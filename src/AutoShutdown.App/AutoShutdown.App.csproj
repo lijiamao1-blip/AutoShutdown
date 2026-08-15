@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>AutoShutdown.App</RootNamespace>
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AutoShutdown.Core\AutoShutdown.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 同一份多尺寸 ICO：作为 WPF 资源嵌入，供主窗口/提醒窗口/托盘共用；EXE 图标由 ApplicationIcon 嵌入 -->
+    <Resource Include="..\..\assets\icon.ico">
+      <LogicalName>assets/icon.ico</LogicalName>
+    </Resource>
+  </ItemGroup>
+</Project>

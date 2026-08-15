@@ -1,0 +1,91 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 主背景：横向蓝紫渐变（参考图基调） -->
+    <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#B6E0FF" Offset="0" />
+        <GradientStop Color="#C5D9FC" Offset="0.52" />
+        <GradientStop Color="#D8C8F8" Offset="1" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="HeaderBackgroundBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#58FFFFFF" Offset="0" />
+        <GradientStop Color="#40FFFFFF" Offset="0.52" />
+        <GradientStop Color="#48F7F2FF" Offset="1" />
+    </LinearGradientBrush>
+    <RadialGradientBrush x:Key="CyanGlowBrush" Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+        <GradientStop Color="#6543E8FF" Offset="0"/><GradientStop Color="#0043E8FF" Offset="1"/>
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="PurpleGlowBrush" Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+        <GradientStop Color="#665E63FF" Offset="0"/><GradientStop Color="#005E63FF" Offset="1"/>
+    </RadialGradientBrush>
+
+    <!-- 导航比内容区更深 -->
+    <LinearGradientBrush x:Key="NavBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#70D9F2FF" Offset="0" />
+        <GradientStop Color="#64D4E8FC" Offset="0.55" />
+        <GradientStop Color="#68E0D8FA" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="NavItemHoverBrush" Color="#33FFFFFF" />
+    <SolidColorBrush x:Key="HighlightBrush" Color="#2688EE" />
+    <SolidColorBrush x:Key="HighlightTextBrush" Color="#FFFFFF" />
+
+    <!-- 玻璃卡片 -->
+    <LinearGradientBrush x:Key="GlassFillBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#C8FFFFFF" Offset="0" />
+        <GradientStop Color="#BFFFFFFF" Offset="0.52" />
+        <GradientStop Color="#B8F8FAFF" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="GlassFillPurpleBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#C8FFFFFF" Offset="0" />
+        <GradientStop Color="#BFF9F5FF" Offset="0.52" />
+        <GradientStop Color="#B8F0E9FF" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="#E8FFFFFF" />
+    <SolidColorBrush x:Key="CardShadowColor" Color="#402040A0" />
+
+    <!-- 按钮 -->
+    <LinearGradientBrush x:Key="PrimaryButtonBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#35A2FF" Offset="0"/><GradientStop Color="#2688EE" Offset="0.55"/><GradientStop Color="#3476E9" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="PrimaryButtonHoverBrush" Color="#3D9BFF" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#E54343" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#8A97B3" />
+
+    <!-- 统一操作蓝：与"倒计时"选中态同源（主色 #2F80ED），创建任务 / 延迟10分钟 复用 -->
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="#2F80ED" />
+    <SolidColorBrush x:Key="AccentBlueSoftBrush" Color="#E62F80ED" />
+    <SolidColorBrush x:Key="AccentBlueHoverBrush" Color="#3D8BF0" />
+    <SolidColorBrush x:Key="AccentBluePressedBrush" Color="#2568C8" />
+    <SolidColorBrush x:Key="AccentBlueBorderBrush" Color="#1E5FB8" />
+
+    <!-- 危险操作深红（取消任务实心按钮，仅供危险操作使用） -->
+    <SolidColorBrush x:Key="DangerSolidBrush" Color="#D32F2F" />
+    <SolidColorBrush x:Key="DangerSolidHoverBrush" Color="#E53935" />
+    <SolidColorBrush x:Key="DangerSolidPressedBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="DangerSolidBorderBrush" Color="#B71C1C" />
+
+    <!-- 文字 -->
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1C2740" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#43536F" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#5A6B8C" />
+    <SolidColorBrush x:Key="TextOnDarkBrush" Color="#F4F7FF" />
+    <SolidColorBrush x:Key="TextOnDarkMutedBrush" Color="#B8C4E0" />
+    <SolidColorBrush x:Key="CountdownTextBrush" Color="#4E4FBD" />
+
+    <!-- 轻量阴影 -->
+    <DropShadowEffect x:Key="CardShadowEffect"
+                      BlurRadius="12"
+                      ShadowDepth="2"
+                      Direction="270"
+                      Opacity="0.10"
+                      Color="#2040A0" />
+
+    <DropShadowEffect x:Key="NavShadowEffect"
+                      BlurRadius="22"
+                      ShadowDepth="6"
+                      Direction="180"
+                      Opacity="0.45"
+                      Color="#101A3E" />
+
+</ResourceDictionary>

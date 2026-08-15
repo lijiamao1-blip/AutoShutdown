@@ -1,0 +1,101 @@
+using System.IO;
+using System.Windows.Threading;
+using AutoShutdown.App.Infrastructure;
+using AutoShutdown.App.Infrastructure.AutoStart;
+using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.App.Infrastructure.Power;
+using AutoShutdown.App.Notifications;
+using AutoShutdown.App.Presentation;
+using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Configuration;
+using AutoShutdown.Core.Power;
+using AutoShutdown.Core.Scheduling;
+using AutoShutdown.Core.State;
+using AutoShutdown.Core.Storage;
+using AutoShutdown.Core.Tasks;
+using AutoShutdown.Core.Workflow;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace AutoShutdown.App.AppHost;
+
+public static class ServiceRegistration
+{
+    public static IServiceCollection AddAutoShutdownServices(
+        this IServiceCollection services,
+        string? dataRoot = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        dataRoot ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AutoShutdown");
+
+        services.AddSingleton<FakePowerService>();
+        services.AddSingleton<IPowerNativeApi, Win32PowerNativeApi>();
+        services.AddSingleton<Win32PowerService>();
+        // 双闸门路由：TestMode=true 时行为等价于 FakePowerService（默认安全测试模式）；
+        // 仅当 TestMode=false 且 RealPowerEnabled=true 且请求携带用户确认标记时才可能调用真实电源。
+        services.AddSingleton<IPowerService>(provider =>
+            new GuardedPowerService(
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<FakePowerService>(),
+                provider.GetRequiredService<Win32PowerService>()));
+        services.AddSingleton<IStorage>(_ => new FileStorage(dataRoot));
+        services.AddSingleton<IConfigurationService>(provider =>
+            new ConfigurationService(
+                provider.GetRequiredService<IStorage>(),
+                Array.Empty<IConfigurationMigration>()));
+        services.AddSingleton<ITaskStateMachine, TaskStateMachine>();
+        services.AddSingleton<INextExecutionCalculator, NextExecutionCalculator>();
+        services.AddSingleton<IIdentifierGenerator, GuidIdentifierGenerator>();
+        services.AddSingleton<ITaskService, TaskService>();
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<IAsyncDeadline, SystemAsyncDeadline>();
+
+        // Application log infrastructure. The logger is a Singleton; App.xaml.cs
+        // may override this registration with a pre-created instance so startup
+        // events share the same file sink.
+        services.AddSingleton<IApplicationLogger>(_ =>
+            new FileApplicationLogger(Path.Combine(dataRoot, "logs")));
+        services.AddSingleton(provider => new LogRetentionService(
+            Path.Combine(dataRoot, "logs"),
+            provider.GetRequiredService<IClock>()));
+
+        // The workflow is decorated with logging only; business behavior,
+        // parameters and return values are passed through untouched.
+        services.AddSingleton<ShutdownWorkflow>();
+        services.AddSingleton<IShutdownWorkflow>(provider =>
+            new LoggingShutdownWorkflowDecorator(
+                provider.GetRequiredService<ShutdownWorkflow>(),
+                provider.GetRequiredService<IApplicationLogger>()));
+        services.AddSingleton<IScheduledTaskHandler, ShutdownScheduledTaskHandler>();
+        services.AddSingleton<ISchedulerEngine, SchedulerEngine>();
+
+        services.AddSingleton<IWindowActivationService, WindowActivationService>();
+        services.AddSingleton<TrayIconService>();
+        services.AddSingleton<ActivationPipeServer>();
+        services.AddSingleton<ApplicationLifetimeCoordinator>();
+
+        // Auto-start infrastructure. The registry store is lazy (no registry
+        // access until GetStatus/Enable/Disable is called), so resolving the
+        // service never writes anything. Default is off; only an explicit
+        // user confirmation may enable it.
+        services.AddSingleton<IRegistryRunKeyStore, RegistryRunKeyStore>();
+        services.AddSingleton<IAutoStartService>(provider =>
+            new AutoStartService(
+                provider.GetRequiredService<IRegistryRunKeyStore>(),
+                () => Environment.ProcessPath));
+
+        services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
+        services.AddSingleton<INotificationService, WpfNotificationService>();
+        services.AddSingleton<NotificationCoordinator>();
+        services.AddSingleton(provider => new DashboardRefreshService(
+            provider.GetRequiredService<MainWindowViewModel>(),
+            provider.GetRequiredService<ISchedulerEngine>(),
+            provider.GetRequiredService<IClock>(),
+            System.Windows.Application.Current?.Dispatcher
+                ?? throw new InvalidOperationException("No WPF dispatcher is available.")));
+        return services;
+    }
+}

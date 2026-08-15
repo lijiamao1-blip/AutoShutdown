@@ -1,0 +1,44 @@
+﻿AutoShutdown 安全测试版发布说明
+================================
+
+一、两种发布包
+
+1. 轻量版（framework-dependent）
+   文件名：AutoShutdown-v1.0.0-win-x64-framework-dependent.zip
+   特点：体积小；运行前需要安装 .NET 8 Desktop Runtime x64。
+   安装地址：https://dotnet.microsoft.com/download/dotnet/8.0
+   （选择 ".NET Desktop Runtime 8.0.x" 的 x64 版本）
+
+2. 免运行库版（self-contained）
+   文件名：AutoShutdown-v1.0.0-win-x64-self-contained.zip
+   特点：已包含 .NET 8 运行库，无需另行安装；包体更大属于正常情况。
+
+二、使用方法
+
+1. 将压缩包解压到新的空目录（不要覆盖开发目录）。
+2. 双击 AutoShutdown.App.exe 启动。
+3. 首次运行会在用户数据目录（%LocalAppData%\AutoShutdown）
+   自动生成配置与日志，发布目录本身不会被写入权威数据。
+
+三、安全说明
+
+1. 当前版本为安全测试模式，电源服务固定为 FakePowerService，
+   不会执行真实关机、重启、睡眠或休眠操作。
+2. 默认不启用开机自启动，不写入注册表；如需开机自启动，
+   请在软件"设置"页显式开启并二次确认。
+3. 发布包内不含源码、测试、PDB、诊断日志、dump、TRX 或
+   开发 SDK；不含任何用户配置、运行态或日志数据。
+4. 发布脚本不会自动启动应用，不要求管理员权限。
+
+四、重新发布
+
+双击 tools\生成安全测试版发布包.cmd，或直接在 PowerShell 执行：
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\Publish-SafeRelease.ps1
+
+发布输出位于 artifacts\release\v1.0.0\（staging / packages / manifests / backups）。
+重复执行会先清理并重建该版本目录下由脚本生成的 staging 等内容。
+
+五、说明
+
+这些脚本与说明仅属于开发环境（tools 目录），不进入正式发布包。

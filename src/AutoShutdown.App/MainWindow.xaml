@@ -1,0 +1,249 @@
+<Window x:Class="AutoShutdown.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:presentation="clr-namespace:AutoShutdown.App.Presentation"
+        Title="电脑自动关机助手" Icon="/assets/icon.ico" Width="1080" Height="640" MinWidth="900" MinHeight="580"
+        WindowStartupLocation="Manual" Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <presentation:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+    </Window.Resources>
+
+    <Grid>
+        <!-- 静态柔光层：不使用动画和高成本模糊 -->
+        <Ellipse Width="620" Height="620" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="100,0,0,-300" Fill="{StaticResource CyanGlowBrush}" IsHitTestVisible="False" />
+        <Ellipse Width="700" Height="700" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-330,-260,0" Fill="{StaticResource PurpleGlowBrush}" IsHitTestVisible="False" />
+        <Canvas IsHitTestVisible="False" Opacity="0.08">
+            <Ellipse Canvas.Left="175" Canvas.Top="118" Width="3" Height="3" Fill="White"/>
+            <Ellipse Canvas.Left="332" Canvas.Top="82" Width="2" Height="2" Fill="White"/>
+            <Ellipse Canvas.Left="615" Canvas.Top="142" Width="3" Height="3" Fill="#DDF7FF"/>
+            <Ellipse Canvas.Right="170" Canvas.Top="108" Width="3" Height="3" Fill="#F7E8FF"/>
+            <Ellipse Canvas.Right="92" Canvas.Top="264" Width="2" Height="2" Fill="White"/>
+            <Ellipse Canvas.Left="214" Canvas.Bottom="112" Width="2" Height="2" Fill="#E4FBFF"/>
+            <Ellipse Canvas.Right="314" Canvas.Bottom="76" Width="3" Height="3" Fill="#F8EAFF"/>
+        </Canvas>
+
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+            <!-- 顶部状态栏 -->
+            <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="#55FFFFFF" BorderThickness="0,0,0,1">
+                <Grid Margin="22,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="39" Height="39" CornerRadius="20" BorderBrush="#CCFFFFFF" BorderThickness="2" Background="#20FFFFFF" VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="⏻" FontFamily="Segoe UI Symbol" FontSize="27" FontWeight="Bold" Foreground="#24436D" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                    </Border>
+                    <TextBlock Grid.Column="1" Text="电脑自动关机助手" FontSize="21" FontWeight="Bold" Foreground="#20375E" VerticalAlignment="Center" Margin="0,0,22,0"/>
+                    <Border Grid.Column="2" Style="{StaticResource CapsuleTagStyle}" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="{Binding HeaderModeText}" FontSize="12" Foreground="#174B42"/>
+                    </Border>
+                    <TextBlock Grid.Column="3" Text="{Binding HeaderModeHint}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="4" Text="服务运行中" Foreground="#29496F" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
+                    <Button Grid.Column="5" Content="⚙  设置" Style="{StaticResource HeaderButtonStyle}" Command="{Binding SettingsCommand}" Margin="0,0,10,0"/>
+                    <Button Grid.Column="6" Content="▣  托盘菜单" Style="{StaticResource HeaderButtonStyle}" Command="{Binding TrayMenuCommand}"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="0.204*"/><ColumnDefinition Width="0.796*"/></Grid.ColumnDefinitions>
+
+                <!-- 左侧导航 -->
+                <Border Grid.Column="0" Background="{StaticResource NavBackgroundBrush}" BorderBrush="#50FFFFFF" BorderThickness="0,0,1,0">
+                    <Viewbox Stretch="Uniform" StretchDirection="Both">
+                        <Grid Width="220" Height="560">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Button Grid.Row="0" Content="首页" Style="{StaticResource NavHomeButtonStyle}" Command="{Binding HomeCommand}" Margin="14,18,14,10"/>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding NavItems}" SelectedItem="{Binding SelectedNav}" Background="Transparent" BorderThickness="0" Margin="6,-8,6,0">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavItemStyle}">
+                                    <Setter Property="ToolTip" Value="{Binding Title}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PageKey}" Value="home"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Icon}" FontSize="18" Foreground="#315A81" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="-3,0,0,0"
+                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="17" Foreground="#29496F" VerticalAlignment="Center"
+                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"
+                                                   Visibility="{Binding DataContext.IsNavCollapsed, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource InverseBoolToVisibility}}"/>
+                                        <Border Grid.Column="2" Style="{StaticResource ComingSoonTagStyle}" Visibility="{Binding IsPlaceholder, Converter={StaticResource BoolToVisibility}}">
+                                            <TextBlock Text="后续开放" FontSize="9" Foreground="#536985"/>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel Grid.Row="2" Margin="20,0,16,18" Visibility="{Binding IsNavCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                            <Border Height="1" Background="#35FFFFFF" Margin="0,0,0,14"/>
+                            <TextBlock Text="◈   v1.0.0 测试版" Foreground="#5B7392" FontSize="11" Margin="0,0,0,12"/>
+                            <TextBlock Text="◉   帮助与反馈" Foreground="#5B7392" FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+                    </Viewbox>
+                </Border>
+
+                <!-- 首页内容 -->
+                <Grid Grid.Column="1">
+                    <Viewbox Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}" Stretch="Uniform" StretchDirection="Both" Margin="12">
+                        <Grid Width="900" Height="620" Margin="4">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.08*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="0.92*"/></Grid.ColumnDefinitions>
+
+                                <!-- 创建任务 -->
+                                <Border Grid.Column="0" Style="{StaticResource GlassCardStyle}" Padding="24,20">
+                                    <StackPanel>
+                                        <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,14"/>
+                                        <TextBlock Text="时间模式" Style="{StaticResource FieldLabelStyle}"/>
+                                        <UniformGrid Columns="3" Margin="0,7,0,12">
+                                            <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        </UniformGrid>
+                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
+                                            <Grid>
+                                                <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource BoolToVisibility}}">
+                                                    <UniformGrid Columns="3">
+                                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding CountdownHourOptions}" SelectedItem="{Binding CountdownHoursText}"/></StackPanel>
+                                                        <StackPanel Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding CountdownMinutesText}"/></StackPanel>
+                                                        <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}"/></StackPanel>
+                                                    </UniformGrid>
+                                                </StackPanel>
+                                                <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                    <UniformGrid Columns="3">
+                                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}"/></StackPanel>
+                                                        <StackPanel Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}"/></StackPanel>
+                                                        <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}"/></StackPanel>
+                                                    </UniformGrid>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                        <UniformGrid Columns="4" Margin="0,0,0,12">
+                                            <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                            <RadioButton Content="重启" IsChecked="{Binding ActionIsRestart}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                            <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                            <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                        </UniformGrid>
+                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
+                                        <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
+                                        <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                        <Button Content="创建任务" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}" HorizontalAlignment="Stretch"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 当前任务 -->
+                                <Border Grid.Column="2" Style="{StaticResource GlassCardPurpleStyle}" Padding="26,20">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <TextBlock Text="当前任务" Style="{StaticResource CardTitleOnPurpleStyle}"/>
+                                        <StackPanel Grid.Row="1" Margin="0,15,0,0">
+                                            <TextBlock Text="{Binding CurrentStateText}" FontSize="15" FontWeight="SemiBold" Foreground="#294064"/>
+                                            <TextBlock Text="{Binding CountdownText}" FontSize="68" FontWeight="Bold" Foreground="White" Margin="0,4,0,8" CacheMode="BitmapCache">
+                                                <TextBlock.Effect><DropShadowEffect Color="#B681FF" BlurRadius="14" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Grid Grid.Row="2" Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                            <TextBlock Text="下次执行时间：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                            <TextBlock Grid.Row="1" Text="任务类型：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                            <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                        </Grid>
+                                        <StackPanel Grid.Row="3">
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                                <Button Content="延迟 10 分钟" Style="{StaticResource SolidBlueButtonStyle}" Command="{Binding SnoozeCommand}"/>
+                                                <Button Grid.Column="2" Content="取消任务" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding CancelCommand}"/>
+                                            </Grid>
+                                            <Button Content="清除当前记录" Style="{StaticResource ClearRecordButtonStyle}" Command="{Binding ClearCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <!-- 状态与最近活动 -->
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.18*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="0.82*"/></Grid.ColumnDefinitions>
+                                <UniformGrid Grid.Column="0" Columns="3">
+                                    <Border Style="{StaticResource StatusCardCyanStyle}" Margin="0,0,7,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource CyanIconCircleStyle}"><TextBlock Text="✓" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="任务状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding CurrentStateText}" Style="{StaticResource StatusValueStyle}"/></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusCardBlueStyle}" Margin="7,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource BlueIconCircleStyle}"><TextBlock Text="◴" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="调度服务" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding SchedulerStatusText}" Style="{StaticResource StatusValueStyle}"/></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusCardGreenStyle}" Margin="7,0,0,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource GreenIconCircleStyle}"><TextBlock Text="▣" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="配置状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding ConfigStatusText}" Style="{StaticResource StatusValueStyle}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="120"/></StackPanel></Border>
+                                </UniformGrid>
+                                <Border Grid.Column="2" Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                    <StackPanel><TextBlock Text="最近活动" Style="{StaticResource CardTitleStyle}" FontSize="17" Margin="0,0,0,8"/>
+                                        <ListBox ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MaxHeight="112">
+                                            <ListBox.ItemTemplate><DataTemplate><TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock></DataTemplate></ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </Viewbox>
+
+                    <StackPanel Visibility="{Binding IsPlaceholderVisible, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <!-- 普通占位页（排除日志页与设置页） -->
+                        <StackPanel Visibility="{Binding IsGenericPlaceholderVisible, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding PlaceholderTitle}" FontSize="26" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                            <TextBlock Text="该功能将在后台能力通过测试后开放" FontSize="14" Foreground="{StaticResource TextOnDarkMutedBrush}"/>
+                            <TextBlock Text="{Binding TaskSummaryText}" Foreground="White" HorizontalAlignment="Center" Margin="0,14,0,0" Visibility="{Binding IsTaskSummaryVisible, Converter={StaticResource BoolToVisibility}}"/>
+                        </StackPanel>
+
+                        <!-- 日志与诊断页 -->
+                        <StackPanel Visibility="{Binding IsLogsPageVisible, Converter={StaticResource BoolToVisibility}}" Width="640">
+                            <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                <StackPanel>
+                                    <TextBlock Text="正式日志目录" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
+                                    <TextBlock Text="{Binding LogDirectory}" Foreground="#29496F" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                    <Button Content="复制日志路径" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CopyLogPathCommand}" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="最近活动（最近 20 条）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
+                                    <ListBox ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MaxHeight="240">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- 软件设置页 -->
+                        <StackPanel Visibility="{Binding IsSettingsPageVisible, Converter={StaticResource BoolToVisibility}}" Width="640">
+                            <TextBlock Text="软件设置" FontSize="26" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                <StackPanel>
+                                    <TextBlock Text="开机自启动" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="仅对当前 Windows 用户生效，可随时关闭；默认不启用。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding AutoStartStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding AutoStartErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasAutoStartError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="启用开机自启动" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding EnableAutoStartCommand}" Padding="26,10" Margin="0,0,15,0"/>
+                                        <Button Content="关闭开机自启动" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DisableAutoStartCommand}" Padding="24,10" Margin="0,0,15,0"/>
+                                        <Button Content="修复自启动" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RepairAutoStartCommand}" Visibility="{Binding IsAutoStartRepairVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

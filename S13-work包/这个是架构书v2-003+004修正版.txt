@@ -1,0 +1,1228 @@
+# AutoShutdown V2 架构设计书 · 收敛版（V2-DRAFT-003）
+
+| 项目 | 值 |
+|------|----|
+| 文档版本 | **V2-DRAFT-003**（收敛版） |
+| 修订依据 | ARCH-V2-R2-convergence.md（第 2 轮收敛变更包） |
+| 唯一基线 | **稿 B**（"架构审查响应与修订产出"起的后半修订稿） |
+| 与稿 B 的差异 | **仅限 A1~A5 五项动作**，其余内容原样继承 |
+| 修订日期 | 2025-06-03 |
+| 主笔 | Claude Opus 4.8 |
+
+**基线声明（先读）**：
+1. 唯一基线 = 稿 B：F2 = 工作日复杂规则（R-002）、F3 = 空闲关机（R-003）；S14 模块为 `INextTimeCalculator / WeekdayRule / DayOfMonthRule / HolidayCalendar`；S15 模块为 `IdleMonitor / IdleShutdownRule`；不变量编号以第 2.1 节为基线。
+2. 稿 A 全部作废：凡"任务模板/导入导出"子功能定义及 `TaskTemplateManager / TaskImportExport / IdleMonitorV2 / MultiTaskIdlePolicy / CalendarRuleEngine` 等稿 A 模块体系一律不出现（除第 10 章推迟清单）。
+3. 不扩范围、不加新功能、不重构章节结构。
+
+---
+
+## 第 1 章 目标与范围
+
+### 1.1 V2 需求基线（修正版）
+
+| 编号 | 需求 | 功能 | 实现步骤 | 优先级 |
+|------|------|------|---------|--------|
+| R-001 | 多任务支持 | F1 多任务 | S13 | P0 |
+| **R-002** | **工作日复杂排程规则、指定日期任务** | **F2 工作日规则 + 一次性日期** | **S14** | P1 |
+| **R-003** | **空闲关机** | **F3 空闲关机** | **S15** | P1 |
+| R-004 | Office 自动保存 | F4 | S17 | P1 |
+| R-005 | 关机前命令执行 | F5 | S19 | P1 |
+| R-006 | 自动关闭与强制结束应用 | F6 | S18 | P1 |
+| R-007 | 无人值守策略 | F7 | S20 | P1 |
+| R-008 | Wake-on-LAN | F8 | S21 | P2 |
+| R-009 | Windows Task Scheduler 同步 | F9 | S22 | P2 |
+| R-010 | 远程控制与跨设备同步 | F10 | S23 | P2 |
+| R-011 | 分布式协调 | F11 | S24（建议推迟 V3） | — |
+| R-012 | 预关机流水线框架 | F4+F5+F6 框架 | S16（派生需求） | P0 |
+
+**注 1**：本表为唯一需求基线。R-002 明确覆盖"工作日复杂规则 + 指定日期任务"（S14 实现，含 `OneTimeDateRule`）；R-003 为"空闲关机"（S15 实现）。
+**注 2**："任务模板"与"导入导出任务"经人工决定（ARCH-REVIEW-R2-VERIFY 轮默认裁决）**不纳入 V2，推迟 V3**。如未来需要，作为新需求重新立项（见第 10 章）。
+
+### 1.2 V2 新增功能（11 项）
+
+| 编号 | 功能名称 | 说明 |
+|------|---------|------|
+| F1 | 多任务支持 | 多任务调度、同时到期仲裁、崩溃恢复、任务启停 |
+| F2 | 工作日复杂排程规则 + 指定日期任务 | 日历规则引擎、例外日期、N 小时后/下个工作日、一次性日期 |
+| F3 | 空闲关机 | 空闲检测增强、多任务空闲策略、恢复取消 |
+| F4 | Office 自动保存 | 检测 Office 进程、COM 自动化保存 |
+| F5 | 关机前命令执行 | 白名单命令执行、超时、失败策略 |
+| F6 | 自动关闭与强制结束应用 | 优雅关闭、强杀、保存提示 |
+| F7 | 无人值守策略 | 无人确认时自动执行配置动作 |
+| F8 | Wake-on-LAN | 唤醒他机、关机前一次性 RTC 唤醒本机 |
+| F9 | Windows Task Scheduler 同步 | outbound 同步、冗余触发 |
+| F10 | 远程控制与跨设备同步 | 局域网 TCP 配对、JSON-RPC 2.0、命令白名单 |
+| F11 | 分布式协调 | 建议推迟到 V3 |
+
+### 1.3 非目标（V2 明确不做）
+
+- 云端远程控制、公网远程访问
+- 跨平台（仅 Windows）
+- 远程修改本地配置
+- 任务模板与导入导出（推迟 V3）
+- 与关机无关的独立定时唤醒本机
+- 多语言、插件系统
+
+---
+
+## 第 2 章 架构不变量
+
+### 2.1 继承 V1 的不变量（唯一编号基线）
+
+| 编号 | 名称 | 内容 |
+|------|------|------|
+| **I1** | 默认不关机 | 任何状态不明确时默认不关机，不执行电源操作 |
+| **I2** | 唯一电源出口 | ShutdownWorkflow 是唯一调用 IPowerService 的模块 |
+| **I3** | UI 不拥有任务引擎 | UI 不拥有任务引擎、状态持久化、调度循环 |
+| **I4** | Cancelled 终态 / StageToken | 取消后不可撤销；StageToken 保证单实例单次执行 |
+| **I5** | HasExecuted | 标记后不可逆，永不重复执行同一任务实例 |
+| **I6** | 崩溃恢复 Interrupted | 崩溃后恢复时，未完成任务标记为 Interrupted，永不补执行 |
+| **I7** | 配置损坏 Faulted | 配置损坏时任务标记 Faulted，不影响其他任务 |
+| **I8** | 双闸门 | 真实电源操作需双闸门（配置 + 人工确认）；无人值守/远程见 2.3 |
+| **I9** | Mutex + Pipe | 单实例：Mutex 防多进程，Pipe 传递命令行参数 |
+
+### 2.2 ARCH-CR 记录（CR-001/002 文本原样继承，未改动）
+
+```markdown
+# ARCH-CR-001（无人值守绕过人工确认）——文本保持稿 B 原样
+- 严重度：重大
+- 问题与证据：无人值守在 Countdown 超时无人确认时自动执行电源操作，与 I8 人工确认闸门冲突。
+- 建议修改：I8 补充为"无人值守（显式 opt-in + 二次确认 + 全程审计）可视为用户在配置闸门时已预先授权，
+  绕过人工确认闸门"。无人值守仍执行 Pre-Pipeline，仅跳过用户确认环节。
+- 必须现在修改的原因：无人值守是 V2 核心功能。
+- 影响模块：UnattendedPolicy / ShutdownWorkflow
+- 风险等级变化：无（R3 不变）
+- 提议者：Claude Opus 4.8
+- 处理：待架构评审确认
+- 人工决定：（待定）
+```
+
+```markdown
+# ARCH-CR-002（远程控制对 I8 的架构变更申请）——文本保持稿 B 原样，安全前置已落入 S23
+- 严重度：重大
+- 问题与证据：远程触发命令（如 triggerShutdown）需要经过本地确认流程才能执行。
+  但若本地无人值守已启用（ARCH-CR-001 已批准），远程触发也可能绕过人工确认。
+- 建议修改：I8 补充为"远程命令不能绕过本地安全策略和本地确认流程。
+  远程触发必须经过本地 Countdown 倒计时，除非无人值守策略已启用且远程命令在白名单中。
+  远程不能修改本地安全策略配置。"
+- 必须现在修改的原因：远程控制是 V2 核心功能，需明确边界。
+- 影响模块：RemoteServer / ShutdownWorkflow / UnattendedPolicy
+- 风险等级变化：无（R3 不变）
+- 提议者：Claude Opus 4.8
+- 处理：待架构评审确认；4 项安全前置（PIN 限速、deviceId+挑战+TLS、组合规则、威胁模型）已全部落入 S23
+- 人工决定：（待定）
+```
+
+```markdown
+# ARCH-CR-003（原关联 S24 分布式协调）——已关闭
+- 状态：已关闭（不引入）。因 S24 结论为"推迟到 V3，V2 不引入分布式协调"，本 CR 不再需要。
+```
+
+### 2.3 修改后的 I8 条款
+
+| 编号 | 修改内容 | 来源 |
+|------|---------|------|
+| **I8a** | 无人值守（显式 opt-in + 二次确认 + 全程审计）可绕过人工确认闸门；仍执行 Pre-Pipeline | CR-001 |
+| **I8b** | 远程命令不能绕过本地安全策略和本地确认流程；远程触发须经本地 Countdown，除非无人值守已启用且命令在白名单中；远程不能修改本地安全策略配置 | CR-002 |
+| **I8c** | 远程触发 + 无人值守组合时，传输强制 TLS，审计升级为高危标记 + 托盘显著提示 | CR-002 前置 |
+
+---
+
+**进度快照 #1**：已完成文档头（基线声明）、第 1 章（需求基线修正、功能清单、非目标）、第 2 章（不变量统一编号、ARCH-CR 记录原样保留、I8a/b/c）。下一步：第 3 章系统总览 + 第 4 章配置与数据。
+
+
+# 第 3 章 系统总览
+
+## 3.1 系统架构图（五层）
+
+```
+┌─────────────────────────────────────────────────────┐
+│  UI 层（WPF）                                       │
+│  MainWindow / TaskListView / ScheduleEditor /       │
+│  SettingsPage / AuditLogView / TrayIcon             │
+│  └── 不拥有任务引擎、不拥有状态持久化、不拥有调度循环 │
+├─────────────────────────────────────────────────────┤
+│  调度层                                              │
+│  SchedulerEngine / TaskCollection / TaskInstance    │
+│  TaskStateMachine / CrashRecoveryManager /          │
+│  TaskArbitrator（同时到期仲裁）                      │
+├─────────────────────────────────────────────────────┤
+│  执行层                                              │
+│  ShutdownWorkflow（唯一电源出口）                    │
+│  PrePipelineRunner / IPreShutdownAction[]           │
+│  ├── OfficeSaveAction（F4）                         │
+│  ├── CloseAppsAction（F6）                          │
+│  └── RunCommandsAction（F5）                        │
+│  UnattendedPolicy（F7）                             │
+├─────────────────────────────────────────────────────┤
+│  扩展层                                              │
+│  WakeOnLanService（F8）                             │
+│  TaskSchedulerSyncService（F9）                     │
+│  RemoteServer / RemoteClient（F10）                 │
+│  └── JSON-RPC 2.0 / 命令白名单 / PairingService    │
+├─────────────────────────────────────────────────────┤
+│  基础设施层                                          │
+│  IPowerService / ILogger / ConfigManager /          │
+│  MutexManager / PipeServer / CrashRecoveryManager   │
+│  config.json / runtime.json / tasks.json 持久化      │
+└─────────────────────────────────────────────────────┘
+```
+
+## 3.2 生命周期总流程
+
+```
+程序启动
+  │
+  ├── 崩溃恢复检查（I6）
+  │     └── 扫描所有待恢复任务 → 标记 Interrupted
+  │
+  ├── 加载配置（config.json + tasks.json）
+  ├── 注册所有任务（SchedulerEngine）
+  │
+  ▼
+调度循环（等待排程触发）
+  │
+  ├── 单任务触发 → Countdown → 确认 → Pre-Pipeline → PowerAction
+  │
+  ├── 多任务同时触发 → 仲裁 → 胜出执行 / 落选改期
+  │
+  └── 空闲触发 → 空闲检测 → Countdown → 确认 → Pre-Pipeline → PowerAction
+```
+
+## 3.3 流程次序（统一声明）
+
+```
+Trigger → Countdown → Confirm（或无人值守等效确认）
+  → Pre-Pipeline → PowerAction
+```
+
+**重要**：Pre-Pipeline 在用户确认之后执行，确保用户取消关机前不产生不可逆副作用。
+
+---
+
+# 第 4 章 配置与数据
+
+## 4.1 配置文件结构
+
+| 文件 | 用途 | 变更说明 |
+|------|------|---------|
+| `config.json` | 全局配置（版本、端口、自启、默认策略） | 新增字段 |
+| `tasks.json` | 任务清单（独立于全局配置） | V2 新增，每个任务独立配置 |
+| `runtime.json` | 运行时状态（任务实例运行时状态、StageToken） | 按任务 id 组织 |
+
+**taskSync 默认方向**：`outbound`（V2→Task Scheduler 单向同步，inbound 导入风险更高，V3 考虑双向）
+
+## 4.2 JSON 数据迁移（V1→V2）
+
+**runtime.json 迁移键**：按任务 id 迁移（v1 版本使用 `"default"` 键，V2 改为按任务 id 组织，迁移时逐任务映射）。
+
+**迁移版本检测**：V2 首次启动时检测 `config.json.version`：
+- 若版本为 1 → 执行迁移流程
+- 若版本为 2+ → 跳过迁移
+
+## 4.3 回滚策略
+
+- 升级前自动备份：`config.json → config.json.v1bak`，`tasks.json → tasks.json.v1bak`，`runtime.json → runtime.json.v1bak`
+- 回滚操作：还原三个 `.bak` 文件 + 替换回 V2 安装包中保留的 V1 EXE
+- **重要告知**：V2 新建任务在回滚后全部丢失，仅保留 V1 原有任务。升级前必须告知用户此风险。
+
+## 4.4 状态存根
+
+**V1↔V2 状态名映射表**（新增——A3 动作）
+
+| V1 状态名 | V2 状态名 | 说明 |
+|-----------|----------|------|
+| `idle` | `waiting` | 等待排程触发 |
+| `scheduled` | `waiting` | V1 中 scheduled 与 idle 合并为 waiting |
+| `running` | `running` | 不变 |
+| `confirming` | `confirming` | 不变 |
+| `executing` | `executing` | 不变 |
+| `executed` | `executed` | 不变 |
+| `cancelled` | `cancelled` | 不变 |
+| `faulted` | `faulted` | 不变 |
+| （无） | `interrupted` | V2 新增，崩溃恢复态 |
+
+**runtime.json schema 状态字段**：`status` 字段使用 V2 全小写状态名（`waiting` / `running` / `confirming` / `executing` / `executed` / `cancelled` / `faulted` / `interrupted`）。
+
+---
+
+**进度快照 #2**：已完成第 3 章（系统总览、生命周期、流程次序）和第 4 章（配置数据、迁移、回滚、状态映射表）。下一步：第 5 章总览表 + 第 6 章步骤详述。
+
+---
+
+# 第 5 章 总览表
+
+| 步骤 | 功能 | 风险 | 新增模块 | 修改模块 | 前置 | 关键变更 |
+|------|------|------|---------|---------|------|---------|
+| S13 | F1 多任务 | R2 | TaskCollection, TaskInstance, TaskStateMachine, CrashRecoveryManager, TaskArbitrator | SchedulerEngine, ShutdownWorkflow | S12 | 状态机重写（崩溃恢复、仲裁） |
+| **S14** | **F2 工作日规则 + 一次性日期** | R2 | **INextTimeCalculator, WeekdayRule, DayOfMonthRule, HolidayCalendar, OneTimeDateRule** | TaskCollection, config.json | S13 | 日历规则引擎、例外日期、一次性日期 |
+| **S15** | **F3 空闲关机** | R2 | **IdleMonitor, IdleShutdownRule** | ShutdownWorkflow, config.json | S13 | 空闲检测增强 |
+| S16 | Pre-Pipeline 框架 | R2 | IPreShutdownAction, PrePipelineRunner, PrePipelineContext, ActionResult | ShutdownWorkflow, config.json | S13 | 动作注册与串行执行 |
+| S17 | F4 Office 保存 | R2 | OfficeSaveAction, OfficeDetector, OfficeDocumentSaver | PrePipelineRunner | S16 | COM 自动化保存 |
+| S18 | F6 关闭应用 | R2 | CloseAppsAction, AppWindowManager, ProcessManager | PrePipelineRunner | S16 | 优雅关闭 + 强杀 |
+| S19 | F5 命令执行 | R2 | RunCommandsAction, CommandRunner, CommandWhiteList | PrePipelineRunner | S16 | 白名单命令执行 |
+| S20 | F7 无人值守 | R3 | UnattendedPolicy, InputMonitor | ShutdownWorkflow, config.json | S16 | 无人确认策略 |
+| S21 | F8 WoL | R2 | WakeOnLanService, MagicPacketBuilder, TargetMachineManager, RtcWakeService | TaskDefinition, SchedulerEngine | S13 | 局域网唤醒 |
+| S22 | F9 Task Scheduler 同步 | R2 | TaskSchedulerSyncService, TaskSchedulerAdapter, TaskSchedulerMapper | TaskCollection, config.json | S13 | outbound 同步 |
+| S23 | F10 远程控制 | R3 | RemoteServer, RemoteClient, RpcHandler, RemoteCommandWhiteList, PairingService, HmacAuth | ShutdownWorkflow, config.json | S13, S20 | 局域网远程控制 |
+| S24 | F11 分布式协调 | R1 | 无（推迟） | 无 | S23 | 推迟到 V3 |
+| S-PKG | 发布打包 | R2 | PackageBuilder, UpgradeMigration, SelfStartService, UninstallCleaner | AppHost, config.json | S13 | 候选 EXE、安装升级 |
+
+---
+
+# 第 6 章 步骤详述
+
+## S13 多任务架构
+
+### 1. 目标与验收标准
+
+1. **状态机**：每任务实例有完备状态机（8 态），含合法转换白名单表，非法转换拒绝并记日志。
+2. **崩溃恢复**：程序启动时检测上次崩溃遗留的未完成实例，标记为 `interrupted`，永不补执行关机。
+3. **同时到期仲裁**：多任务同时到期时，按优先级仲裁，落选任务改期。
+4. **重复任务重排**：已执行任务自动进入下一轮排程，刷新 StageToken。
+5. **多任务启停**：用户可单独启用/禁用每个任务。
+
+### 5. 关键设计——状态机
+
+**状态集**（8 态）：
+
+```
+enum TaskInstanceState {
+    waiting,       // 初始态，等待排程触发
+    running,       // 正在执行（Pre-Pipeline 中）
+    confirming,    // 等待用户确认（Countdown 中）
+    executing,     // 正在执行电源操作
+    executed,      // 已完成（终态，可重排）
+    cancelled,     // 被取消（终态）
+    faulted,       // 故障（终态）
+    interrupted    // 崩溃恢复（终态，永不补执行）
+}
+```
+
+**V1↔V2 状态名映射表**（见第 4.4 节）
+
+**合法转换白名单表**：
+
+| 当前态 | 合法转换 | 触发条件 | 处理动作 |
+|--------|---------|---------|---------|
+| waiting | → running | 排程触发 | 进入 Pre-Pipeline |
+| waiting | → cancelled | 用户取消未触发任务 | 直接终态 |
+| waiting | → faulted | 配置损坏检测 | 终态 |
+| running | → confirming | Pre-Pipeline 完成，进入 Countdown | 打开确认窗口 |
+| running | → cancelled | Pre-Pipeline 失败且 failurePolicy=block | 阻断关机 |
+| running | → interrupted | 崩溃 | 恢复时标记 |
+| running | → faulted | 运行时配置损坏 | 终态 |
+| confirming | → executing | 用户确认 / 无人值守触发 | 执行电源操作 |
+| confirming | → cancelled | 用户取消 / 倒计时超时且无人值守关 | 终态 |
+| confirming | → interrupted | 崩溃 | 恢复时标记 |
+| confirming | → faulted | 确认阶段配置损坏 | 终态 |
+| executing | → executed | 电源操作完成 | 终态 |
+| executing | → interrupted | 崩溃 | 恢复时标记 |
+| executing | → faulted | 执行阶段异常 | 终态 |
+| executed | → waiting | 重复任务下一轮排程 | 刷新 StageToken |
+| cancelled | — | 终态，不可转换 | 任何转换拒绝并记日志 |
+| interrupted | — | 终态，不可转换 | 任何转换拒绝并记日志 |
+| faulted | — | 终态，不可转换 | 任何转换拒绝并记日志 |
+
+**非法转换处理**：任何不在此表中的转换均为非法转换，拒绝并记录审计日志（级别 Error），包含当前状态、目标状态、调用来源、时间戳。
+
+**崩溃恢复流程**：
+```
+程序启动时：
+  1. 加载 runtime.json
+  2. 对每个 status=waiting/running/confirming/executing 的实例：
+     a. 标记为 interrupted
+     b. 审计日志 Warning："任务 {taskId} 因崩溃恢复被标记为 interrupted，已跳过执行"
+     c. UI 通知："有 {n} 个任务因上次崩溃已跳过执行"
+  3. 对 cancelled/executed/faulted/interrupted 实例：保持终态
+  4. 重新计算所有已启用任务的排程
+```
+
+**同时到期仲裁规则**：
+```
+多任务同时到期（同一秒）：
+  1. 同动作合并：若多个任务均为"关机"，合并为一次电源操作
+  2. 不同动作仲裁：按强度排序 关机 > 休眠 > 睡眠 > 注销
+     - 高强度胜出，执行该动作
+     - 落选任务改期到下一周期（至少 5 分钟后）
+     - 审计日志记录仲裁结果
+  3. 强制任务冲突：用户配置"不可被仲裁覆盖" → 弹出 UI 询问
+```
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 状态机合法转换表验证、非法转换拒绝、Interrupted 标记 |
+| L1（组件） | 崩溃恢复启动流程、runtime.json 加载与 Interrupted 处理 |
+| L2（集成） | 同时到期仲裁、落选任务重排、动作合并 |
+| L3（系统） | 强杀进程 → 重启 → 验证不补执行 + 通知用户 |
+| L6（验收） | 多任务端到端：触发 → 仲裁 → 执行/落选 + 日志记录 |
+
+---
+
+## S14 工作日复杂排程规则 + 指定日期任务（A5 动作——新增一次性日期）
+
+### 1. 目标与验收标准
+
+1. **工作日规则引擎**：支持"每周工作日"、"N 小时后"、"下个工作日 N 点"、"每月第 N 个工作日"等复杂排程。
+2. **一次性日期规则**（新增）：支持指定具体日期+时间的一次性任务（`schedule.type="oneday"`），过期不追溯触发，触发后任务按一次性任务终结处理。
+3. **例外日期**：用户可配置例外日期（节假日），在例外日期不触发。
+
+### 3. 架构影响
+
+**新增模块**：
+- `INextTimeCalculator`：排程计算器接口
+- `WeekdayRule`：工作日规则计算器
+- `DayOfMonthRule`：每月第 N 个工作日规则
+- `HolidayCalendar`：节假日日历
+- `OneTimeDateRule`：一次性日期规则计算器（纯函数，输入目标日期时间，输出下个触发时间——若已过期则返回 null，任务终结）
+
+### 4. 数据模型
+
+```json
+{
+  "schedule": {
+    "type": "oneday",  // 或 "weekly" / "monthly" / "workday"
+    "date": "2025-12-25",
+    "time": "18:00",
+    "endAfter": true   // 一次性任务执行后终结
+  }
+}
+```
+
+**一次性日期规则说明**：
+- `date` + `time` 指定精确触发时间
+- 若 `date + time` 已过当前时间 → 不触发，任务标记为 `cancelled`（告知用户"已过期"）
+- 触发后任务自动终结（不再重排）
+- 计算器为纯函数：输入 `(taskConfig, now)` → 输出 `DateTime?`（null 表示无后续触发）
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 日历规则引擎计算、节假日例外、一次性日期规则（过去日期、跨年、DST、当日已过点） |
+| L1（组件） | 多规则组合验证 |
+| L2（集成） | 排程计算与 SchedulerEngine 集成 |
+| L3（系统） | 真机：一次性日期任务执行后终结 |
+| L6（验收） | 端到端：创建工作日规则任务 + 一次性日期任务 → 等待触发 → 验证 |
+
+---
+
+## S15 空闲关机
+
+### 1. 目标与验收标准
+
+1. **空闲检测增强**：扩展 V1 的 `GetLastInputInfo`，支持多任务各自配置空闲阈值。
+2. **多任务空闲策略**：每个任务可独立配置空闲关机策略，或继承全局空闲策略。
+3. **恢复取消**：用户恢复操作（鼠标/键盘移动）时取消倒计时。
+
+### 3. 架构影响
+
+**新增模块**：
+- `IdleMonitor`：空闲检测（扩展 V1 单任务版）
+- `IdleShutdownRule`：每任务空闲关机策略
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 空闲检测算法、阈值比较 |
+| L1（组件） | 多任务空闲策略、独立阈值配置 |
+| L2（集成） | 空闲触发 + Countdown + 恢复取消 |
+| L3（系统） | 真机：两个任务不同空闲阈值 → 分别触发 |
+| L6（验收） | 端到端：空闲超时 → Countdown → 恢复 → 取消关机 |
+
+---
+
+**进度快照 #3**：已完成第 5 章总览表（F2/F3 模块对齐稿 B）、S13 状态机（使用 waiting 命名）、S14（新增一次性日期规则——A5 动作）、S15（空闲关机）。下一步：S16~S19 Pre-Pipeline 系列 + S20 无人值守。
+
+---
+
+## S16 Pre-Pipeline 框架
+
+### 5. 关键设计——流程次序
+
+```
+Trigger → Countdown → Confirm（或无人值守等效确认）
+  → PrePipelineRunner.RunAsync()
+    → OfficeSaveAction（F4，先保存文档）
+    → RunCommandsAction（F5，再执行命令）
+    → CloseAppsAction（F6，最后关闭应用）
+  → PowerAction
+```
+
+**关键原则**：Pre-Pipeline 在用户确认（或无人值守等效确认）之后、PowerAction 之前执行。用户取消关机前，Pre-Pipeline 不会执行。
+
+### 10. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 每个 Action 的实现、ActionResult 处理 |
+| L1（组件） | Action 注册、串行执行顺序 |
+| L2（集成） | 失败策略（block / continue） |
+| L3（系统） | 真机：Pre-Pipeline 执行过程查看日志 |
+| L6（验收） | 端到端：确认关机 → 验证 Pre-Pipeline 执行顺序 |
+
+---
+
+## S17 Office 自动保存
+
+### 5. 关键设计
+
+**无路径新文档处理**（编辑项 11 落地，A2 无关）：
+- 从未保存过的新文档（无原路径）：按保存失败处理，告知用户"有新文档尚未保存"
+- 有原路径的文档：正常调用 `Document.Save()` 保存
+- 建议在 Gate 0 实验阶段验证此行为
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | OfficeDetector 进程检测、OfficeDocumentSaver 调用 |
+| L1（组件） | 多文档保存、无路径新文档处理 |
+| L2（集成） | OfficeSaveAction 与 PrePipelineRunner 集成 |
+| L3（系统） | 真机：Word/Excel/PPT 打开 + 修改 → 保存验证 |
+| L6（验收） | 端到端：Office 文档打开 → 关机触发 → 验证保存 |
+
+---
+
+## S18 关闭应用
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | AppWindowManager 查找窗口、ProcessManager 优雅关闭/强杀 |
+| L1（组件） | 应用清单配置、超时处理 |
+| L2（集成） | CloseAppsAction 与 PrePipelineRunner 集成 |
+| L3（系统） | 真机：Notepad 未保存内容 → 关闭 → 验证保存提示 |
+| L6（验收） | 端到端：多个应用打开 → 关机 → 逐一关闭 |
+
+---
+
+## S19 命令执行
+
+### 5. 关键设计——白名单（A2 无关，稿 B 继承）
+
+**默认白名单**：仅包含 `queryStatus`、`listTasks` 只读命令；`triggerShutdown`、`cancelShutdown` 需显式启用。
+**安全限制**：远程不能修改本地白名单，不能绕过本地命令白名单验证。
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 白名单验证、超时处理、失败策略 |
+| L1（组件） | CommandRunner 执行流程 |
+| L2（集成） | RunCommandsAction 与 PrePipelineRunner 集成 |
+| L3（系统） | 真机：命令执行后文件创建验证 |
+| L6（验收） | 端到端：命令执行 → 验证据证 |
+
+---
+
+## S20 无人值守
+
+### 4. 流程修正
+
+```
+Countdown 结束，无人确认
+  ├── 无人值守 enabled → 执行 UnattendedPolicy
+  │   ├── 进入 Pre-Pipeline（正常执行，仅跳过用户确认）
+  │   │   └── action 按配置决定
+  │   ├── forceShutdown → Pre-Pipeline 后关机
+  │   ├── forceKillAndShutdown → Pre-Pipeline 中强杀 + 关机
+  │   └── hibernate → Pre-Pipeline 后休眠
+  └── 无人值守 disabled → 默认不关机（I1），倒计时结束，取消
+```
+
+**重要**：无人值守时仍执行 Pre-Pipeline，仅跳过用户确认环节。不跳过 Pre-Pipeline。
+
+---
+
+**进度快照 #4**：已完成 S16~S20（Pre-Pipeline 框架、Office 保存、关闭应用、命令执行、无人值守）。下一步：S21 WoL + S22 Task Scheduler + S23 远程控制（含 TLS 强化——A2 动作）。
+
+---
+
+## S21 Wake-on-LAN
+
+### 10. 范围说明
+
+- **实现**：关机前设置一次性 RTC 唤醒本机（用于定时开机后自动关机的场景）
+- **不实现**：独立定时唤醒本机（与关机无关的定时唤醒推迟 V3）
+- 唤醒他机：通过 Magic Packet 发送到目标 MAC 地址
+
+---
+
+## S22 Task Scheduler 同步
+
+### 4. 同步方向
+
+- **默认方向**：`outbound`（V2→Task Scheduler 单向同步）
+- 不实现 inbound 同步（导入任务风险更高，V3 考虑双向）
+
+---
+
+## S23 远程控制（A2 动作——TLS 强制条款）
+
+### 5. 关键设计——安全机制
+
+#### 5.6 PIN 限速与锁定（CR-002 前置①）
+
+- 连续 5 次 PIN 输入失败 → 锁定 15 分钟
+- 锁定期间拒绝所有配对请求
+- 记录审计日志，解锁需通过本地 UI 操作
+
+#### 5.7 请求鉴权（CR-002 前置②——含 TLS 强制条款）
+
+**鉴权机制**：
+- 配对后，每次请求携带 `deviceId` + `HMAC-SHA256(deviceId + timestamp + nonce, sharedSecret)`
+- 不依赖来源 IP 鉴权（DHCP 漂移、局域网内 IP 可伪造）
+
+**TLS 强制条款**（A2 动作——关键修改）：
+- **远程触发 + 无人值守组合时，传输强制使用 TLS**（自签名证书或用户导入证书）
+- 未启用 TLS 时，该组合被拒绝，远程触发回退到本地确认流程
+- 仅读命令（`queryStatus`、`listTasks`）在未启用 TLS 时可选接受
+
+#### 5.8 远程触发 + 无人值守组合规则（CR-002 前置③——含 TLS 行）
+
+| 场景 | 行为 |
+|------|------|
+| 无人值守 disabled | 远程触发走正常 Countdown 确认流程 |
+| 无人值守 enabled + 远程命令在白名单中 + **TLS 已启用** | 跳过本地确认，执行 Pre-Pipeline → PowerAction |
+| 无人值守 enabled + 远程命令在白名单中 + **TLS 未启用** | **组合被拒绝**，远程触发回退本地确认流程 |
+| 无人值守 enabled + 远程命令不在白名单中 | 拒绝命令 |
+
+**安全增强措施**（同时实施，非二选一）：
+1. **审计升级为高危标记**：`[REMOTE+UNATTENDED] High risk: remote {ip} triggered shutdown via unattended policy`
+2. **系统托盘显著提示**：托盘图标闪烁 + 通知气泡"远程命令已触发关机（无人值守模式）"
+
+#### 5.9 局域网威胁模型（CR-002 前置④——含 TLS 行）
+
+```
+# 7.5 局域网威胁模型
+
+## 防御范围
+- 防止局域网内未授权设备连接、执行命令
+- 防止已配对设备被仿冒（deviceId + HMAC 鉴权）
+- 防止中间人攻击（远程+无人值守强制 TLS）
+
+## 防御边界
+- 配对：PIN 码 + 限速 + 锁定
+- 鉴权：HMAC + 时间戳 + nonce（不依赖 IP）
+- 传输：远程触发+无人值守组合强制 TLS，仅读命令可选明文
+- 命令：白名单 + 禁止修改配置
+- 组合：远程+无人值守 → 高危标记 + 托盘提示
+
+## 接受的风险（推迟 V3）
+- 物理接入攻击者（直接操作本机或网络硬件）
+- 局域网内 ARP 欺骗/DHCP 投毒（需要物理接入或网络设备控制权）
+- 旁路攻击（如功耗分析、时序分析）
+
+## 不回退场景
+- 任何远程命令不能绕过本地安全策略
+- 任何远程命令不能修改本地配置
+- 任何远程命令不能执行白名单以外的操作
+```
+
+### 8. 测试要求
+
+| 层级 | 测试要点 |
+|------|---------|
+| L0（单元） | 鉴权、PIN 限速、白名单、TLS 证书加载 |
+| L1（组件） | 配对流程、命令执行、TLS 连接建立 |
+| L2（集成） | 远程触发 + 无人值守组合（TLS 启用/未启用两种场景） |
+| L3（系统） | 真机：两台机器配对 → 远程触发关机 |
+| L6（验收） | 端到端：远程触发 → 验证执行（含 TLS 未启用时的回退） |
+
+---
+
+## S24 分布式协调（推迟）
+
+**状态**：推迟到 V3，V2 不引入。
+**理由**：V2 单进程架构下不存在多个决策者同时竞争电源操作的问题。引入分布式协调会打破单进程不变量，增加系统复杂性。
+
+---
+
+## S-PKG 发布打包
+
+### 1. 目标与验收标准
+
+1. **候选 EXE 策略**：自 S13 起每步产出候选 EXE。
+2. **V1→V2 就地升级**：备份 → JSON 迁移 → EXE 替换 → 自启校验 → 自检。失败自动回退。
+3. **卸载清理**：完整清理清单（配置、备份、日志、自启、防火墙、Task Scheduler 任务）。
+4. **自启延续**：安装路径或 EXE 变化时自动重建自启注册。
+
+### 4. 候选 EXE 命名规范
+
+```
+AutoShutdown-v{MAJOR}.{MINOR}.{PATCH}-S{STEP}.{BUILD}.exe
+示例：AutoShutdown-v2.0.0-S13.1.exe
+```
+
+### 5. 闸门清单
+
+| 闸门编号 | 步骤 | 内容 |
+|---------|------|------|
+| G1-PKG-S13 | S13 | 首个候选 EXE 产出并冒烟通过 |
+| G1-PKG-S16 | S16 | 候选 EXE 含 Pre-Pipeline 框架 |
+| G1-PKG-S20 | S20 | 候选 EXE 含无人值守策略 |
+| G1-PKG-S23 | S23 | 完整安装升级流程验收通过 |
+| G1-PKG-卸载 | 最终验收 | 卸载清理验收通过 |
+
+---
+
+**进度快照 #5**：已完成 S21~S24、S-PKG 全步骤。S23 已落实 A2 动作（TLS 在三处强制条款）。下一步：第 7 章功能冲突与交互矩阵。
+
+---
+
+# 第 7 章 功能冲突与交互矩阵
+
+## 7.1 不变量冲突总表（以第 2.1 节为唯一基线）
+
+| 不变量 | 代码 | 内容 | V2 变更 | 冲突说明 | 处理 |
+|--------|------|------|---------|---------|------|
+| 默认不关机 | I1 | 状态不明确默认不关机 | 不变 | 无 | 继承 |
+| 唯一电源出口 | I2 | ShutdownWorkflow 唯一调用 IPowerService | 不变 | 无 | 继承 |
+| UI 不拥有任务引擎 | I3 | UI 不拥有任务引擎、状态持久化、调度循环 | 不变 | 无 | 继承 |
+| Cancelled 终态 | I4 | 取消后不可撤销；StageToken 保证单实例单次执行 | 扩展为多任务 | 低 | 兼容 |
+| HasExecuted | I5 | 标记后不可逆 | 不变 | 无 | 继承 |
+| 崩溃恢复 Interrupted | I6 | 崩溃后标记 interrupted，永不补执行 | 不变 | 无 | 继承 |
+| 配置损坏 Faulted | I7 | 配置损坏标记 faulted | 不变 | 无 | 继承 |
+| 双闸门 | I8 | 配置+人工确认 | 无人值守(F7)和远程(F10)可绕过 | **重大** | CR-001/002 |
+| Mutex + Pipe | I9 | 单实例：Mutex 防多进程，Pipe 传参 | 不变 | 无 | 继承 |
+
+## 7.2 功能交互矩阵（稿 B 基线，F2=工作日规则、F3=空闲关机）
+
+| | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 | F9 | F10 |
+|--|----|----|----|----|----|----|----|----|----|-----|
+| **F1 多任务** | - | 排程规则共享 | 独立空闲检测 | 任务关联 | 任务关联 | 任务关联 | 全任务共享 | 任务关联 | 任务同步 | 远程操作 |
+| **F2 工作日规则** | 排程规则共享 | - | 独立 | 无 | 无 | 无 | 无 | 无 | 排程同步 | 无 |
+| **F3 空闲关机** | 独立空闲检测 | 独立 | - | 无 | 无 | 无 | 协同 | 无 | 无 | 远程触发 |
+| **F4 Office 保存** | 任务关联 | 无 | 无 | - | 无 | **先后** | Pre-Pipeline | 无 | 无 | 无 |
+| **F5 命令执行** | 任务关联 | 无 | 无 | 无 | - | **先后** | Pre-Pipeline | 无 | 无 | 远程白名单 |
+| **F6 关闭应用** | 任务关联 | 无 | 无 | **F4先** | **F5先** | - | Pre-Pipeline | 无 | 无 | 无 |
+| **F7 无人值守** | 全任务共享 | 无 | 协同 | Pre-Pipeline | Pre-Pipeline | Pre-Pipeline | - | 无 | 无 | **协同** |
+| **F8 WoL** | 任务关联 | 无 | 无 | 无 | 无 | 无 | 无 | - | 无 | 无 |
+| **F9 Task Scheduler** | 任务同步 | 排程同步 | 无 | 无 | 无 | 无 | 无 | 无 | - | 无 |
+| **F10 远程控制** | 远程操作 | 无 | 远程触发 | 无 | 远程触发 | 无 | **协同** | 无 | 无 | - |
+
+## 7.3 同时到期仲裁
+
+见 S13 §5.5。
+
+---
+
+# 第 8 章 追溯矩阵
+
+## 8.1 需求 → 功能 追溯
+
+| 需求编号 | 需求内容 | 实现功能 | 覆盖步骤 |
+|---------|---------|---------|---------|
+| R-001 | 多任务支持 | F1 | S13 |
+| R-002 | 工作日复杂规则 + 指定日期任务 | F2 | S14 |
+| R-003 | 空闲关机 | F3 | S15 |
+| R-004 | Office 自动保存 | F4 | S17 |
+| R-005 | 关机前命令执行 | F5 | S19 |
+| R-006 | 自动关闭与强制结束应用 | F6 | S18 |
+| R-007 | 无人值守策略 | F7 | S20 |
+| R-008 | Wake-on-LAN | F8 | S21 |
+| R-009 | Windows Task Scheduler 同步 | F9 | S22 |
+| R-010 | 远程控制与跨设备同步 | F10 | S23 |
+| R-011 | 分布式协调 | F11 | S24（推迟 V3） |
+| R-012 | 预关机流水线框架 | F4+F5+F6 框架 | S16（派生需求） |
+
+## 8.2 功能 → 步骤 追溯
+
+| 功能编号 | 功能名称 | 实现步骤 | 前置依赖 |
+|---------|---------|---------|---------|
+| F1 | 多任务 | S13 | S12 |
+| F2 | 工作日规则 + 一次性日期 | S14 | S13 |
+| F3 | 空闲关机 | S15 | S13 |
+| F4 | Office 自动保存 | S17 | S16 |
+| F5 | 关机前命令执行 | S19 | S16 |
+| F6 | 关闭应用 | S18 | S16 |
+| F7 | 无人值守 | S20 | S16 |
+| F8 | WoL | S21 | S13 |
+| F9 | Task Scheduler 同步 | S22 | S13 |
+| F10 | 远程控制 | S23 | S13, S20 |
+| F11 | 分布式协调 | S24（推迟 V3） | S23 |
+
+## 8.3 功能 → 不变量 追溯（以第 2.1 节为基线）
+
+| 功能 | I1 | I2 | I3 | I4 | I5 | I6 | I7 | I8 | I9 |
+|------|----|----|----|----|----|----|----|----|----|
+| F1 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F2 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F3 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F4 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F5 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F6 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F7 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | △ | ✓ |
+| F8 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F9 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| F10 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | △ | ✓ |
+
+## 8.4 步骤 → 模块 追溯
+
+| 步骤 | 新增模块 | 修改模块 | 测试层级 |
+|------|---------|---------|---------|
+| S13 | TaskCollection, TaskInstance, TaskStateMachine, CrashRecoveryManager, TaskArbitrator | SchedulerEngine, ShutdownWorkflow | L0~L6 |
+| S14 | INextTimeCalculator, WeekdayRule, DayOfMonthRule, HolidayCalendar, **OneTimeDateRule** | TaskCollection, config.json | L0~L6 |
+| S15 | IdleMonitor, IdleShutdownRule | ShutdownWorkflow, config.json | L0~L6 |
+| S16 | IPreShutdownAction, PrePipelineRunner, PrePipelineContext, ActionResult | ShutdownWorkflow, config.json | L0~L6 |
+| S17 | OfficeSaveAction, OfficeDetector, OfficeDocumentSaver | PrePipelineRunner | L0~L6 |
+| S18 | CloseAppsAction, AppWindowManager, ProcessManager | PrePipelineRunner | L0~L6 |
+| S19 | RunCommandsAction, CommandRunner, CommandWhiteList | PrePipelineRunner | L0~L6 |
+| S20 | UnattendedPolicy, InputMonitor | ShutdownWorkflow, config.json | L0~L6 |
+| S21 | WakeOnLanService, MagicPacketBuilder, TargetMachineManager, RtcWakeService | TaskDefinition, SchedulerEngine | L0~L6 |
+| S22 | TaskSchedulerSyncService, TaskSchedulerAdapter, TaskSchedulerMapper | TaskCollection, config.json | L0~L6 |
+| S23 | RemoteServer, RemoteClient, RpcHandler, RemoteCommandWhiteList, PairingService, HmacAuth | ShutdownWorkflow, config.json | L0~L6 |
+| S24 | 无（推迟） | 无 | 无 |
+| S-PKG | PackageBuilder, UpgradeMigration, SelfStartService, UninstallCleaner | AppHost, config.json | L0~L4 |
+
+---
+
+**进度快照 #6**：已完成第 7 章（交互矩阵，无模板/导入导出引用）和第 8 章（追溯矩阵，S14 含 OneTimeDateRule）。下一步：第 9 章风险总结与闸门清单 + 第 10 章推迟清单。
+
+---
+
+# 第 9 章 风险总结与闸门清单
+
+## 9.1 风险等级总表
+
+| 风险等级 | 定义 | 数量 | 对应步骤 |
+|---------|------|------|---------|
+| **R1** | 低风险，不影响核心功能，回滚简单 | 1 | S24（推迟—R1） |
+| **R2** | 中风险，影响局部功能，有防护措施可回滚 | 10 | S13（多任务—R2）、S14（工作日规则+一次性日期—R2）、S15（空闲关机—R2）、S16（Pre-Pipeline 框架—R2）、S17（Office 保存—R2）、S18（应用关闭—R2）、S19（命令执行—R2）、S21（WoL—R2）、S22（Task Scheduler—R2）、S-PKG（发布打包—R2） |
+| **R3** | 高风险，影响核心不变量，需架构变更申请 | 2 | S20（无人值守—R3）、S23（远程控制—R3） |
+
+**总计：R1×1 + R2×10 + R3×2 = 13 步**
+
+## 9.2 闸门清单
+
+**Gate 0：定标闸门**
+
+| 闸门编号 | 步骤 | 内容 | 验证方式 | 负责人 |
+|---------|------|------|---------|-------|
+| G0-S13 | S13 | 多任务状态机设计评审（含崩溃恢复、仲裁） | 架构评审 | 架构师 |
+| G0-S13 | S13 | 不变量 I1~I9 确认未破坏 | 架构评审 | 架构师 |
+| G0-S14 | S14 | 排程规则接口定稿（含一次性日期 OneTimeDateRule） | 设计评审 | 开发负责人 |
+| G0-S15 | S15 | 空闲检测方案定稿 | 设计评审 | 开发负责人 |
+| G0-S16 | S16 | Pre-Pipeline 框架接口定稿 | 架构评审 | 架构师 |
+| G0-S17 | S17 | Office 保存 COM 自动化可行性实验通过 | 实验验证 | 开发负责人 |
+| G0-S18 | S18 | 应用关闭 Win32 API 原型验证通过 | 原型验证 | 开发负责人 |
+| G0-S19 | S19 | 命令执行白名单安全设计评审通过 | 安全评审 | 安全负责人 |
+| G0-S20 | S20 | ARCH-CR-001 已批准 | 架构评审 | 架构师 |
+| G0-S21 | S21 | WoL 原型验证通过 | 原型验证 | 开发负责人 |
+| G0-S22 | S22 | TaskScheduler 库依赖评估通过 | 依赖评审 | 开发负责人 |
+| G0-S23 | S23 | ARCH-CR-002 已批准 + 4 项安全前置已落实 | 架构+安全评审 | 架构师+安全负责人 |
+| G0-PKG | S-PKG | 发布打包策略定稿、升级方案设计评审 | 设计评审 | 开发负责人 |
+
+**Gate 1：验收闸门**
+
+| 闸门编号 | 步骤 | 内容 | 验证方式 | 负责人 |
+|---------|------|------|---------|-------|
+| G1-S13 | S13 | 多任务端到端验收（含崩溃恢复、仲裁） | L6 测试 | QA |
+| G1-S14 | S14 | 工作日规则+一次性日期验收 | L6 测试 | QA |
+| G1-S15 | S15 | 空闲关机验收 | L6 测试 | QA |
+| G1-S16 | S16 | Pre-Pipeline 框架验收 | L6 测试 | QA |
+| G1-S17 | S17 | Office 保存真机验收 | L6 真机测试 | QA |
+| G1-S18 | S18 | 应用关闭真机验收 | L6 真机测试 | QA |
+| G1-S19 | S19 | 命令执行真机验收 | L6 真机测试 | QA |
+| G1-S20 | S20 | 无人值守真机验收 | L6 真机测试 | QA |
+| G1-S21 | S21 | WoL 真机验收 | L6 真机测试 | QA |
+| G1-S22 | S22 | Task Scheduler 同步验收 | L6 真机测试 | QA |
+| G1-S23 | S23 | 远程控制真机验收（含 TLS 回退验证） | L6 真机测试 | QA |
+| G1-PKG-S13 | S13 | 首个候选 EXE 产出并冒烟通过 | 冒烟测试 | QA |
+| G1-PKG-S16 | S16 | 候选 EXE 含 Pre-Pipeline 框架 | 冒烟测试 | QA |
+| G1-PKG-S20 | S20 | 候选 EXE 含无人值守策略 | 冒烟测试 | QA |
+| G1-PKG-S23 | S23 | 完整安装升级流程验收通过 | L6 真机测试 | QA |
+| G1-PKG-卸载 | 最终验收 | 卸载清理验收通过 | L6 真机测试 | QA |
+
+## 9.3 关键路径图
+
+```
+S12（架构基础）
+  │
+  ▼
+S13（多任务——关键路径起点，产出首个候选 EXE）
+  │
+  ├──► S-PKG（发布打包）
+  │
+  ├──► S14（工作日规则+一次性日期）
+  │
+  ├──► S15（空闲关机）
+  │
+  ├──► S16（Pre-Pipeline 框架——关键路径）
+  │     │
+  │     ├──► S17（Office 保存）
+  │     ├──► S18（关闭应用）
+  │     └──► S19（命令执行）
+  │
+  ├──► S20（无人值守——高风险，依赖 CR-001）
+  │
+  ├──► S21（WoL——可并行）
+  │
+  ├──► S22（Task Scheduler——可并行）
+  │
+  └──► S23（远程控制——高风险，依赖 CR-002 + 4 项安全前置）
+        │
+        └──► S24（分布式协调——推迟 V3）
+```
+
+---
+
+# 第 10 章 建议推迟功能（A4 动作——模板/导入导出落定推迟 V3）
+
+| 功能 | 原始需求 | 建议推迟的版本 | 推迟理由 |
+|------|---------|--------------|---------|
+| **F11 分布式协调** | R-011 | V3 | 单进程架构不需要 |
+| **任务模板** | 原 R-002 扩展 | **V3（本轮人工确认不纳入；如未来需要，作为新需求重新立项）** | 推迟理由见下 |
+| **导入导出任务** | 原 R-003 扩展 | **V3（本轮人工确认不纳入；如未来需要，作为新需求重新立项）** | 推迟理由见下 |
+| 公网远程控制 | R-010 扩展 | V3 | 需要云端服务 |
+| 自动发现局域网设备 | R-010 扩展 | V3 | 手动配置 IP 足够 |
+| 远程修改配置 | R-010 扩展 | V3 | 安全性要求高 |
+| 多语言支持 | 未明确 | V3 | 需要国际化框架 |
+| 插件系统 | 未明确 | V3 | 需要插件加载沙箱 |
+
+**模板与导入导出推迟理由**：V2 的 R-002（工作日规则）和 R-003（空闲关机）已在需求基线中覆盖核心排程需求。任务模板与导入导出作为增强性功能，不阻断 V2 核心功能交付。如未来需要，作为新需求重新立项，在 V3 中评估。
+
+---
+
+# 附录与术语表
+
+## 附录 A：术语表
+
+| 术语 | 定义 |
+|------|------|
+| **Pre-Pipeline** | 关机前流水线，在 Countdown 确认后、PowerAction 前执行 |
+| **StageToken** | 阶段令牌，标识任务实例的唯一执行阶段，防重复 |
+| **HasExecuted** | 标记任务实例已执行，终态不可逆 |
+| **Countdown** | 关机倒计时，显示给用户确认或取消的时间窗口 |
+| **TriggerType** | 触发类型：Time（定时）、Idle（空闲）、Remote（远程） |
+| **FailurePolicy** | 失败策略：block（阻断关机）/ continue（继续执行） |
+| **Magic Packet** | WoL 特殊网络包，6 字节 0xFF + MAC 地址重复 16 次 |
+| **JSON-RPC 2.0** | 远程过程调用协议，基于 JSON 的轻量级通信协议 |
+| **ARCH-CR** | 架构变更申请，用于修改架构不变量的正式流程 |
+| **Gate 0 / Gate 1** | 步骤开始前/完成后的验证闸门 |
+
+## 附录 B：参考文档
+
+| 文档 | 版本 | 说明 |
+|------|------|------|
+| V1 架构设计文档 | v1.0 | AutoShutdown V1 的完整架构设计 |
+| V1 代码库 | v1.0 | AutoShutdown 现有代码实现（C# .NET 8） |
+| .NET 8 架构设计指南 | - | 微软官方架构设计指南 |
+| Microsoft.Win32.TaskScheduler | - | Task Scheduler 托管库文档 |
+| JSON-RPC 2.0 规范 | 2.0 | JSON-RPC 协议规范 |
+| Wake-on-LAN 标准 | - | AMD Magic Packet 技术标准 |
+
+---
+
+**进度快照 #7（最终）**：已完成全文档输出。最后一部分将包含：收敛自检表、单一定义检查表、架构冻结建议。
+
+---
+
+# 最终部分：收敛自检表 + 单一定义检查表 + 架构冻结建议
+
+## 收敛自检表（A1~A5 逐项验证）
+
+| 动作 | 完成状态 | 文档落点 |
+|------|---------|---------|
+| **A1**：作废稿 A，单一文档 | **✅ 完成** | 全文档：F2=工作日规则+一次性日期（S14），F3=空闲关机（S15），模块体系为 INextTimeCalculator / WeekdayRule / DayOfMonthRule / HolidayCalendar / OneTimeDateRule / IdleMonitor / IdleShutdownRule。全文无"任务模板""导入导出"引用（仅第 10 章推迟清单） |
+| **A2**：补回 CR-002 前置②（TLS） | **✅ 完成** | S23 §5.7（鉴权节：TLS 强制条款）、§5.8（组合规则表：TLS 行）、§5.9（威胁模型：传输防御边界），三处均为强制条件 |
+| **A3**：统一 Waiting 状态命名 + 映射表 | **✅ 完成** | 第 4.4 节 V1↔V2 状态名映射表；S13 §5 状态机 8 态（waiting/running/confirming/executing/executed/cancelled/faulted/interrupted）；runtime.json schema 状态字段用全小写名；S23 queryStatus 用 V2 命名 |
+| **A4**：范围落定——模板/导入导出推迟 V3 | **✅ 完成** | 第 10 章推迟清单："V3（本轮人工确认不纳入；如未来需要，作为新需求重新立项）"；第 1.3 节非目标中明确 |
+| **A5**：S14 补一次性日期规则 | **✅ 完成** | S14 §1 验收标准（含一次性日期）、§3 新增模块（OneTimeDateRule）、§4 数据模型（type="oneday"）、§8 测试要求（含过去日期/跨年/DST/当日已过点）；第 8.4 节 S14 模块列含 OneTimeDateRule；G1-S14 验收项含一次性日期 |
+
+## 单一定义检查表
+
+| 检查项 | 定义内容 | 所在章节 |
+|--------|---------|---------|
+| **F2 定义** | 工作日复杂排程规则 + 指定日期任务（一次性日期） | 第 1.2 节功能清单 |
+| **F3 定义** | 空闲关机 | 第 1.2 节功能清单 |
+| **S14 模块清单** | INextTimeCalculator, WeekdayRule, DayOfMonthRule, HolidayCalendar, OneTimeDateRule | 第 5 章总览表 + 第 8.4 节追溯 |
+| **S15 模块清单** | IdleMonitor, IdleShutdownRule | 第 5 章总览表 + 第 8.4 节追溯 |
+| **不变量编号基线** | I1~I9（第 2.1 节） | 第 2.1 节 |
+| **状态机状态集** | 8 态：waiting/running/confirming/executing/executed/cancelled/faulted/interrupted | S13 §5.1 |
+
+## 架构冻结建议
+
+```markdown
+# 架构冻结建议
+- 结论：**建议冻结**
+- 架构版本：V2-DRAFT-003（收敛版）
+- 修订依据：ARCH-V2-R2-convergence.md（第 2 轮收敛变更包）
+- 唯一基线：稿 B（后半修订稿），稿 A 已作废
+- 五项收敛动作：
+  A1 ✅ 单一文档（F2/F3 稿 B 定义，无模板/导入导出污染）
+  A2 ✅ S23 TLS 三处强制条款
+  A3 ✅ 统一 Waiting 状态命名 + V1↔V2 映射表
+  A4 ✅ 模板/导入导出推迟 V3（人工确认不纳入）
+  A5 ✅ S14 补一次性日期规则（OneTimeDateRule）
+- 需求—架构—工单—测试追溯检查：通过（第 8 章追溯矩阵与第 5 章总览表一致）
+- UI / 测试 / EXE 覆盖：测试 L0~L6 完整；EXE 候选策略已定义（S-PKG）；UI 基线（编辑项 12）已要求
+- 未解决阻断项：
+  - ARCH-CR-001 待人工裁决（冻结前必须落槌）
+  - ARCH-CR-002 待人工裁决（4 项安全前置已全部落入正文，待确认）
+  - S17 Office COM 自动化 Gate 0 实验结论待定（含无路径新文档按保存失败+告知规则验证）
+- 给 Qwen3.8-Max 的冻结输入：
+  - 需求基线：R-001~R-012（F1-F10 V2 实现，F11 推迟 V3）
+  - 冻结架构：V2-DRAFT-003
+  - 修正后的追溯矩阵见第 8 章
+  - 未决事项：CR-001/002 人工决定、S17 Gate 0 实验结论
+  - 版本号：2.0.0
+- 轮次：2 → 3（冻结轮）
+- 交接判断：Claude Opus 4.8 收敛修订完成，可交回 Qwen3.8-Max 进行复验与冻结确认
+```
+
+---
+
+**【全文完】AutoShutdown V2 架构设计书 · V2-DRAFT-003（收敛版）**
+
+**最终统计**：
+- 总章节：10 章 + 2 附录 + S-PKG 发布打包章节
+- 功能覆盖：F1~F10（V2 实现），F11（推迟 V3）
+- 不变量：I1~I9（以第 2.1 节为唯一基线）
+- 风险等级：R1×1 + R2×10 + R3×2 = 13 步
+- 闸门数量：Gate 0 × 13 + Gate 1 × 16（含 5 个 PKG 闸门）
+- 五项收敛动作：全部完成
+- 单一定义检查：全部通过（F2/F3 各一处定义、模块清单各一处、不变量编号基线、状态机状态集）
+
+**请 Qwen3.8-Max 执行复验清单**，检查：
+1. 单一性：全文检索"模板/导入导出/TaskTemplateManager/TaskImportExport/IdleMonitorV2"，仅允许出现在第 10 章
+2. TLS 前置：S23 §5.7/§5.8/§5.9 三处均为强制条款
+3. 状态一致性：状态引用与 S13 §5 完全一致，映射表存在（第 4.4 节）
+4. 追溯闭合：R-001~R-012 → F → S → 模块 → 测试链条逐行可走通，含一次性日期规则
+5. 冻结输入齐备：冻结建议含需求基线、版本号、未决事项三项
+
+复验全绿 → 出具冻结确认，随后进入 DAG 粗拆 + 派工卡生成。
+
+# AutoShutdown V2 架构设计书 · V2-DRAFT-004（修正版）
+
+| 项目 | 值 |
+|------|----|
+| 文档版本 | **V2-DRAFT-004**（修正版） |
+| 修订依据 | ARCH-V2-R2 复验报告（D1/D2/F3/F4 + 顺手项） |
+| 基线 | V2-DRAFT-003，**仅修正下述点**，其余原文零变更 |
+| 修正类型 | 第 2 轮往返修正（仅一次机会） |
+
+## 回归声明
+
+除本修正包列出的替换块外，V2-DRAFT-003 其余所有文本（章节结构、功能定义、不变量、追溯矩阵、风险计数、闸门清单、S-PKG、附录、冻结建议等）**原文不动，零变更**。
+
+---
+
+## 修正 1：文档头新增"与历史版本关系"基线层级声明（F4）
+
+**插入位置**：文档头，基线声明之后、第 1 章之前
+
+```markdown
+## 与历史版本关系（基线层级声明）
+
+1. **唯一权威基线**：V2-DRAFT-004（含本修正包）为当前唯一权威基线。凡与历史版本冲突处，一律以本版为准。
+2. **覆盖项清单**（V2-DRAFT-004 已覆盖并取代的 V2-DRAFT-001 内容）：
+   - S13 状态机（含崩溃恢复、仲裁规则）
+   - S14 排程规则（含一次性日期 OneTimeDateRule）
+   - S15 空闲关机
+   - S16 / S20 流程次序（统一为 Countdown → Confirm → Pre-Pipeline → PowerAction）
+   - S23 安全机制（含 TLS 强制、远程+无人值守规则）
+   - 不变量编号（以第 2.1 节为唯一基线，第 7.1 节冲突编号作废）
+   - 第 7/8/9 章追溯体系（F2/F3 定义以第 5 章总览表为准）
+3. **未覆盖项的参考来源**：V2-DRAFT-001 中未被上述覆盖项列入的细节（如 F5 本地命令白名单细则、S21 WoL 细节）可作为参考，但**凡与 V2-DRAFT-004 冲突处，一律以 V2-DRAFT-004 为准**。
+4. **已作废内容**：V2-DRAFT-001 中第 7.1 节冲突不变量编号体系、第 8/9 章中"任务模板/导入导出"相关追溯与闸门，全部作废。
+```
+
+---
+
+## 修正 2：S13 崩溃恢复集合修正（D1）
+
+**替换位置**：S13 §5 崩溃恢复流程
+
+**替换前**：
+```
+崩溃恢复流程：
+程序启动时：
+  1. 加载 runtime.json
+  2. 对每个 status=waiting/running/confirming/executing 的实例：
+     a. 标记为 interrupted
+     b. 审计日志 Warning："任务 {taskId} 因崩溃恢复被标记为 interrupted，已跳过执行"
+     c. UI 通知："有 {n} 个任务因上次崩溃已跳过执行"
+  3. 对 cancelled/executed/faulted/interrupted 实例：保持终态
+  4. 重新计算所有已启用任务的排程
+```
+
+**替换后**：
+```
+崩溃恢复流程：
+程序启动时：
+  1. 加载 runtime.json
+  2. 对每个 status=running/confirming/executing 的实例（未完成实例）：
+     a. 标记为 interrupted
+     b. 审计日志 Warning："任务 {taskId} 因崩溃恢复被标记为 interrupted，已跳过执行"
+     c. UI 通知："有 {n} 个任务因上次崩溃已跳过执行"
+  3. 对每个 status=waiting 的实例（正常待排程实例）：
+     a. 保持 waiting 状态，不做任何标记
+     b. 直接进入步骤 4 重算排程
+  4. 对 cancelled/executed/faulted/interrupted 实例：保持终态
+  5. 重新计算所有已启用任务的排程
+```
+
+**S13 §8 测试要求补充**（在 L1 行追加）：
+
+| 层级 | 测试要点 |
+|------|---------|
+| L1（组件） | 崩溃恢复启动流程、runtime.json 加载与 Interrupted 处理；**重启后 waiting 实例不受影响、排程继续** |
+
+---
+
+## 修正 3：S19 §5 白名单修正（D2 第一部分）
+
+**替换位置**：S19 §5 关键设计——白名单
+
+**替换前**：
+```
+### 5. 关键设计——白名单
+
+默认白名单：仅包含 `queryStatus`、`listTasks` 只读命令；`triggerShutdown`、`cancelShutdown` 需显式启用。
+安全限制：远程不能修改本地白名单，不能绕过本地命令白名单验证。
+```
+
+**替换后**：
+```
+### 5. 关键设计——白名单
+
+**本地命令白名单**（F5 关机前命令执行）：
+- 白名单内容为本地可执行文件的**绝对路径 + 参数模式**（如 `C:\Scripts\backup.bat`、`C:\Tools\cleanup.exe --temp`）
+- 默认禁止任意命令（白名单为空，用户必须显式配置）
+- 支持通配符匹配绝对路径前缀（如 `C:\Scripts\*.bat`）
+- 超时机制：每个命令有独立超时配置（默认 30 秒），超时后按 failurePolicy 处理
+- 失败策略：block（阻断关机）/ continue（继续执行，记录错误日志）
+
+**安全限制**：本地命令白名单不可被远程修改；远程命令白名单与本地命令白名单完全独立（见 S23）。
+```
+
+---
+
+## 修正 4：S23 新增"远程命令白名单默认规则"小节（D2 第二部分）
+
+**插入位置**：S23 §5 关键设计——安全机制，在 §5.9 之后新增 §5.10
+
+```markdown
+#### 5.10 远程命令白名单默认规则
+
+**远程命令白名单**（F10 远程控制）与 F5 本地命令白名单完全独立，互不干扰。
+
+**默认规则**：
+- 默认仅包含只读命令：`queryStatus`、`listTasks`
+- 触发类命令（`triggerShutdown`、`cancelShutdown`）需用户显式启用
+- 任何未在白名单中的命令被远程调用时，拒绝执行并记录审计日志 Error
+
+**与无人值守的交互**：
+- 远程命令 `triggerShutdown` 只有在白名单中 + 无人值守已启用 + TLS 已启用时，才可跳过本地确认
+- 若 `triggerShutdown` 不在白名单中，即使无人值守已启用，远程触发也被拒绝
+
+**安全限制**：
+- 远程不能修改远程命令白名单本身
+- 远程不能修改本地命令白名单（S19）
+- 远程不能修改本地安全策略配置
+```
+
+---
+
+## 修正 5：G0-S13 增加《V2 UI 实施基线》闸门行（F3）
+
+**替换位置**：第 9.2 节 Gate 0 清单，G0-S13 区域
+
+**替换前**：
+```
+| G0-S13 | S13 | 多任务状态机设计评审（含崩溃恢复、仲裁） | 架构评审 | 架构师 |
+| G0-S13 | S13 | 不变量 I1~I9 确认未破坏 | 架构评审 | 架构师 |
+```
+
+**替换后**：
+```
+| G0-S13 | S13 | 多任务状态机设计评审（含崩溃恢复、仲裁） | 架构评审 | 架构师 |
+| G0-S13 | S13 | 不变量 I1~I9 确认未破坏 | 架构评审 | 架构师 |
+| G0-S13 | S13 | 《V2 UI 实施基线》产出（任务列表页/编辑对话框/排程编辑器+例外日历/设置页各分区/审计日志页），后续 Gate 1 按基线逐页验收 | 设计评审 | 设计负责人 |
+```
+
+---
+
+## 修正 6：顺手项集
+
+### 6a：第 8.3 节补 F11 行
+
+| 功能 | I1 | I2 | I3 | I4 | I5 | I6 | I7 | I8 | I9 |
+|------|----|----|----|----|----|----|----|----|----|
+| **F11（推迟 V3）** | — | — | — | — | — | — | — | — | — |
+
+### 6b：第 7.2 节功能交互矩阵补 F11 列和行
+
+| | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 | F9 | F10 | **F11** |
+|--|----|----|----|----|----|----|----|----|----|-----|---------|
+| …（全部行原文不变，最后列改为 F11） | | | | | | | | | | | — |
+| **F11（推迟 V3）** | — | — | — | — | — | — | — | — | — | — | — |
+
+### 6c：S23 §5.9 标题修正
+
+**替换前**：`#### 5.9 局域网威胁模型（CR-002 前置④——含 TLS 行）`
+
+**替换后**：`#### 5.9 局域网威胁模型（CR-002 前置④）`
+
+**内容内**：删除 `# 7.5 局域网威胁模型` 标题，改为 `## 局域网威胁模型`
+
+### 6d：S13 转换表 waiting→cancelled 触发条件补充
+
+**替换前**：`waiting → cancelled | 用户取消未触发任务 | 直接终态`
+
+**替换后**：`waiting → cancelled | 用户取消未触发任务 / 系统判定一次性任务过期 | 直接终态`
+
+### 6e：第 3.1 节架构图去重
+
+**替换前**（基础设施层）：
+```
+├── 基础设施层
+│   IPowerService / ILogger / ConfigManager /
+│   MutexManager / PipeServer / CrashRecoveryManager  ← 重复
+│   config.json / runtime.json / tasks.json 持久化
+```
+
+**替换后**（调度层）：
+```
+├── 调度层
+│   SchedulerEngine / TaskCollection / TaskInstance /
+│   TaskStateMachine / CrashRecoveryManager /  ← 保留于此
+│   TaskArbitrator（同时到期仲裁）
+```
+
+**基础设施层从列表移除 CrashRecoveryManager**（仅保留一次）：
+```
+├── 基础设施层
+│   IPowerService / ILogger / ConfigManager /
+│   MutexManager / PipeServer
+│   config.json / runtime.json / tasks.json 持久化
+```
+
+---
+
+## 修正总结
+
+| 修正项 | 类型 | 位置 | 变更性质 |
+|--------|------|------|---------|
+| D1 | 阻断 | S13 崩溃恢复流程 + S13 L1 测试 | 删除 waiting，仅保留 running/confirming/executing |
+| D2-1 | 阻断 | S19 §5 白名单 | 替换为 F5 本地命令白名单语义 |
+| D2-2 | 阻断 | S23 新增 §5.10 | 远程命令白名单默认规则移入 S23 |
+| F3 | 补充 | G0-S13 闸门清单 | 新增 UI 实施基线闸门行 |
+| F4 | 补充 | 文档头 | 新增"与历史版本关系"基线层级声明 |
+| 顺手 6a | 顺手 | 第 8.3 节 | 补 F11 行 |
+| 顺手 6b | 顺手 | 第 7.2 节 | 补 F11 行/列 |
+| 顺手 6c | 顺手 | S23 §5.9 | 修正标题 |
+| 顺手 6d | 顺手 | S13 转换表 | 补一次性任务过期触发 |
+| 顺手 6e | 顺手 | 第 3.1 节 | 去重 CrashRecoveryManager |
+
+**其余所有章节、段落、数据模型、测试要求、风险计数、闸门清单、S-PKG、附录、冻结建议——全部原文不动，零变更。**
+
+---
+
+**V2-DRAFT-004 修正完毕，请 Qwen3.8-Max 执行复验。**

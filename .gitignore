@@ -1,0 +1,25 @@
+# ===== .NET 构建产物 =====
+**/bin/
+**/obj/
+
+# ===== 测试结果与诊断 =====
+TestResults/
+
+# ===== 发布产物（可由 tools/Publish-SafeRelease.ps1 重新生成）=====
+artifacts/
+
+# ===== 构建/测试日志（保留在磁盘，不入基线）=====
+*.log
+*.out
+*.trx
+
+# ===== IDE / 工具状态 =====
+.vs/
+.vscode/
+.dsh-vision-toolkit/
+.workbuddy/
+.idea/
+*.user
+
+# ===== Agent 会话状态 =====
+.claude/session-*/

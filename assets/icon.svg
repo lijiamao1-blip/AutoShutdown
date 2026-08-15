@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  原创矢量图标：电源圆环 + 中央向下 V 形（定时/自动执行）
+  以第 5 张图构图作概念参考，全部路径自零设计，未引用任何 JPG 像素。
+  透明背景；无文字、无水印、无阴影、无外发光、无外部图片引用。
+  线性渐变：左上 #00BFFF → 右下 #A020F0（userSpaceOnUse，跨画布 45°）。
+  圆环 / 电源竖线 / V 形均使用圆角线帽（round cap）与圆角连接（round join）。
+  结构：圆环中心 (128,128)，路径半径 78、线宽 24（外径 90 = 画布 70.3%，四周留边 ≥ 10%）。
+        顶部缺口 30°；竖线自缺口下沿 (128,66) 垂直到 V 形顶点 (128,182)；
+        V 形两臂夹角约 91°，顶点圆角底缘 (y≈194) 与圆环内缘相切。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="powerGradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="256" y2="256">
+      <stop offset="0" stop-color="#00BFFF"/>
+      <stop offset="1" stop-color="#A020F0"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#powerGradient)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 电源圆环（顶部 30° 开口） -->
+    <path d="M 107.8 52.7 A 78 78 0 1 0 148.2 52.7"/>
+    <!-- 电源竖线：自圆环顶部缺口下沿延伸至 V 形顶点 -->
+    <path d="M 128 66 L 128 182"/>
+    <!-- 中央向下 V 形（顶点与圆环内缘相切） -->
+    <path d="M 63 118 L 128 182 L 193 118"/>
+  </g>
+</svg>

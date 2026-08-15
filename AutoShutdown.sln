@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.Core", "src\AutoShutdown.Core\AutoShutdown.Core.csproj", "{180BC54E-BFCC-46ED-BD9C-476B3DC260B3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.App", "src\AutoShutdown.App\AutoShutdown.App.csproj", "{2581D8B9-3539-4109-B1A3-A438ED71A23D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.Tests", "tests\AutoShutdown.Tests\AutoShutdown.Tests.csproj", "{328B7593-9654-498C-9C07-917BA77D0DAE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{180BC54E-BFCC-46ED-BD9C-476B3DC260B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{180BC54E-BFCC-46ED-BD9C-476B3DC260B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{180BC54E-BFCC-46ED-BD9C-476B3DC260B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{180BC54E-BFCC-46ED-BD9C-476B3DC260B3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2581D8B9-3539-4109-B1A3-A438ED71A23D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2581D8B9-3539-4109-B1A3-A438ED71A23D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2581D8B9-3539-4109-B1A3-A438ED71A23D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2581D8B9-3539-4109-B1A3-A438ED71A23D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{328B7593-9654-498C-9C07-917BA77D0DAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{328B7593-9654-498C-9C07-917BA77D0DAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{328B7593-9654-498C-9C07-917BA77D0DAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{328B7593-9654-498C-9C07-917BA77D0DAE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
