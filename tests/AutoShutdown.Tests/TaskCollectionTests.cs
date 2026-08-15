@@ -244,6 +244,105 @@ public sealed class TaskCollectionTests
         Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
     }
 
+    // ===== 结构校验（S13-T02A 补丁）：TaskKind / CountdownDuration / TargetTimeOfDay / WarningSeconds =====
+
+    [Theory]
+    [InlineData(TaskKind.Unknown)]
+    [InlineData((TaskKind)99)]
+    public void Add_UnknownOrUndefinedTaskKind_ReturnsInvalidDefinitionWithoutMutation(TaskKind kind)
+    {
+        var collection = new TaskCollection();
+
+        var result = collection.Add(Definition(TaskA) with { Kind = kind });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(0, collection.Count);
+    }
+
+    [Fact]
+    public void Add_CountdownMissingDuration_ReturnsInvalidDefinition()
+    {
+        var collection = new TaskCollection();
+
+        var result = collection.Add(Definition(TaskA) with { CountdownDuration = null });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(0, collection.Count);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Add_CountdownNonPositiveDuration_ReturnsInvalidDefinition(int seconds)
+    {
+        var collection = new TaskCollection();
+
+        var result = collection.Add(Definition(TaskA) with { CountdownDuration = TimeSpan.FromSeconds(seconds) });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(0, collection.Count);
+    }
+
+    [Theory]
+    [InlineData(TaskKind.TodayAt)]
+    [InlineData(TaskKind.DailyAt)]
+    public void Add_TimeOfDayTaskMissingTarget_ReturnsInvalidDefinition(TaskKind kind)
+    {
+        var collection = new TaskCollection();
+
+        var result = collection.Add(TimeOfDayDefinition(TaskA, kind, targetTimeOfDay: null));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(0, collection.Count);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(86401)]
+    public void Add_WarningSecondsOutOfRange_ReturnsInvalidDefinition(int warningSeconds)
+    {
+        var collection = new TaskCollection();
+
+        var result = collection.Add(Definition(TaskA) with { WarningSeconds = warningSeconds });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(0, collection.Count);
+    }
+
+    [Fact]
+    public void Update_StructurallyInvalidDefinition_KeepsOriginal()
+    {
+        var collection = new TaskCollection();
+        collection.Add(Definition(TaskA, priority: 20));
+
+        var result = collection.Update(Definition(TaskA) with { Kind = TaskKind.Unknown });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(TaskCollectionStatus.InvalidDefinition, result.Status);
+        Assert.Equal(20, collection.Get(TaskA)!.Priority);
+        Assert.Equal(TaskKind.Countdown, collection.Get(TaskA)!.Kind);
+    }
+
+    [Fact]
+    public void Add_AllThreeValidTaskKinds_AreAccepted()
+    {
+        var collection = new TaskCollection();
+
+        var countdown = collection.Add(Definition(TaskA));
+        var todayAt = collection.Add(TimeOfDayDefinition(TaskB, TaskKind.TodayAt, new TimeOnly(20, 0)));
+        var dailyAt = collection.Add(TimeOfDayDefinition(TaskC, TaskKind.DailyAt, new TimeOnly(8, 30)));
+
+        Assert.True(countdown.Succeeded);
+        Assert.True(todayAt.Succeeded);
+        Assert.True(dailyAt.Succeeded);
+        Assert.Equal(3, collection.Count);
+    }
+
     // ===== TaskService 委托（集合化 CRUD 通过 ITaskService 暴露） =====
 
     [Fact]
@@ -317,5 +416,18 @@ public sealed class TaskCollectionTests
             CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
             Priority = priority,
             IsEnabled = isEnabled
+        };
+
+    private static TaskDefinition TimeOfDayDefinition(
+        Guid id,
+        TaskKind kind,
+        TimeOnly? targetTimeOfDay) => new()
+        {
+            Id = id,
+            Kind = kind,
+            Action = PowerAction.Shutdown,
+            TargetTimeOfDay = targetTimeOfDay,
+            WarningSeconds = 60,
+            CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
         };
 }

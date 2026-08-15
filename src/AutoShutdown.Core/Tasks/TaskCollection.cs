@@ -1,20 +1,13 @@
-using AutoShutdown.Core.State;
-
 namespace AutoShutdown.Core.Tasks;
 
 /// <summary>
 /// 任务定义的领域模型集合（内存，无持久化）。提供多任务增删改查与分别启停。
-/// 校验语义：Id 非空且唯一、Action 合法、Priority 在 0~100 内（超出拒绝、不截断）。
+/// 结构校验（Id、Action、Priority、WarningSeconds、Kind/时长/目标时间）统一委托
+/// <see cref="TaskDefinitionValidator"/>，与 TaskService.Create 共用同一套规则。
 /// 本类不引入任何 tasks.json 读写（归 S13-T02B）。
 /// </summary>
 public sealed class TaskCollection
 {
-    public const int MinPriority = 0;
-    public const int MaxPriority = 100;
-
-    private static readonly HashSet<PowerAction> AllowedActions =
-        [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate];
-
     private readonly Dictionary<Guid, TaskDefinition> _items = new();
 
     /// <summary>集合中任务数量。</summary>
@@ -122,25 +115,10 @@ public sealed class TaskCollection
 
     private static TaskCollectionResult Validate(TaskDefinition definition)
     {
-        if (definition.Id == Guid.Empty)
+        var error = TaskDefinitionValidator.GetStructuralError(definition);
+        if (error is not null)
         {
-            return Failure(
-                TaskCollectionStatus.InvalidDefinition,
-                "definition.Id must not be an empty GUID.");
-        }
-
-        if (!AllowedActions.Contains(definition.Action))
-        {
-            return Failure(
-                TaskCollectionStatus.InvalidDefinition,
-                $"Action {definition.Action} is not allowed.");
-        }
-
-        if (definition.Priority is < MinPriority or > MaxPriority)
-        {
-            return Failure(
-                TaskCollectionStatus.InvalidDefinition,
-                $"Priority must be between {MinPriority} and {MaxPriority}; got {definition.Priority}.");
+            return Failure(TaskCollectionStatus.InvalidDefinition, error);
         }
 
         return Success(definition, "The task definition is valid.");

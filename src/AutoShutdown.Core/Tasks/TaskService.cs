@@ -5,12 +5,7 @@ namespace AutoShutdown.Core.Tasks;
 
 public sealed class TaskService : ITaskService
 {
-    private const int MaxWarningSeconds = 86400;
-
     private static readonly TimeSpan MaxSnoozeDuration = TimeSpan.FromDays(7);
-
-    private static readonly HashSet<PowerAction> AllowedActions =
-        [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate];
 
     private readonly INextExecutionCalculator _nextExecutionCalculator;
     private readonly ITaskStateMachine _stateMachine;
@@ -53,23 +48,10 @@ public sealed class TaskService : ITaskService
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(timeZone);
 
-        if (definition.Id == Guid.Empty)
+        var structuralError = TaskDefinitionValidator.GetStructuralError(definition);
+        if (structuralError is not null)
         {
-            return Failure(TaskCommandStatus.InvalidDefinition, "definition.Id must not be an empty GUID.");
-        }
-
-        if (!AllowedActions.Contains(definition.Action))
-        {
-            return Failure(
-                TaskCommandStatus.InvalidDefinition,
-                $"Action {definition.Action} is not allowed.");
-        }
-
-        if (definition.WarningSeconds is < 0 or > MaxWarningSeconds)
-        {
-            return Failure(
-                TaskCommandStatus.InvalidDefinition,
-                "WarningSeconds must be between 0 and 86400.");
+            return Failure(TaskCommandStatus.InvalidDefinition, structuralError);
         }
 
         var schedule = _nextExecutionCalculator.Calculate(definition, now, timeZone);
