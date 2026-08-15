@@ -3,6 +3,7 @@ using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
+using AutoShutdown.Core.Tasks;
 using Xunit;
 
 namespace AutoShutdown.Tests;
@@ -223,6 +224,70 @@ public sealed class ConfigurationServiceTests
     }
 
     [Fact]
+    public async Task LoadTasksAsync_WhenFileMissing_ReturnsNotFound()
+    {
+        var service = new ConfigurationService(new InMemoryStorage());
+
+        var result = await service.LoadTasksAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.NotFound, result.Status);
+        Assert.Null(result.Document);
+    }
+
+    [Fact]
+    public async Task LoadTasksAsync_WhenStorageReportsCorrupt_ReturnsCorruptWithoutFallback()
+    {
+        var storage = new InMemoryStorage { ReadStatus = StorageReadStatus.Corrupt };
+        var service = new ConfigurationService(storage);
+
+        var result = await service.LoadTasksAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.Corrupt, result.Status);
+        Assert.Null(result.Document);
+    }
+
+    [Fact]
+    public async Task LoadTasksAsync_WhenValid_ReturnsDocument()
+    {
+        var storage = new InMemoryStorage();
+        storage.Seed(
+            "tasks.json",
+            """{"SchemaVersion":1,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0}]}""");
+        var service = new ConfigurationService(storage);
+
+        var result = await service.LoadTasksAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.Success, result.Status);
+        Assert.Single(result.Document!.Tasks);
+        Assert.Equal(TaskKind.Countdown, result.Document.Tasks[0].Kind);
+    }
+
+    [Fact]
+    public async Task SaveTasksAsync_WhenValid_WritesToTasksJson()
+    {
+        var storage = new InMemoryStorage();
+        var service = new ConfigurationService(storage);
+
+        var result = await service.SaveTasksAsync(ValidTasksDocument(), CancellationToken.None);
+
+        Assert.Equal(TasksSaveStatus.Success, result.Status);
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "tasks.json" }, storage.WritePaths);
+    }
+
+    [Fact]
+    public async Task ConfigAndTasks_AreWrittenToSeparateFiles()
+    {
+        var storage = new InMemoryStorage();
+        var service = new ConfigurationService(storage);
+
+        await service.SaveAsync(ValidConfig(), CancellationToken.None);
+        await service.SaveTasksAsync(ValidTasksDocument(), CancellationToken.None);
+
+        Assert.Equal(new[] { "config.json", "tasks.json" }, storage.WritePaths);
+    }
+
+    [Fact]
     public void Validator_WhenConfigIsValid_ReportsNoErrors()
     {
         Assert.Empty(ConfigurationValidator.Validate(ValidConfig()));
@@ -243,6 +308,23 @@ public sealed class ConfigurationServiceTests
         DefaultSnoozeSeconds = 300,
         AllowedActions = [PowerAction.Shutdown, PowerAction.Restart],
         Logging = new LoggingConfig { Level = LogLevel.Information, RetentionDays = 14 }
+    };
+
+    private static TasksDocument ValidTasksDocument() => new()
+    {
+        Tasks =
+        [
+            new TaskDefinition
+            {
+                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                Kind = TaskKind.Countdown,
+                Action = PowerAction.Shutdown,
+                CountdownDuration = TimeSpan.FromHours(2),
+                WarningSeconds = 60,
+                CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
+                Priority = 0
+            }
+        ]
     };
 
     private sealed class InMemoryStorage : IStorage

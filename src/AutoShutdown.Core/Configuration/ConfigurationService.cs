@@ -12,6 +12,7 @@ public sealed class ConfigurationService : IConfigurationService
 
     private readonly IStorage _storage;
     private readonly IReadOnlyList<IConfigurationMigration> _migrations;
+    private readonly TasksDocumentStore _tasksStore;
 
     public ConfigurationService(
         IStorage storage,
@@ -20,6 +21,7 @@ public sealed class ConfigurationService : IConfigurationService
         ArgumentNullException.ThrowIfNull(storage);
         _storage = storage;
         _migrations = migrations?.ToList() ?? [];
+        _tasksStore = new TasksDocumentStore(storage);
     }
 
     public async Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken)
@@ -175,6 +177,14 @@ public sealed class ConfigurationService : IConfigurationService
 
         return await SaveAsync(safe, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task<TasksLoadResult> LoadTasksAsync(CancellationToken cancellationToken)
+        => _tasksStore.LoadAsync(cancellationToken);
+
+    public Task<TasksSaveResult> SaveTasksAsync(
+        TasksDocument document,
+        CancellationToken cancellationToken)
+        => _tasksStore.SaveAsync(document, cancellationToken);
 
     private static bool TryReadSchemaVersion(JsonElement root, out int version)
     {
