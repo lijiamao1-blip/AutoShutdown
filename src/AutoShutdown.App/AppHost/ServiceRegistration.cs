@@ -51,7 +51,11 @@ public static class ServiceRegistration
             new LoggingTaskInstanceStateMachineDecorator(
                 provider.GetRequiredService<TaskInstanceStateMachine>(),
                 provider.GetRequiredService<IApplicationLogger>()));
-        services.AddSingleton<ITaskArbitrator, NoOpTaskArbitrator>();
+        services.AddSingleton<TaskArbitrator>();
+        services.AddSingleton<ITaskArbitrator>(provider =>
+            new LoggingTaskArbitratorDecorator(
+                provider.GetRequiredService<TaskArbitrator>(),
+                provider.GetRequiredService<IApplicationLogger>()));
         services.AddSingleton<CrashRecoveryManager>();
         services.AddSingleton<INextExecutionCalculator, NextExecutionCalculator>();
         services.AddSingleton<IIdentifierGenerator, GuidIdentifierGenerator>();
