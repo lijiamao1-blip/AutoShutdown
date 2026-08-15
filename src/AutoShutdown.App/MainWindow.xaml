@@ -211,7 +211,7 @@
                                 </Border>
                                 <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="18,14" Margin="0,0,0,8" Visibility="{Binding HasPendingArbitration, Converter={StaticResource BoolToVisibility}}">
                                     <StackPanel>
-                                        <TextBlock Text="多任务同时到期且存在强制冲突，请选择要立即执行的任务：" FontSize="14" FontWeight="SemiBold" Foreground="#294064" Margin="0,0,0,10"/>
+                                        <TextBlock Text="多任务同时到期且存在强制冲突，请选择需由调度器执行的胜出任务：" FontSize="14" FontWeight="SemiBold" Foreground="#294064" Margin="0,0,0,10"/>
                                         <ItemsControl ItemsSource="{Binding PendingArbitrationItems}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
