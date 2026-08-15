@@ -190,7 +190,97 @@
                         </Grid>
                     </Viewbox>
 
-                    <StackPanel Visibility="{Binding IsPlaceholderVisible, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <!-- 任务管理页（T08：真实任务列表 / 分别启停 / 8 态 / 空错态 / 恢复通知 / 强制冲突询问 / 仲裁结果） -->
+                    <Viewbox Visibility="{Binding IsTasksPageVisible, Converter={StaticResource BoolToVisibility}}" Stretch="Uniform" StretchDirection="Both" Margin="12">
+                        <Grid Width="900" Height="620" Margin="4">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="10"/><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="任务管理" FontSize="26" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="＋  新建任务" Style="{StaticResource PrimaryButtonStyle}" Padding="22,10" HorizontalAlignment="Right" Command="{Binding HomeCommand}"/>
+                            </Grid>
+
+                            <!-- 横幅区：恢复通知 / 仲裁结果 / 强制冲突询问 / 故障状态 -->
+                            <StackPanel Grid.Row="2">
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="16,10" Margin="0,0,0,8" Visibility="{Binding HasRecoveryNotice, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{Binding RecoveryNoticeText}" FontSize="13" Foreground="#C62828" TextWrapping="Wrap"/>
+                                </Border>
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="16,10" Margin="0,0,0,8" Visibility="{Binding HasArbitrationDecision, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{Binding ArbitrationDecisionText}" FontSize="13" Foreground="#29496F" TextWrapping="Wrap"/>
+                                </Border>
+                                <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="18,14" Margin="0,0,0,8" Visibility="{Binding HasPendingArbitration, Converter={StaticResource BoolToVisibility}}">
+                                    <StackPanel>
+                                        <TextBlock Text="多任务同时到期且存在强制冲突，请选择要立即执行的任务：" FontSize="14" FontWeight="SemiBold" Foreground="#294064" Margin="0,0,0,10"/>
+                                        <ItemsControl ItemsSource="{Binding PendingArbitrationItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Margin="0,0,0,8" HorizontalAlignment="Left" Style="{StaticResource SolidBlueButtonStyle}"
+                                                            Command="{Binding DataContext.ResolveArbitrationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding TaskId}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding ActionText}" Margin="0,0,10,0"/>
+                                                            <TextBlock Text="{Binding FireTimeText}" Foreground="#536985"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="16,10" Margin="0,0,0,8" Visibility="{Binding HasSchedulerFault, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{Binding SchedulerFaultText}" FontSize="13" Foreground="#C62828" TextWrapping="Wrap"/>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- 空状态 -->
+                            <StackPanel Grid.Row="4" Visibility="{Binding HasNoTasks, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="暂无任务" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                <TextBlock Text="点击右上角「新建任务」创建第一个定时任务。" FontSize="14" Foreground="{StaticResource TextOnDarkMutedBrush}"/>
+                            </StackPanel>
+
+                            <!-- 任务列表 -->
+                            <Border Grid.Row="4" Style="{StaticResource GlassCardStyle}" Padding="18,14" Visibility="{Binding HasTasks, Converter={StaticResource BoolToVisibility}}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding TaskItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="14,10" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding ActionText}" FontSize="16" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,12,0"/>
+                                                                <TextBlock Text="{Binding StateText}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="#536985">
+                                                                <Run Text="执行时间 "/><Run Text="{Binding FireTimeText, Mode=OneWay}"/>
+                                                                <Run Text="    提醒 "/><Run Text="{Binding WarningText, Mode=OneWay}"/>
+                                                                <Run Text="    倒计时 "/><Run Text="{Binding CountdownText, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Content="延迟10分钟" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
+                                                                    Command="{Binding DataContext.RowSnoozeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding CanSnooze}"/>
+                                                            <Button Content="停止" Style="{StaticResource DangerSolidButtonStyle}" Padding="14,6" Margin="0,0,8,0"
+                                                                    Command="{Binding DataContext.RowStopCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding CanStop}"/>
+                                                            <Button Content="清除" Style="{StaticResource ClearRecordButtonStyle}" Padding="14,6"
+                                                                    Command="{Binding DataContext.RowClearCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding CanClear}"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Viewbox>
+
+                    <StackPanel Visibility="{Binding IsPlaceholderAreaVisible, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <!-- 普通占位页（排除日志页与设置页） -->
                         <StackPanel Visibility="{Binding IsGenericPlaceholderVisible, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Text="{Binding PlaceholderTitle}" FontSize="26" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"/>

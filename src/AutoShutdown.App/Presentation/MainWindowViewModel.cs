@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
+using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.Core.Abstractions;
@@ -22,6 +23,24 @@ public sealed record NavItem(string Title, string Icon, string PageKey, bool IsP
 
 public sealed record RecentActivityItem(string Time, string Text);
 
+/// <summary>任务列表行（T08 UI 切片；由 SchedulerSnapshot.Instances 驱动）。</summary>
+public sealed record TaskListItem(
+    Guid TaskId,
+    Guid InstanceId,
+    Guid StageToken,
+    string ActionText,
+    string StateText,
+    string FireTimeText,
+    string CountdownText,
+    string WarningText,
+    TaskInstanceState State,
+    bool CanStop,
+    bool CanSnooze,
+    bool CanClear);
+
+/// <summary>强制冲突待决仲裁的候选任务（供 UI 询问用户）。</summary>
+public sealed record PendingArbitrationItem(Guid TaskId, string ActionText, string FireTimeText);
+
 public sealed class MainWindowViewModel : ObservableObject
 {
     private const int MaxRecentActivities = 20;
@@ -34,6 +53,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _autoStartConfirmation;
     private readonly Func<bool>? _cancelConfirmation;
     private readonly Func<bool>? _realPowerConfirmation;
+    private readonly RecoveryNoticeService? _recoveryNoticeService;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -56,7 +76,8 @@ public sealed class MainWindowViewModel : ObservableObject
         IAutoStartService autoStart,
         Func<bool>? autoStartConfirmation = null,
         Func<bool>? cancelConfirmation = null,
-        Func<bool>? realPowerConfirmation = null)
+        Func<bool>? realPowerConfirmation = null,
+        RecoveryNoticeService? recoveryNotice = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -72,11 +93,12 @@ public sealed class MainWindowViewModel : ObservableObject
         _autoStartConfirmation = autoStartConfirmation;
         _cancelConfirmation = cancelConfirmation;
         _realPowerConfirmation = realPowerConfirmation;
+        _recoveryNoticeService = recoveryNotice;
 
         NavItems =
         [
             new NavItem("首页", "⌂", "home", false),
-            new NavItem("任务管理", "▤", "tasks", true),
+            new NavItem("任务管理", "▤", "tasks", false),
             new NavItem("高级功能", "◈", "advanced", true),
             new NavItem("网络唤醒", "⇪", "wol", true),
             new NavItem("日志与诊断", "▤", "logs", true),
@@ -112,6 +134,10 @@ public sealed class MainWindowViewModel : ObservableObject
         EnableAutoStartCommand = new AsyncRelayCommand(ExecuteEnableAutoStartAsync, () => !IsAutoStartBusy);
         DisableAutoStartCommand = new AsyncRelayCommand(ExecuteDisableAutoStartAsync, () => !IsAutoStartBusy);
         RepairAutoStartCommand = new AsyncRelayCommand(ExecuteRepairAutoStartAsync, () => !IsAutoStartBusy);
+        RowSnoozeCommand = new RelayCommand(RowSnooze);
+        RowStopCommand = new RelayCommand(RowStop);
+        RowClearCommand = new RelayCommand(RowClear);
+        ResolveArbitrationCommand = new RelayCommand(ResolveArbitration);
     }
 
     // ---- 导航 ----
@@ -129,10 +155,12 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(IsHomeVisible));
                 OnPropertyChanged(nameof(IsPlaceholderVisible));
+                OnPropertyChanged(nameof(IsPlaceholderAreaVisible));
                 OnPropertyChanged(nameof(PlaceholderTitle));
                 OnPropertyChanged(nameof(IsTaskSummaryVisible));
                 OnPropertyChanged(nameof(IsLogsPageVisible));
                 OnPropertyChanged(nameof(IsSettingsPageVisible));
+                OnPropertyChanged(nameof(IsTasksPageVisible));
                 OnPropertyChanged(nameof(IsGenericPlaceholderVisible));
             }
         }
@@ -166,9 +194,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsSettingsPageVisible => SelectedNav.PageKey == "settings";
 
-    /// <summary>普通占位页：非首页、非日志页、非设置页时才显示。</summary>
+    public bool IsTasksPageVisible => SelectedNav.PageKey == "tasks";
+
+    /// <summary>占位区（日志页/设置页/普通占位页）；任务管理页拥有真实页面，不进入占位区。</summary>
+    public bool IsPlaceholderAreaVisible => IsPlaceholderVisible && !IsTasksPageVisible;
+
+    /// <summary>普通占位页：非首页、非日志页、非设置页、非任务管理页时才显示。</summary>
     public bool IsGenericPlaceholderVisible
-        => IsPlaceholderVisible && !IsLogsPageVisible && !IsSettingsPageVisible;
+        => IsPlaceholderVisible
+            && !IsLogsPageVisible
+            && !IsSettingsPageVisible
+            && !IsTasksPageVisible;
 
     public string LogDirectory => _logger.LogDirectory;
 
@@ -504,6 +540,68 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _canClear, value);
     }
 
+    // ---- 任务列表与仲裁（T08 UI 切片） ----
+
+    public ObservableCollection<TaskListItem> TaskItems { get; } = [];
+
+    public ObservableCollection<PendingArbitrationItem> PendingArbitrationItems { get; } = [];
+
+    private bool _hasTasks;
+
+    public bool HasTasks
+    {
+        get => _hasTasks;
+        private set => SetProperty(ref _hasTasks, value);
+    }
+
+    private bool _hasNoTasks;
+
+    public bool HasNoTasks
+    {
+        get => _hasNoTasks;
+        private set => SetProperty(ref _hasNoTasks, value);
+    }
+
+    private bool _hasPendingArbitration;
+
+    public bool HasPendingArbitration
+    {
+        get => _hasPendingArbitration;
+        private set => SetProperty(ref _hasPendingArbitration, value);
+    }
+
+    private string _arbitrationDecisionText = string.Empty;
+
+    public string ArbitrationDecisionText
+    {
+        get => _arbitrationDecisionText;
+        private set
+        {
+            if (SetProperty(ref _arbitrationDecisionText, value))
+            {
+                OnPropertyChanged(nameof(HasArbitrationDecision));
+            }
+        }
+    }
+
+    public bool HasArbitrationDecision => !string.IsNullOrEmpty(_arbitrationDecisionText);
+
+    private string _recoveryNoticeText = string.Empty;
+
+    public string RecoveryNoticeText
+    {
+        get => _recoveryNoticeText;
+        private set
+        {
+            if (SetProperty(ref _recoveryNoticeText, value))
+            {
+                OnPropertyChanged(nameof(HasRecoveryNotice));
+            }
+        }
+    }
+
+    public bool HasRecoveryNotice => !string.IsNullOrEmpty(_recoveryNoticeText);
+
     // ---- 状态卡 ----
 
     private string _schedulerStatusText = "未知状态";
@@ -519,8 +617,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public string SchedulerFaultText
     {
         get => _schedulerFaultText;
-        private set => SetProperty(ref _schedulerFaultText, value);
+        private set
+        {
+            if (SetProperty(ref _schedulerFaultText, value))
+            {
+                OnPropertyChanged(nameof(HasSchedulerFault));
+            }
+        }
     }
+
+    public bool HasSchedulerFault => !string.IsNullOrEmpty(_schedulerFaultText);
 
     public string ConfigStatusText
     {
@@ -802,6 +908,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand HomeCommand { get; }
 
+    public ICommand RowSnoozeCommand { get; }
+
+    public ICommand RowStopCommand { get; }
+
+    public ICommand RowClearCommand { get; }
+
+    public ICommand ResolveArbitrationCommand { get; }
+
     public AsyncRelayCommand InitializeConfigCommand { get; }
 
     public async Task InitializeAsync()
@@ -809,6 +923,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Refresh(GetSnapshot(), _clock.UtcNow);
         await RefreshConfigurationAsync();
         RefreshAutoStart();
+        RefreshRecoveryNotice();
     }
 
     public async Task RefreshConfigurationAsync()
@@ -912,6 +1027,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SchedulerFaultText = snapshot.EngineStatus == SchedulerEngineStatus.Faulted
             ? (snapshot.FaultMessage ?? "调度服务发生故障")
             : string.Empty;
+
+        // 任务列表与仲裁呈现独立于「主实例」选择，始终刷新。
+        RefreshTaskList(snapshot, now);
+        RefreshArbitration(snapshot);
 
         var instance = SelectPrimaryInstance(snapshot);
         if (instance is null)
@@ -1201,6 +1320,193 @@ public sealed class MainWindowViewModel : ObservableObject
             new ClearTerminalTaskCommand(instance.InstanceId),
             "清除当前记录");
     }
+
+    private void RowSnooze(object? parameter)
+    {
+        if (parameter is not TaskListItem item || _isSubmitting)
+        {
+            return;
+        }
+
+        _ = SubmitCommandAsync(
+            new SnoozeTaskCommand(item.InstanceId, item.StageToken, TimeSpan.FromMinutes(10)),
+            "延迟10分钟");
+    }
+
+    private void RowStop(object? parameter)
+    {
+        if (parameter is not TaskListItem item || _isSubmitting)
+        {
+            return;
+        }
+
+        var confirmed = _cancelConfirmation is not null
+            ? _cancelConfirmation()
+            : System.Windows.MessageBox.Show(
+                "停止后任务将不再执行。",
+                "停止任务",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning) == MessageBoxResult.OK;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _ = SubmitCommandAsync(
+            new CancelTaskCommand(item.InstanceId, item.StageToken),
+            "停止任务");
+    }
+
+    private void RowClear(object? parameter)
+    {
+        if (parameter is not TaskListItem item || _isSubmitting)
+        {
+            return;
+        }
+
+        _ = SubmitCommandAsync(
+            new ClearTerminalTaskCommand(item.InstanceId),
+            "清除记录");
+    }
+
+    private void ResolveArbitration(object? parameter)
+    {
+        if (parameter is not Guid taskId || _isSubmitting)
+        {
+            return;
+        }
+
+        _ = SubmitCommandAsync(
+            new ResolveArbitrationCommand(taskId),
+            "仲裁决策");
+    }
+
+    /// <summary>
+    /// 由 SchedulerSnapshot.Instances 构建任务列表（仅消费快照，不拥有调度循环/持久化）。
+    /// </summary>
+    private void RefreshTaskList(SchedulerSnapshot snapshot, DateTimeOffset now)
+    {
+        var instances = snapshot.Instances.Values
+            .OrderBy(instance => instance.ScheduledFireTime)
+            .ThenBy(instance => instance.SourceTaskId)
+            .ToList();
+
+        TaskItems.Clear();
+        foreach (var instance in instances)
+        {
+            var localFire = TimeZoneInfo.ConvertTime(instance.ScheduledFireTime, _clock.LocalTimeZone);
+            var localWarning = instance.WarningStartTime is null
+                ? (DateTimeOffset?)null
+                : TimeZoneInfo.ConvertTime(instance.WarningStartTime.Value, _clock.LocalTimeZone);
+            var remaining = instance.ScheduledFireTime - now;
+            TaskItems.Add(new TaskListItem(
+                instance.SourceTaskId,
+                instance.InstanceId,
+                instance.StageToken,
+                UiTextMapper.Map(instance.ActionSnapshot),
+                UiTextMapper.Map(instance.State),
+                localFire.ToString("yyyy-MM-dd HH:mm:ss"),
+                remaining > TimeSpan.Zero ? remaining.ToString(@"hh\:mm\:ss") : "已到期",
+                localWarning?.ToString("HH:mm:ss") ?? "无",
+                instance.State,
+                instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming,
+                instance.State == TaskInstanceState.Waiting,
+                instance.State is TaskInstanceState.Cancelled
+                    or TaskInstanceState.Executed
+                    or TaskInstanceState.Faulted
+                    or TaskInstanceState.Interrupted));
+        }
+
+        HasTasks = instances.Count > 0;
+        HasNoTasks = instances.Count == 0;
+    }
+
+    /// <summary>
+    /// 呈现待决强制冲突（询问用户）与最近一次仲裁结果（赢家/合并/改期/理由）。
+    /// </summary>
+    private void RefreshArbitration(SchedulerSnapshot snapshot)
+    {
+        if (snapshot.PendingArbitration is { } pending)
+        {
+            PendingArbitrationItems.Clear();
+            foreach (var taskId in pending.CandidateTaskIds)
+            {
+                if (!snapshot.Instances.TryGetValue(taskId, out var instance))
+                {
+                    continue;
+                }
+
+                var localFire = TimeZoneInfo.ConvertTime(instance.ScheduledFireTime, _clock.LocalTimeZone);
+                PendingArbitrationItems.Add(new PendingArbitrationItem(
+                    taskId,
+                    UiTextMapper.Map(instance.ActionSnapshot),
+                    localFire.ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+
+            HasPendingArbitration = true;
+        }
+        else
+        {
+            PendingArbitrationItems.Clear();
+            HasPendingArbitration = false;
+        }
+
+        if (snapshot.LastArbitration is { } outcome)
+        {
+            var parts = new List<string>();
+            if (outcome.WinnerTaskId is { } winnerId)
+            {
+                parts.Add("赢家执行：" + DescribeTask(snapshot, winnerId));
+            }
+
+            if (outcome.MergedTaskIds.Count > 0)
+            {
+                parts.Add("合并：" + string.Join("、", outcome.MergedTaskIds.Select(id => DescribeTask(snapshot, id))));
+            }
+
+            if (outcome.RescheduledTaskIds.Count > 0)
+            {
+                parts.Add("改期：" + string.Join("、", outcome.RescheduledTaskIds.Select(id => DescribeTask(snapshot, id))));
+            }
+
+            var suffix = string.IsNullOrEmpty(outcome.DecisionReason)
+                ? string.Empty
+                : "（" + outcome.DecisionReason + "）";
+            ArbitrationDecisionText = "多任务冲突已仲裁：" + string.Join("；", parts) + "。" + suffix;
+        }
+        else
+        {
+            ArbitrationDecisionText = string.Empty;
+        }
+    }
+
+    /// <summary>启动链写入的崩溃恢复通知 → 恢复横幅。</summary>
+    private void RefreshRecoveryNotice()
+    {
+        var notice = _recoveryNoticeService?.Notice;
+        if (notice is not null && notice.InterruptedTaskIds.Count > 0)
+        {
+            RecoveryNoticeText = "上次异常退出后已恢复："
+                + notice.InterruptedTaskIds.Count + " 个任务被标记为中断（不会补执行）："
+                + string.Join("、", notice.InterruptedTaskIds.Select(ShortId)) + "。";
+        }
+        else
+        {
+            RecoveryNoticeText = string.Empty;
+        }
+    }
+
+    private static string DescribeTask(SchedulerSnapshot snapshot, Guid taskId)
+    {
+        if (snapshot.Instances.TryGetValue(taskId, out var instance))
+        {
+            return UiTextMapper.Map(instance.ActionSnapshot) + "（" + ShortId(taskId) + "）";
+        }
+
+        return ShortId(taskId);
+    }
+
+    private static string ShortId(Guid id) => id.ToString("N")[..8].ToUpperInvariant();
 
     private async Task SubmitCommandAsync(SchedulerCommand command, string displayName)
     {

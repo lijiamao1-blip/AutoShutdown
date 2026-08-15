@@ -19,6 +19,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private readonly CrashRecoveryManager _crashRecoveryManager;
     private readonly DashboardRefreshService _dashboardRefreshService;
     private readonly NotificationCoordinator _notificationCoordinator;
+    private readonly RecoveryNoticeService _recoveryNotice;
     private readonly IApplicationLogger _logger;
     private readonly LogRetentionService _logRetention;
     private readonly CancellationTokenSource _appCts = new();
@@ -38,6 +39,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         CrashRecoveryManager crashRecoveryManager,
         DashboardRefreshService dashboardRefreshService,
         NotificationCoordinator notificationCoordinator,
+        RecoveryNoticeService recoveryNotice,
         IApplicationLogger logger,
         LogRetentionService logRetention)
     {
@@ -49,6 +51,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(crashRecoveryManager);
         ArgumentNullException.ThrowIfNull(dashboardRefreshService);
         ArgumentNullException.ThrowIfNull(notificationCoordinator);
+        ArgumentNullException.ThrowIfNull(recoveryNotice);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(logRetention);
 
@@ -60,6 +63,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _crashRecoveryManager = crashRecoveryManager;
         _dashboardRefreshService = dashboardRefreshService;
         _notificationCoordinator = notificationCoordinator;
+        _recoveryNotice = recoveryNotice;
         _logger = logger;
         _logRetention = logRetention;
     }
@@ -91,6 +95,11 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         try
         {
             var result = _crashRecoveryManager.RecoverAsync(_appCts.Token).GetAwaiter().GetResult();
+
+            // 恢复通知交给 UI 检查点（T08）呈现横幅；只读，不持久化。
+            _recoveryNotice.Notice = result.InterruptedTaskIds.Count > 0
+                ? new RecoveryNotice(result.InterruptedTaskIds)
+                : null;
 
             foreach (var taskId in result.InterruptedTaskIds)
             {

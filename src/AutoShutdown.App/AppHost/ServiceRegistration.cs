@@ -85,6 +85,7 @@ public static class ServiceRegistration
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();
         services.AddSingleton<ActivationPipeServer>();
+        services.AddSingleton<RecoveryNoticeService>();
         services.AddSingleton<ApplicationLifetimeCoordinator>();
 
         // Auto-start infrastructure. The registry store is lazy (no registry
