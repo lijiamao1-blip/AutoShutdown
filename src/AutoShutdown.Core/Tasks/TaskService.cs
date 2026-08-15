@@ -15,6 +15,7 @@ public sealed class TaskService : ITaskService
     private readonly INextExecutionCalculator _nextExecutionCalculator;
     private readonly ITaskStateMachine _stateMachine;
     private readonly IIdentifierGenerator _identifierGenerator;
+    private readonly TaskCollection _tasks = new();
 
     public TaskService(
         INextExecutionCalculator nextExecutionCalculator,
@@ -29,6 +30,20 @@ public sealed class TaskService : ITaskService
         _stateMachine = stateMachine;
         _identifierGenerator = identifierGenerator;
     }
+
+    // ===== 任务定义领域模型集合化 CRUD（S13-T02A，内存领域模型，无持久化） =====
+
+    public TaskCollectionResult Add(TaskDefinition definition) => _tasks.Add(definition);
+
+    public TaskCollectionResult Update(TaskDefinition definition) => _tasks.Update(definition);
+
+    public TaskCollectionResult Remove(Guid taskId) => _tasks.Remove(taskId);
+
+    public TaskCollectionResult SetEnabled(Guid taskId, bool isEnabled) => _tasks.SetEnabled(taskId, isEnabled);
+
+    public TaskDefinition? Get(Guid taskId) => _tasks.Get(taskId);
+
+    public IReadOnlyCollection<TaskDefinition> GetAll() => _tasks.Items;
 
     public TaskCommandResult Create(
         TaskDefinition definition,

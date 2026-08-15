@@ -1,0 +1,161 @@
+using AutoShutdown.Core.State;
+
+namespace AutoShutdown.Core.Tasks;
+
+/// <summary>
+/// 任务定义的领域模型集合（内存，无持久化）。提供多任务增删改查与分别启停。
+/// 校验语义：Id 非空且唯一、Action 合法、Priority 在 0~100 内（超出拒绝、不截断）。
+/// 本类不引入任何 tasks.json 读写（归 S13-T02B）。
+/// </summary>
+public sealed class TaskCollection
+{
+    public const int MinPriority = 0;
+    public const int MaxPriority = 100;
+
+    private static readonly HashSet<PowerAction> AllowedActions =
+        [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate];
+
+    private readonly Dictionary<Guid, TaskDefinition> _items = new();
+
+    /// <summary>集合中任务数量。</summary>
+    public int Count => _items.Count;
+
+    /// <summary>当前全部任务定义的快照（无内部状态泄漏）。</summary>
+    public IReadOnlyCollection<TaskDefinition> Items => _items.Values.ToArray();
+
+    /// <summary>新增任务定义（Id 已存在则拒绝）。</summary>
+    public TaskCollectionResult Add(TaskDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var validation = Validate(definition);
+        if (!validation.Succeeded)
+        {
+            return validation;
+        }
+
+        if (_items.ContainsKey(definition.Id))
+        {
+            return Failure(
+                TaskCollectionStatus.DuplicateId,
+                $"A task with id {definition.Id} already exists.");
+        }
+
+        _items.Add(definition.Id, definition);
+        return Success(definition, "The task definition was added.");
+    }
+
+    /// <summary>更新已存在的任务定义（Id 必须存在且不变）。</summary>
+    public TaskCollectionResult Update(TaskDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var validation = Validate(definition);
+        if (!validation.Succeeded)
+        {
+            return validation;
+        }
+
+        if (!_items.ContainsKey(definition.Id))
+        {
+            return Failure(
+                TaskCollectionStatus.NotFound,
+                $"A task with id {definition.Id} does not exist.");
+        }
+
+        _items[definition.Id] = definition;
+        return Success(definition, "The task definition was updated.");
+    }
+
+    /// <summary>移除任务定义（Id 不存在则拒绝）。</summary>
+    public TaskCollectionResult Remove(Guid taskId)
+    {
+        if (taskId == Guid.Empty)
+        {
+            return Failure(
+                TaskCollectionStatus.InvalidDefinition,
+                "taskId must not be an empty GUID.");
+        }
+
+        if (!_items.Remove(taskId))
+        {
+            return Failure(
+                TaskCollectionStatus.NotFound,
+                $"A task with id {taskId} does not exist.");
+        }
+
+        return Success(null, "The task definition was removed.");
+    }
+
+    /// <summary>分别启用/禁用任务（Id 不存在则拒绝）。</summary>
+    public TaskCollectionResult SetEnabled(Guid taskId, bool isEnabled)
+    {
+        if (taskId == Guid.Empty)
+        {
+            return Failure(
+                TaskCollectionStatus.InvalidDefinition,
+                "taskId must not be an empty GUID.");
+        }
+
+        if (!_items.TryGetValue(taskId, out var existing))
+        {
+            return Failure(
+                TaskCollectionStatus.NotFound,
+                $"A task with id {taskId} does not exist.");
+        }
+
+        var updated = existing with { IsEnabled = isEnabled };
+        _items[taskId] = updated;
+        return Success(updated, isEnabled ? "The task was enabled." : "The task was disabled.");
+    }
+
+    /// <summary>按 Id 获取任务定义；不存在返回 null。</summary>
+    public TaskDefinition? Get(Guid taskId)
+        => _items.TryGetValue(taskId, out var definition) ? definition : null;
+
+    /// <summary>按 Id 尝试获取任务定义。</summary>
+    public bool TryGet(Guid taskId, out TaskDefinition? definition)
+        => _items.TryGetValue(taskId, out definition);
+
+    /// <summary>是否存在指定 Id 的任务。</summary>
+    public bool Contains(Guid taskId) => _items.ContainsKey(taskId);
+
+    private static TaskCollectionResult Validate(TaskDefinition definition)
+    {
+        if (definition.Id == Guid.Empty)
+        {
+            return Failure(
+                TaskCollectionStatus.InvalidDefinition,
+                "definition.Id must not be an empty GUID.");
+        }
+
+        if (!AllowedActions.Contains(definition.Action))
+        {
+            return Failure(
+                TaskCollectionStatus.InvalidDefinition,
+                $"Action {definition.Action} is not allowed.");
+        }
+
+        if (definition.Priority is < MinPriority or > MaxPriority)
+        {
+            return Failure(
+                TaskCollectionStatus.InvalidDefinition,
+                $"Priority must be between {MinPriority} and {MaxPriority}; got {definition.Priority}.");
+        }
+
+        return Success(definition, "The task definition is valid.");
+    }
+
+    private static TaskCollectionResult Success(TaskDefinition? definition, string message) => new()
+    {
+        Status = TaskCollectionStatus.Success,
+        Definition = definition,
+        Message = message
+    };
+
+    private static TaskCollectionResult Failure(TaskCollectionStatus status, string message) => new()
+    {
+        Status = status,
+        Message = message
+    };
+}
