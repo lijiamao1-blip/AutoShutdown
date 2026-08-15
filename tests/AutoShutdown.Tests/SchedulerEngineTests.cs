@@ -67,47 +67,15 @@ public sealed class SchedulerEngineTests
     [Fact(Timeout = 2000)]
     public async Task Run_WhenRuntimeStateIsInvalid_Faults()
     {
-        await AssertInvalidRecoveryFaultsAsync("null");
-        await AssertInvalidRecoveryFaultsAsync(
+        await AssertInvalidRuntimeStateFaultsAsync("null");
+        await AssertInvalidRuntimeStateFaultsAsync(
             """{"SchemaVersion":2,"Instances":null,"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
-        await AssertInvalidRecoveryFaultsAsync(
+        await AssertInvalidRuntimeStateFaultsAsync(
             """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"00000000-0000-0000-0000-000000000000","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":1,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
     }
 
     [Fact(Timeout = 2000)]
-    public async Task Run_RecoversWarningAndExecutingToInterrupted_WithoutHandler()
-    {
-        var warningStorage = new InMemoryStorage();
-        warningStorage.Seed("runtime.json", WarningRuntimeJson);
-        var warningEngine = CreateEngine(warningStorage, new FakeClock(ClockBase), new ControllableDeadline(), new FakeHandler());
-
-        using (var scope = new EngineScope(warningEngine))
-        {
-            await WaitUntilAsync(() =>
-                Current(warningEngine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
-
-            var interrupted = Current(warningEngine.GetSnapshot())!;
-            Assert.Equal(TaskInstanceState.Interrupted, interrupted.State);
-            Assert.False(interrupted.HasExecuted);
-            Assert.Equal(1, warningStorage.WriteCount);
-        }
-
-        var executingStorage = new InMemoryStorage();
-        executingStorage.Seed("runtime.json", ExecutingRuntimeJson);
-        var executingEngine = CreateEngine(executingStorage, new FakeClock(ClockBase), new ControllableDeadline(), new FakeHandler());
-
-        using (var scope = new EngineScope(executingEngine))
-        {
-            await WaitUntilAsync(() =>
-                Current(executingEngine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
-
-            Assert.True(Current(executingEngine.GetSnapshot())!.HasExecuted);
-            Assert.Equal(1, executingStorage.WriteCount);
-        }
-    }
-
-    [Fact(Timeout = 2000)]
-    public async Task Run_WhenRecoveredScheduledIsInFuture_EstablishesWait()
+    public async Task Run_WhenRestoredScheduledIsInFuture_EstablishesWait()
     {
         var storage = new InMemoryStorage();
         storage.Seed("runtime.json", FutureScheduledRuntimeJson);
@@ -848,25 +816,6 @@ public sealed class SchedulerEngineTests
         Assert.Single(power.Invocations);
     }
 
-    [Fact(Timeout = 2000)]
-    public async Task RecoveredInstances_NeverInvokeWorkflowOrPower()
-    {
-        var storage = new InMemoryStorage();
-        storage.Seed("runtime.json", WarningRuntimeJson);
-        var power = new FakePowerService();
-        var engine = CreateWorkflowEngine(
-            storage,
-            new FakeClock(ClockBase),
-            new ControllableDeadline(),
-            power,
-            new FixedConfigurationService(SuccessConfig()));
-
-        using var scope = new EngineScope(engine);
-        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
-
-        Assert.Empty(power.Invocations);
-    }
-
     [Fact]
     public void AppCompositionRoot_RegistersGuardedPowerAndShutdownHandler_WithoutRealPowerApis()
     {
@@ -940,7 +889,7 @@ public sealed class SchedulerEngineTests
     private static TaskInstance? Current(SchedulerSnapshot snapshot)
         => snapshot.Instances.Values.FirstOrDefault();
 
-    private static async Task AssertInvalidRecoveryFaultsAsync(string json)
+    private static async Task AssertInvalidRuntimeStateFaultsAsync(string json)
     {
         var storage = new InMemoryStorage();
         storage.Seed("runtime.json", json);
@@ -1037,12 +986,6 @@ public sealed class SchedulerEngineTests
             await Task.Delay(5);
         }
     }
-
-    private const string WarningRuntimeJson =
-        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
-
-    private const string ExecutingRuntimeJson =
-        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private const string FutureScheduledRuntimeJson =
         """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":1,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";

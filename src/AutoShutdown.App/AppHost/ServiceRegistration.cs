@@ -9,6 +9,7 @@ using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Power;
+using AutoShutdown.Core.Recovery;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
@@ -51,6 +52,7 @@ public static class ServiceRegistration
                 provider.GetRequiredService<TaskInstanceStateMachine>(),
                 provider.GetRequiredService<IApplicationLogger>()));
         services.AddSingleton<ITaskArbitrator, NoOpTaskArbitrator>();
+        services.AddSingleton<CrashRecoveryManager>();
         services.AddSingleton<INextExecutionCalculator, NextExecutionCalculator>();
         services.AddSingleton<IIdentifierGenerator, GuidIdentifierGenerator>();
         services.AddSingleton<ITaskService, TaskService>();

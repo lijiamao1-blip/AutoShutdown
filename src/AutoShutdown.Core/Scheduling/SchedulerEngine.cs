@@ -203,6 +203,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
 
     private async Task<bool> TryRestoreAsync(CancellationToken cancellationToken)
     {
+        // 崩溃恢复已迁出至 CrashRecoveryManager（启动链在调度循环前执行）；
+        // 引擎此处只载入（已恢复的）运行态并建立初始快照，不再做瞬态实例中断。
         var load = await _runtimeStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         switch (load.Status)
@@ -221,7 +223,17 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 return true;
             case RuntimeStateLoadStatus.Success:
             case RuntimeStateLoadStatus.Migrated:
-                break;
+                lock (_sync)
+                {
+                    _snapshot = new SchedulerSnapshot
+                    {
+                        EngineStatus = SchedulerEngineStatus.Running,
+                        Instances = load.State!.Instances,
+                        LastUpdatedAt = load.State!.LastUpdatedAt
+                    };
+                }
+
+                return true;
             case RuntimeStateLoadStatus.Corrupt:
                 SetFaulted("The runtime state file is corrupt: " + JoinErrors(load.Errors));
                 return false;
@@ -234,71 +246,6 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 SetFaulted("The runtime state is invalid: " + JoinErrors(load.Errors));
                 return false;
         }
-
-        var state = load.State!;
-        var now = _clock.UtcNow.ToUniversalTime();
-
-        if (!TryRecoverTransientInstances(state.Instances, out var instances))
-        {
-            return false;
-        }
-
-        if (!ReferenceEquals(instances, state.Instances))
-        {
-            // At least one transient instance was interrupted → persist the recovered state.
-            if (!await PersistAndCommitAsync(instances, now, cancellationToken).ConfigureAwait(false))
-            {
-                return false;
-            }
-        }
-        else
-        {
-            lock (_sync)
-            {
-                _snapshot = new SchedulerSnapshot
-                {
-                    EngineStatus = SchedulerEngineStatus.Running,
-                    Instances = state.Instances,
-                    LastUpdatedAt = state.LastUpdatedAt
-                };
-            }
-        }
-
-        return true;
-    }
-
-    private bool TryRecoverTransientInstances(
-        IReadOnlyDictionary<Guid, TaskInstance> source,
-        out IReadOnlyDictionary<Guid, TaskInstance> result)
-    {
-        var copy = new Dictionary<Guid, TaskInstance>(source);
-        result = copy;
-
-        foreach (var (taskId, instance) in source)
-        {
-            if (instance.State is not (
-                TaskInstanceState.Running
-                or TaskInstanceState.Confirming
-                or TaskInstanceState.Executing))
-            {
-                continue;
-            }
-
-            var transition = _stateMachine.TryTransition(
-                instance.State,
-                TaskInstanceState.Interrupted,
-                TaskInstanceStateTransitionCause.CrashRecovered,
-                SourceName);
-            if (!transition.Allowed)
-            {
-                SetFaulted("A recovered transient instance cannot be interrupted: " + transition.Reason);
-                return false;
-            }
-
-            copy[taskId] = instance with { State = TaskInstanceState.Interrupted };
-        }
-
-        return true;
     }
 
     private async Task<bool> TryProcessDueAsync(CancellationToken cancellationToken)

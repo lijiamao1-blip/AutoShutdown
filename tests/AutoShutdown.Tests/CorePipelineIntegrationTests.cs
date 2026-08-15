@@ -210,36 +210,6 @@ public sealed class CorePipelineIntegrationTests
             new[] { SchedulerCommandStatus.Faulted, SchedulerCommandStatus.NotRunning });
     }
 
-    // ---- F. 崩溃恢复绝不补执行 ----
-
-    [Fact(Timeout = 2000)]
-    public async Task F_RecoverWarning_Interrupted_NoExecution()
-    {
-        var storage = new InMemoryStorage();
-        storage.Seed("runtime.json", WarningRuntimeJson);
-        using var harness = new Harness(storage: storage, startRunning: true);
-
-        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Interrupted);
-
-        Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(0, harness.Configuration.LoadCount);
-        Assert.False(harness.CurrentInstance!.HasExecuted);
-    }
-
-    [Fact(Timeout = 2000)]
-    public async Task F_RecoverExecuting_Interrupted_NoExecution()
-    {
-        var storage = new InMemoryStorage();
-        storage.Seed("runtime.json", ExecutingRuntimeJson);
-        using var harness = new Harness(storage: storage, startRunning: true);
-
-        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Interrupted);
-
-        Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(0, harness.Configuration.LoadCount);
-        Assert.True(harness.CurrentInstance!.HasExecuted);
-    }
-
     // ---- G. 重复与过期回调 ----
 
     [Fact(Timeout = 2000)]
@@ -528,12 +498,6 @@ public sealed class CorePipelineIntegrationTests
             await Task.Delay(5);
         }
     }
-
-    private const string WarningRuntimeJson =
-        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
-
-    private const string ExecutingRuntimeJson =
-        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private sealed class Harness : IDisposable
     {

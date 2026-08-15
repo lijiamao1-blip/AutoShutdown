@@ -5,6 +5,7 @@ using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Recovery;
 
 namespace AutoShutdown.App.AppHost;
 
@@ -15,6 +16,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private readonly TrayIconService _trayIcon;
     private readonly ActivationPipeServer _pipeServer;
     private readonly ISchedulerEngine _schedulerEngine;
+    private readonly CrashRecoveryManager _crashRecoveryManager;
     private readonly DashboardRefreshService _dashboardRefreshService;
     private readonly NotificationCoordinator _notificationCoordinator;
     private readonly IApplicationLogger _logger;
@@ -33,6 +35,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         TrayIconService trayIcon,
         ActivationPipeServer pipeServer,
         ISchedulerEngine schedulerEngine,
+        CrashRecoveryManager crashRecoveryManager,
         DashboardRefreshService dashboardRefreshService,
         NotificationCoordinator notificationCoordinator,
         IApplicationLogger logger,
@@ -43,6 +46,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(trayIcon);
         ArgumentNullException.ThrowIfNull(pipeServer);
         ArgumentNullException.ThrowIfNull(schedulerEngine);
+        ArgumentNullException.ThrowIfNull(crashRecoveryManager);
         ArgumentNullException.ThrowIfNull(dashboardRefreshService);
         ArgumentNullException.ThrowIfNull(notificationCoordinator);
         ArgumentNullException.ThrowIfNull(logger);
@@ -53,6 +57,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _trayIcon = trayIcon;
         _pipeServer = pipeServer;
         _schedulerEngine = schedulerEngine;
+        _crashRecoveryManager = crashRecoveryManager;
         _dashboardRefreshService = dashboardRefreshService;
         _notificationCoordinator = notificationCoordinator;
         _logger = logger;
@@ -64,6 +69,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         System.Windows.Application.Current.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _logRetention.RunOnce();
         _logger.Info("SchedulerStarting", "调度引擎启动中。");
+        RecoverFromCrash();
         _pipeServer.Start();
         _engineTask = _schedulerEngine.RunAsync(_appCts.Token);
         _logger.Info("SchedulerRunning", "调度引擎已启动。");
@@ -74,6 +80,40 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _notificationCoordinator.Start();
         _windowActivation.ActivateMainWindow();
         _logger.Info("ApplicationStarted", "应用启动完成。");
+    }
+
+    /// <summary>
+    /// 调度循环前执行崩溃恢复。启动期间同步阻塞：恢复必须完成后再启动调度，
+    /// 否则瞬态实例可能被调度循环当作在途任务继续执行。
+    /// </summary>
+    private void RecoverFromCrash()
+    {
+        try
+        {
+            var result = _crashRecoveryManager.RecoverAsync(_appCts.Token).GetAwaiter().GetResult();
+
+            foreach (var taskId in result.InterruptedTaskIds)
+            {
+                _logger.Warning(
+                    "CrashRecovered",
+                    "崩溃恢复：任务 " + taskId + " 已标记为中断（interrupted），不补执行。");
+            }
+
+            if (result.Status is CrashRecoveryStatus.Recovered
+                or CrashRecoveryStatus.NoRecoveryNeeded
+                or CrashRecoveryStatus.NotFound)
+            {
+                return;
+            }
+
+            _logger.Error(
+                "CrashRecoveryFailed",
+                "崩溃恢复失败：" + string.Join(" ", result.Errors));
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("CrashRecoveryFailed", "崩溃恢复异常：" + exception.Message, exception);
+        }
     }
 
     public void RequestExit()
