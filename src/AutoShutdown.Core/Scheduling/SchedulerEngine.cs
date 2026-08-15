@@ -9,17 +9,17 @@ namespace AutoShutdown.Core.Scheduling;
 
 public sealed class SchedulerEngine : ISchedulerEngine
 {
-    private const string RuntimeFileName = "runtime.json";
-    private const int RuntimeSchemaVersion = 1;
+    private const string SourceName = "SchedulerEngine";
 
     private readonly Channel<PendingCommand> _channel;
-    private readonly IStorage _storage;
     private readonly IClock _clock;
     private readonly IAsyncDeadline _deadline;
     private readonly ITaskService _taskService;
-    private readonly ITaskStateMachine _stateMachine;
+    private readonly ITaskInstanceStateMachine _stateMachine;
     private readonly IIdentifierGenerator _identifierGenerator;
     private readonly IScheduledTaskHandler _handler;
+    private readonly ITaskArbitrator _arbitrator;
+    private readonly RuntimeStateStore _runtimeStateStore;
     private readonly object _sync = new();
 
     private SchedulerSnapshot _snapshot = SchedulerSnapshot.Empty;
@@ -30,9 +30,10 @@ public sealed class SchedulerEngine : ISchedulerEngine
         IClock clock,
         IAsyncDeadline deadline,
         ITaskService taskService,
-        ITaskStateMachine stateMachine,
+        ITaskInstanceStateMachine stateMachine,
         IIdentifierGenerator identifierGenerator,
-        IScheduledTaskHandler handler)
+        IScheduledTaskHandler handler,
+        ITaskArbitrator arbitrator)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(clock);
@@ -41,14 +42,16 @@ public sealed class SchedulerEngine : ISchedulerEngine
         ArgumentNullException.ThrowIfNull(stateMachine);
         ArgumentNullException.ThrowIfNull(identifierGenerator);
         ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(arbitrator);
 
-        _storage = storage;
         _clock = clock;
         _deadline = deadline;
         _taskService = taskService;
         _stateMachine = stateMachine;
         _identifierGenerator = identifierGenerator;
         _handler = handler;
+        _arbitrator = arbitrator;
+        _runtimeStateStore = new RuntimeStateStore(storage);
 
         var options = new UnboundedChannelOptions
         {
@@ -158,23 +161,18 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 return;
             }
 
-            if (await TryHandleImmediateAsync(cancellationToken).ConfigureAwait(false))
+            if (await TryProcessDueAsync(cancellationToken).ConfigureAwait(false))
             {
                 continue;
             }
 
-            snapshot = GetSnapshot();
-            var now = _clock.UtcNow;
-            var instance = snapshot.CurrentInstance;
-            var deadline = instance is not null ? ComputeDeadline(instance, now) : null;
-            var context = deadline is not null && instance is not null
-                ? new DeadlineContext(instance.InstanceId, instance.StageToken, instance.State, deadline.Value)
-                : (DeadlineContext?)null;
+            var now = _clock.UtcNow.ToUniversalTime();
+            var nextDeadline = ComputeNextDeadline(now);
 
             using var iterationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var readTask = _channel.Reader.ReadAsync(iterationCts.Token).AsTask();
-            Task? deadlineTask = context is not null
-                ? _deadline.WaitUntilAsync(context.Value.UtcDeadline, iterationCts.Token)
+            Task? deadlineTask = nextDeadline is { } deadline
+                ? _deadline.WaitUntilAsync(deadline, iterationCts.Token)
                 : null;
 
             if (deadlineTask is null)
@@ -198,237 +196,206 @@ public sealed class SchedulerEngine : ISchedulerEngine
             {
                 iterationCts.Cancel();
                 await SuppressAsync(readTask).ConfigureAwait(false);
-                await OnDeadlineExpiredAsync(
-                    context!.Value,
-                    cancellationToken).ConfigureAwait(false);
+                // Deadline fired: loop back to re-derive due instances from fresh state.
             }
         }
     }
 
     private async Task<bool> TryRestoreAsync(CancellationToken cancellationToken)
     {
-        var read = await _storage.ReadAsync<RuntimeState>(RuntimeFileName, cancellationToken)
-            .ConfigureAwait(false);
+        var load = await _runtimeStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
 
-        switch (read.Status)
+        switch (load.Status)
         {
-            case StorageReadStatus.NotFound:
+            case RuntimeStateLoadStatus.NotFound:
                 lock (_sync)
                 {
                     _snapshot = new SchedulerSnapshot
                     {
                         EngineStatus = SchedulerEngineStatus.Running,
-                        CurrentInstance = null,
+                        Instances = new Dictionary<Guid, TaskInstance>(),
                         LastUpdatedAt = _clock.UtcNow.ToUniversalTime()
                     };
                 }
 
                 return true;
-            case StorageReadStatus.Corrupt:
-                SetFaulted("The runtime state file is corrupt: " + (read.Error ?? "unknown error."));
-                return false;
-            case StorageReadStatus.IoFailure:
-                SetFaulted("Failed to read the runtime state file: " + (read.Error ?? "unknown error."));
-                return false;
-            case StorageReadStatus.Success:
+            case RuntimeStateLoadStatus.Success:
+            case RuntimeStateLoadStatus.Migrated:
                 break;
+            case RuntimeStateLoadStatus.Corrupt:
+                SetFaulted("The runtime state file is corrupt: " + JoinErrors(load.Errors));
+                return false;
+            case RuntimeStateLoadStatus.IoFailure:
+                SetFaulted("Failed to read the runtime state file: " + JoinErrors(load.Errors));
+                return false;
+            case RuntimeStateLoadStatus.Invalid:
+            case RuntimeStateLoadStatus.UnsupportedVersion:
             default:
-                SetFaulted("The storage layer returned an unknown status while reading the runtime state.");
+                SetFaulted("The runtime state is invalid: " + JoinErrors(load.Errors));
                 return false;
         }
 
-        var state = read.Value;
-        if (state is null || state.SchemaVersion != RuntimeSchemaVersion)
-        {
-            SetFaulted("The runtime state is missing or has an unsupported schema version.");
-            return false;
-        }
-
-        if (state.LastUpdatedAt == default)
-        {
-            SetFaulted("The runtime state has an invalid LastUpdatedAt.");
-            return false;
-        }
-
-        var instance = state.CurrentInstance;
-        if (instance is not null
-            && (instance.InstanceId == Guid.Empty
-                || instance.SourceTaskId == Guid.Empty
-                || instance.StageToken == Guid.Empty))
-        {
-            SetFaulted("The runtime instance has empty identity fields.");
-            return false;
-        }
-
+        var state = load.State!;
         var now = _clock.UtcNow.ToUniversalTime();
 
-        if (instance is not null && instance.State is TaskState.Warning or TaskState.Executing)
+        if (!TryRecoverTransientInstances(state.Instances, out var instances))
         {
-            var transition = _stateMachine.TryTransition(
-                instance.State,
-                TaskState.Interrupted,
-                TaskTransitionCause.RecoveryInterrupted);
-            if (!transition.Allowed)
-            {
-                SetFaulted("The recovered instance cannot be interrupted: " + transition.Message);
-                return false;
-            }
-
-            var interrupted = instance with { State = TaskState.Interrupted };
-            var candidate = new RuntimeState
-            {
-                SchemaVersion = RuntimeSchemaVersion,
-                CurrentInstance = interrupted,
-                LastUpdatedAt = now
-            };
-
-            var write = await _storage.WriteAsync(RuntimeFileName, candidate, cancellationToken)
-                .ConfigureAwait(false);
-            if (!write.Succeeded)
-            {
-                SetFaulted("Failed to persist the recovered state: " + (write.Error ?? "unknown error."));
-                return false;
-            }
-
-            lock (_sync)
-            {
-                _snapshot = new SchedulerSnapshot
-                {
-                    EngineStatus = SchedulerEngineStatus.Running,
-                    CurrentInstance = interrupted,
-                    LastUpdatedAt = now
-                };
-            }
-
-            return true;
+            return false;
         }
 
-        if (instance is not null && instance.State == TaskState.Scheduled && instance.ScheduledFireTime <= now)
+        if (!ReferenceEquals(instances, state.Instances))
+        {
+            // At least one transient instance was interrupted → persist the recovered state.
+            if (!await PersistAndCommitAsync(instances, now, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+        else
         {
             lock (_sync)
             {
                 _snapshot = new SchedulerSnapshot
                 {
                     EngineStatus = SchedulerEngineStatus.Running,
-                    CurrentInstance = instance,
+                    Instances = state.Instances,
                     LastUpdatedAt = state.LastUpdatedAt
                 };
             }
-
-            SetFaulted("Recovery found a missed task; the instance is preserved for manual resolution.");
-            return false;
-        }
-
-        lock (_sync)
-        {
-            _snapshot = new SchedulerSnapshot
-            {
-                EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = instance,
-                LastUpdatedAt = state.LastUpdatedAt
-            };
         }
 
         return true;
     }
 
-    private async Task<bool> TryHandleImmediateAsync(CancellationToken cancellationToken)
+    private bool TryRecoverTransientInstances(
+        IReadOnlyDictionary<Guid, TaskInstance> source,
+        out IReadOnlyDictionary<Guid, TaskInstance> result)
     {
-        var instance = GetSnapshot().CurrentInstance;
-        if (instance is null)
+        var copy = new Dictionary<Guid, TaskInstance>(source);
+        result = copy;
+
+        foreach (var (taskId, instance) in source)
+        {
+            if (instance.State is not (
+                TaskInstanceState.Running
+                or TaskInstanceState.Confirming
+                or TaskInstanceState.Executing))
+            {
+                continue;
+            }
+
+            var transition = _stateMachine.TryTransition(
+                instance.State,
+                TaskInstanceState.Interrupted,
+                TaskInstanceStateTransitionCause.CrashRecovered,
+                SourceName);
+            if (!transition.Allowed)
+            {
+                SetFaulted("A recovered transient instance cannot be interrupted: " + transition.Reason);
+                return false;
+            }
+
+            copy[taskId] = instance with { State = TaskInstanceState.Interrupted };
+        }
+
+        return true;
+    }
+
+    private async Task<bool> TryProcessDueAsync(CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow.ToUniversalTime();
+        var due = GetActiveInstances()
+            .Where(instance => IsDueNow(instance, now))
+            .ToList();
+
+        if (due.Count == 0)
         {
             return false;
         }
 
-        var now = _clock.UtcNow.ToUniversalTime();
-
-        if (instance.State == TaskState.Scheduled)
+        if (due.Count == 1)
         {
-            if (instance.WarningStartTime is { } warningStart
-                && warningStart <= now
-                && instance.ScheduledFireTime > now)
-            {
-                await EnterWarningAsync(instance, now, cancellationToken).ConfigureAwait(false);
-                return true;
-            }
-
-            if (instance.ScheduledFireTime <= now)
-            {
-                await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
-                return true;
-            }
-        }
-        else if (instance.State == TaskState.Warning && instance.ScheduledFireTime <= now)
-        {
-            await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+            await AdvanceInstanceAsync(due[0], now, cancellationToken).ConfigureAwait(false);
             return true;
         }
 
-        return false;
+        // 仲裁调用点：多个实例同时到期。
+        var arbitration = _arbitrator.Arbitrate(due, now);
+        if (arbitration.WinnerTaskId is { } winnerId && !arbitration.RequiresUserDecision)
+        {
+            // 正式赢家 + 重排逻辑归 T06；T04 占位仲裁（NoOp）对多到期恒返回 RequiresUserDecision。
+            SetFaulted(
+                $"Arbitration selected winner {winnerId}, but automatic winner/loser scheduling is not implemented (T06): "
+                + arbitration.DecisionReason);
+        }
+        else
+        {
+            SetFaulted(
+                "Multiple tasks are due simultaneously and require user arbitration: "
+                + arbitration.DecisionReason);
+        }
+
+        return true;
     }
 
-    private async Task OnDeadlineExpiredAsync(
-        DeadlineContext context,
-        CancellationToken cancellationToken)
-    {
-        var instance = GetSnapshot().CurrentInstance;
-        if (instance is null)
-        {
-            return;
-        }
-
-        if (instance.InstanceId != context.InstanceId
-            || instance.StageToken != context.StageToken
-            || instance.State != context.ExpectedState)
-        {
-            return;
-        }
-
-        var now = _clock.UtcNow.ToUniversalTime();
-
-        if (instance.State == TaskState.Scheduled)
-        {
-            if (instance.WarningStartTime is { } warningStart
-                && warningStart <= now
-                && instance.ScheduledFireTime > now)
-            {
-                await EnterWarningAsync(instance, now, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (instance.ScheduledFireTime <= now)
-            {
-                await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        else if (instance.State == TaskState.Warning && instance.ScheduledFireTime <= now)
-        {
-            await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task EnterWarningAsync(
+    private async Task AdvanceInstanceAsync(
         TaskInstance instance,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var transition = _stateMachine.TryTransition(
+        switch (instance.State)
+        {
+            case TaskInstanceState.Waiting:
+                if (instance.WarningStartTime is { } warningStart
+                    && warningStart <= now
+                    && instance.ScheduledFireTime > now)
+                {
+                    await EnterConfirmingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+                }
+                else if (instance.ScheduledFireTime <= now)
+                {
+                    await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+                }
+
+                break;
+            case TaskInstanceState.Confirming:
+                if (instance.ScheduledFireTime <= now)
+                {
+                    await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+                }
+
+                break;
+        }
+    }
+
+    private async Task EnterConfirmingAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // waiting → running（瞬时，不落盘）→ confirming。
+        var running = _stateMachine.TryTransition(
             instance.State,
-            TaskState.Warning,
-            TaskTransitionCause.WarningDue);
-        if (!transition.Allowed)
+            TaskInstanceState.Running,
+            TaskInstanceStateTransitionCause.ScheduleTriggered,
+            SourceName);
+        if (!running.Allowed)
         {
             return;
         }
 
-        var candidate = new RuntimeState
+        var confirming = _stateMachine.TryTransition(
+            TaskInstanceState.Running,
+            TaskInstanceState.Confirming,
+            TaskInstanceStateTransitionCause.PipelineCompleted,
+            SourceName);
+        if (!confirming.Allowed)
         {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = instance with { State = TaskState.Warning },
-            LastUpdatedAt = now
-        };
+            return;
+        }
 
-        await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false);
+        var updated = instance with { State = TaskInstanceState.Confirming };
+        await PersistAndCommitInstanceAsync(updated, now, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EnterExecutingAsync(
@@ -441,42 +408,61 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return;
         }
 
-        var transition = _stateMachine.TryTransition(
-            instance.State,
-            TaskState.Executing,
-            TaskTransitionCause.ExecuteDue);
-        if (!transition.Allowed)
+        if (instance.State == TaskInstanceState.Waiting)
+        {
+            // 无告警窗口：waiting → running（瞬时）→ confirming（瞬时）→ executing。
+            var running = _stateMachine.TryTransition(
+                instance.State,
+                TaskInstanceState.Running,
+                TaskInstanceStateTransitionCause.ScheduleTriggered,
+                SourceName);
+            if (!running.Allowed)
+            {
+                return;
+            }
+
+            var confirming = _stateMachine.TryTransition(
+                TaskInstanceState.Running,
+                TaskInstanceState.Confirming,
+                TaskInstanceStateTransitionCause.PipelineCompleted,
+                SourceName);
+            if (!confirming.Allowed)
+            {
+                return;
+            }
+        }
+
+        var executingTransition = _stateMachine.TryTransition(
+            TaskInstanceState.Confirming,
+            TaskInstanceState.Executing,
+            TaskInstanceStateTransitionCause.PowerConfirmed,
+            SourceName);
+        if (!executingTransition.Allowed)
         {
             return;
         }
 
-        var executed = instance with
+        var executing = instance with
         {
-            State = TaskState.Executing,
+            State = TaskInstanceState.Executing,
             HasExecuted = true
         };
-        var candidate = new RuntimeState
-        {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = executed,
-            LastUpdatedAt = now
-        };
 
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
+        if (!await PersistAndCommitInstanceAsync(executing, now, cancellationToken).ConfigureAwait(false))
         {
             return;
         }
 
         try
         {
-            await _handler.HandleDueAsync(executed, cancellationToken).ConfigureAwait(false);
+            await _handler.HandleDueAsync(executing, cancellationToken).ConfigureAwait(false);
         }
         catch (ScheduledTaskHandlingException)
         {
-            await EnterTerminalStateAsync(
-                executed,
-                TaskState.Failed,
-                TaskTransitionCause.PowerFailed,
+            await EnterTerminalAsync(
+                executing,
+                TaskInstanceState.Faulted,
+                TaskInstanceStateTransitionCause.PowerFailed,
                 _clock.UtcNow.ToUniversalTime(),
                 cancellationToken).ConfigureAwait(false);
             return;
@@ -487,39 +473,55 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return;
         }
 
-        await EnterTerminalStateAsync(
-            executed,
-            TaskState.Completed,
-            TaskTransitionCause.PowerAccepted,
+        await EnterTerminalAsync(
+            executing,
+            TaskInstanceState.Executed,
+            TaskInstanceStateTransitionCause.PowerCompleted,
             _clock.UtcNow.ToUniversalTime(),
             cancellationToken).ConfigureAwait(false);
+
+        await TryRescheduleRecurringAsync(executing, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task EnterTerminalStateAsync(
+    private async Task EnterTerminalAsync(
         TaskInstance instance,
-        TaskState target,
-        TaskTransitionCause cause,
+        TaskInstanceState target,
+        TaskInstanceStateTransitionCause cause,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var transition = _stateMachine.TryTransition(instance.State, target, cause);
+        var transition = _stateMachine.TryTransition(instance.State, target, cause, SourceName);
         if (!transition.Allowed)
         {
-            SetFaulted("The state machine rejected the terminal transition: " + transition.Message);
+            SetFaulted("The state machine rejected the terminal transition: " + transition.Reason);
             return;
         }
 
         var terminal = instance with { State = target };
-        var candidate = new RuntimeState
-        {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = terminal,
-            LastUpdatedAt = now
-        };
+        await PersistAndCommitInstanceAsync(terminal, now, cancellationToken).ConfigureAwait(false);
+    }
 
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
+    private async Task TryRescheduleRecurringAsync(
+        TaskInstance executed,
+        CancellationToken cancellationToken)
+    {
+        var definition = _taskService.Get(executed.SourceTaskId);
+        if (definition is null || !definition.IsEnabled || definition.Kind != TaskKind.DailyAt)
         {
             return;
+        }
+
+        var now = _clock.UtcNow.ToUniversalTime();
+        var result = _taskService.RescheduleDaily(
+            definition,
+            executed,
+            now,
+            _clock.LocalTimeZone);
+
+        if (result.Succeeded && result.Instance is not null)
+        {
+            await PersistAndCommitInstanceAsync(result.Instance, now, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -533,6 +535,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
             SnoozeTaskCommand snooze => await HandleSnoozeAsync(snooze, cancellationToken).ConfigureAwait(false),
             CancelTaskCommand cancel => await HandleCancelAsync(cancel, cancellationToken).ConfigureAwait(false),
             ClearTerminalTaskCommand clear => await HandleClearTerminalAsync(clear, cancellationToken).ConfigureAwait(false),
+            SetTaskEnabledCommand setEnabled => HandleSetEnabledAsync(setEnabled),
             _ => Rejected(GetSnapshot(), SchedulerCommandStatus.InvalidCommand, "Unknown command type.")
         };
     }
@@ -541,10 +544,14 @@ public sealed class SchedulerEngine : ISchedulerEngine
         CreateTaskCommand command,
         CancellationToken cancellationToken)
     {
-        var instance = GetSnapshot().CurrentInstance;
-        if (instance is not null && instance.State != TaskState.Idle)
+        var instances = GetSnapshot().Instances;
+        if (instances.TryGetValue(command.Definition.Id, out var existing)
+            && !IsTerminal(existing.State))
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.ActiveTaskExists, "An active task instance already exists.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.ActiveTaskExists,
+                "A live instance for this task already exists.");
         }
 
         var taskResult = _taskService.Create(
@@ -561,16 +568,14 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 taskResult.TransitionDecisionCode);
         }
 
-        var candidate = new RuntimeState
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = WithInstance(instances, taskResult.Instance!);
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
         {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = taskResult.Instance,
-            LastUpdatedAt = _clock.UtcNow.ToUniversalTime()
-        };
-
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.PersistenceFailed, "Failed to persist the created task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the created task.");
         }
 
         return Success("The task was created.");
@@ -580,15 +585,21 @@ public sealed class SchedulerEngine : ISchedulerEngine
         SnoozeTaskCommand command,
         CancellationToken cancellationToken)
     {
-        var instance = GetSnapshot().CurrentInstance;
+        var instance = FindInstance(command.ExpectedInstanceId);
         if (instance is null)
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.NoCurrentTask, "There is no current task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "No instance matches the expected instance id.");
         }
 
-        if (command.ExpectedInstanceId != instance.InstanceId || command.ExpectedStageToken != instance.StageToken)
+        if (command.ExpectedStageToken != instance.StageToken)
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.StaleCommand, "The instance identity or stage token does not match.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.StaleCommand,
+                "The stage token does not match.");
         }
 
         var taskResult = _taskService.Snooze(instance, command.Duration, _clock.UtcNow);
@@ -602,16 +613,14 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 taskResult.TransitionDecisionCode);
         }
 
-        var candidate = new RuntimeState
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = WithInstance(GetSnapshot().Instances, taskResult.Instance!);
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
         {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = taskResult.Instance,
-            LastUpdatedAt = _clock.UtcNow.ToUniversalTime()
-        };
-
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.PersistenceFailed, "Failed to persist the snoozed task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the snoozed task.");
         }
 
         return Success("The task was snoozed.");
@@ -621,15 +630,21 @@ public sealed class SchedulerEngine : ISchedulerEngine
         CancelTaskCommand command,
         CancellationToken cancellationToken)
     {
-        var instance = GetSnapshot().CurrentInstance;
+        var instance = FindInstance(command.ExpectedInstanceId);
         if (instance is null)
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.NoCurrentTask, "There is no current task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "No instance matches the expected instance id.");
         }
 
-        if (command.ExpectedInstanceId != instance.InstanceId || command.ExpectedStageToken != instance.StageToken)
+        if (command.ExpectedStageToken != instance.StageToken)
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.StaleCommand, "The instance identity or stage token does not match.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.StaleCommand,
+                "The stage token does not match.");
         }
 
         var taskResult = _taskService.Cancel(instance);
@@ -643,16 +658,14 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 taskResult.TransitionDecisionCode);
         }
 
-        var candidate = new RuntimeState
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = WithInstance(GetSnapshot().Instances, taskResult.Instance!);
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
         {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = taskResult.Instance,
-            LastUpdatedAt = _clock.UtcNow.ToUniversalTime()
-        };
-
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.PersistenceFailed, "Failed to persist the cancelled task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the cancelled task.");
         }
 
         return Success("The task was cancelled.");
@@ -662,64 +675,49 @@ public sealed class SchedulerEngine : ISchedulerEngine
         ClearTerminalTaskCommand command,
         CancellationToken cancellationToken)
     {
-        var instance = GetSnapshot().CurrentInstance;
+        var instance = FindInstance(command.ExpectedInstanceId);
         if (instance is null)
         {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.NoCurrentTask, "There is no current task.");
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "No instance matches the expected instance id.");
         }
 
-        if (command.ExpectedInstanceId != instance.InstanceId)
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.StaleCommand, "The instance identity does not match.");
-        }
-
-        if (instance.State is not (TaskState.Cancelled or TaskState.Completed or TaskState.Failed or TaskState.Interrupted))
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.TransitionRejected, "ClearTerminal only applies to terminal states.");
-        }
-
-        var transition = _stateMachine.TryTransition(
-            instance.State,
-            TaskState.Idle,
-            TaskTransitionCause.ClearTerminalState);
-        if (!transition.Allowed)
+        if (!IsTerminal(instance.State))
         {
             return Rejected(
                 GetSnapshot(),
                 SchedulerCommandStatus.TransitionRejected,
-                transition.Message,
-                null,
-                transition.DecisionCode);
+                "ClearTerminal only applies to terminal states.");
         }
 
-        var stageToken = _identifierGenerator.NewId();
-        if (stageToken == Guid.Empty || stageToken == instance.StageToken || stageToken == instance.InstanceId)
+        // V2 无 Idle 态：直接移除终态实例。
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = WithoutInstance(GetSnapshot().Instances, instance.SourceTaskId);
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the cleared task.");
+        }
+
+        return Success("The terminal instance was cleared.");
+    }
+
+    private SchedulerCommandResult HandleSetEnabledAsync(SetTaskEnabledCommand command)
+    {
+        var result = _taskService.SetEnabled(command.TaskId, command.IsEnabled);
+        if (!result.Succeeded)
         {
             return Rejected(
                 GetSnapshot(),
                 SchedulerCommandStatus.TaskServiceRejected,
-                "The generated stage token is not valid.");
+                result.Message);
         }
 
-        var cleared = instance with
-        {
-            State = TaskState.Idle,
-            WarningStartTime = null,
-            StageToken = stageToken
-        };
-        var candidate = new RuntimeState
-        {
-            SchemaVersion = RuntimeSchemaVersion,
-            CurrentInstance = cleared,
-            LastUpdatedAt = _clock.UtcNow.ToUniversalTime()
-        };
-
-        if (!await PersistAndCommitAsync(candidate, cancellationToken).ConfigureAwait(false))
-        {
-            return Rejected(GetSnapshot(), SchedulerCommandStatus.PersistenceFailed, "Failed to persist the cleared task.");
-        }
-
-        return Success("The terminal state was cleared.");
+        return Success("The task enable state was updated.");
     }
 
     private async Task ProcessCommandAsync(
@@ -743,16 +741,31 @@ public sealed class SchedulerEngine : ISchedulerEngine
         pending.Tcs.TrySetResult(result);
     }
 
-    private async Task<bool> PersistAndCommitAsync(
-        RuntimeState candidate,
+    private async Task<bool> PersistAndCommitInstanceAsync(
+        TaskInstance updated,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var write = await _storage.WriteAsync(RuntimeFileName, candidate, cancellationToken)
-            .ConfigureAwait(false);
+        var next = WithInstance(GetSnapshot().Instances, updated);
+        return await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false);
+    }
 
+    private async Task<bool> PersistAndCommitAsync(
+        IReadOnlyDictionary<Guid, TaskInstance> instances,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var candidate = new RuntimeState
+        {
+            SchemaVersion = RuntimeState.CurrentSchemaVersion,
+            Instances = instances,
+            LastUpdatedAt = now
+        };
+
+        var write = await _runtimeStateStore.SaveAsync(candidate, cancellationToken).ConfigureAwait(false);
         if (!write.Succeeded)
         {
-            SetFaulted("Failed to persist the runtime state: " + (write.Error ?? "unknown error."));
+            SetFaulted("Failed to persist the runtime state: " + JoinErrors(write.Errors));
             return false;
         }
 
@@ -761,8 +774,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
             _snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = candidate.CurrentInstance,
-                LastUpdatedAt = candidate.LastUpdatedAt
+                Instances = instances,
+                LastUpdatedAt = now
             };
         }
 
@@ -809,6 +822,86 @@ public sealed class SchedulerEngine : ISchedulerEngine
         }
     }
 
+    private TaskInstance? FindInstance(Guid instanceId)
+        => GetSnapshot().Instances.Values.FirstOrDefault(instance => instance.InstanceId == instanceId);
+
+    private IReadOnlyList<TaskInstance> GetActiveInstances()
+        => GetSnapshot().Instances.Values
+            .Where(instance => instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming)
+            .ToList();
+
+    private DateTimeOffset? ComputeNextDeadline(DateTimeOffset now)
+    {
+        DateTimeOffset? next = null;
+        foreach (var instance in GetActiveInstances())
+        {
+            var deadline = ComputeFutureDeadline(instance, now);
+            if (deadline is null)
+            {
+                continue;
+            }
+
+            if (next is null || deadline.Value < next.Value)
+            {
+                next = deadline.Value;
+            }
+        }
+
+        return next;
+    }
+
+    private static bool IsDueNow(TaskInstance instance, DateTimeOffset now)
+    {
+        return instance.State switch
+        {
+            TaskInstanceState.Waiting => instance.ScheduledFireTime <= now
+                || (instance.WarningStartTime is { } warningStart && warningStart <= now),
+            TaskInstanceState.Confirming => instance.ScheduledFireTime <= now,
+            _ => false
+        };
+    }
+
+    private static DateTimeOffset? ComputeFutureDeadline(TaskInstance instance, DateTimeOffset now)
+    {
+        return instance.State switch
+        {
+            TaskInstanceState.Waiting when instance.WarningStartTime is { } warningStart && warningStart > now =>
+                warningStart,
+            TaskInstanceState.Waiting when instance.ScheduledFireTime > now => instance.ScheduledFireTime,
+            TaskInstanceState.Confirming when instance.ScheduledFireTime > now => instance.ScheduledFireTime,
+            _ => null
+        };
+    }
+
+    private static bool IsTerminal(TaskInstanceState state)
+        => state is TaskInstanceState.Cancelled
+            or TaskInstanceState.Executed
+            or TaskInstanceState.Faulted
+            or TaskInstanceState.Interrupted;
+
+    private static IReadOnlyDictionary<Guid, TaskInstance> WithInstance(
+        IReadOnlyDictionary<Guid, TaskInstance> current,
+        TaskInstance updated)
+    {
+        var copy = new Dictionary<Guid, TaskInstance>(current)
+        {
+            [updated.SourceTaskId] = updated
+        };
+        return copy;
+    }
+
+    private static IReadOnlyDictionary<Guid, TaskInstance> WithoutInstance(
+        IReadOnlyDictionary<Guid, TaskInstance> current,
+        Guid taskId)
+    {
+        var copy = new Dictionary<Guid, TaskInstance>(current);
+        copy.Remove(taskId);
+        return copy;
+    }
+
+    private static string JoinErrors(IReadOnlyList<string> errors)
+        => errors.Count == 0 ? "unknown error." : string.Join(" ", errors);
+
     private SchedulerCommandResult Success(string message) => new()
     {
         Status = SchedulerCommandStatus.Success,
@@ -821,7 +914,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
         SchedulerCommandStatus status,
         string message,
         TaskCommandStatus? taskCommandStatus = null,
-        TaskTransitionDecisionCode? transitionDecisionCode = null) => new()
+        TaskInstanceStateTransitionDecisionCode? transitionDecisionCode = null) => new()
         {
             Status = status,
             TaskCommandStatus = taskCommandStatus,
@@ -829,26 +922,6 @@ public sealed class SchedulerEngine : ISchedulerEngine
             Snapshot = snapshot,
             Message = message
         };
-
-    private static DateTimeOffset? ComputeDeadline(TaskInstance instance, DateTimeOffset now)
-    {
-        if (instance.State == TaskState.Scheduled)
-        {
-            if (instance.WarningStartTime is { } warningStart && warningStart > now)
-            {
-                return warningStart;
-            }
-
-            return instance.ScheduledFireTime;
-        }
-
-        if (instance.State == TaskState.Warning)
-        {
-            return instance.ScheduledFireTime;
-        }
-
-        return null;
-    }
 
     private static async Task SuppressAsync(Task task)
     {
@@ -860,12 +933,6 @@ public sealed class SchedulerEngine : ISchedulerEngine
         {
         }
     }
-
-    private readonly record struct DeadlineContext(
-        Guid InstanceId,
-        Guid StageToken,
-        TaskState ExpectedState,
-        DateTimeOffset UtcDeadline);
 
     private readonly record struct PendingCommand(
         SchedulerCommand Command,

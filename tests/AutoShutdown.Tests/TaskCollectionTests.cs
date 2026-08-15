@@ -399,7 +399,7 @@ public sealed class TaskCollectionTests
 
     private static TaskService CreateService() => new(
         new AutoShutdown.Core.Scheduling.NextExecutionCalculator(),
-        new AutoShutdown.Core.State.TaskStateMachine(),
+        new AutoShutdown.Core.State.TaskInstanceStateMachine(),
         new AutoShutdown.Core.Tasks.GuidIdentifierGenerator());
 
     private static TaskDefinition Definition(

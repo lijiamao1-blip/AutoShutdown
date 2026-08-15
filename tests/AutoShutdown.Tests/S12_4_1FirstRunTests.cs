@@ -130,7 +130,7 @@ public sealed class S12_4_1FirstRunTests
             InstanceId = Guid.NewGuid(),
             SourceTaskId = Guid.NewGuid(),
             ActionSnapshot = PowerAction.Shutdown,
-            State = TaskState.Scheduled,
+            State = TaskInstanceState.Waiting,
             ScheduledFireTime = now.AddSeconds(10),
             WarningStartTime = null,
             StageToken = Guid.NewGuid(),
@@ -142,7 +142,7 @@ public sealed class S12_4_1FirstRunTests
             Snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = instance,
+                Instances = new Dictionary<Guid, TaskInstance> { [instance.SourceTaskId] = instance },
                 LastUpdatedAt = now
             }
         };
@@ -270,7 +270,7 @@ public sealed class S12_4_1FirstRunTests
             Snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = null,
+                Instances = new Dictionary<Guid, TaskInstance>(),
                 LastUpdatedAt = Now
             }
         };

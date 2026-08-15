@@ -31,7 +31,7 @@ public sealed class TaskServiceTests
         Assert.Equal(InstanceId1, instance.InstanceId);
         Assert.Equal(SourceTaskId, instance.SourceTaskId);
         Assert.Equal(PowerAction.Shutdown, instance.ActionSnapshot);
-        Assert.Equal(TaskState.Scheduled, instance.State);
+        Assert.Equal(TaskInstanceState.Waiting, instance.State);
         Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero), instance.ScheduledFireTime);
         Assert.Equal(new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero), instance.WarningStartTime);
         Assert.Equal(StageToken1, instance.StageToken);
@@ -117,45 +117,21 @@ public sealed class TaskServiceTests
     }
 
     [Fact]
-    public void Create_WhenStateMachineRejects_ReturnsTransitionRejectedWithoutInstanceOrGuid()
+    public void Create_DoesNotInvokeStateMachine_InstanceIsBornWaiting()
     {
-        var machine = new RejectingStateMachine();
+        var machine = new RecordingStateMachine();
         var generator = new SequentialIdentifierGenerator(InstanceId1, StageToken1);
         var service = CreateService(machine: machine, generator: generator);
 
         var result = service.Create(CountdownDefinition(), Now, TimeZoneInfo.Utc);
 
-        Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
-        Assert.Equal(TaskTransitionDecisionCode.TransitionNotAllowed, result.TransitionDecisionCode);
-        Assert.Null(result.Instance);
-        Assert.Equal(0, generator.CallCount);
-    }
-
-    [Fact]
-    public void Snooze_FromWarning_ReturnsScheduledWithNewTokenAndTime()
-    {
-        var current = WarningInstance();
-        var generator = new SequentialIdentifierGenerator(StageToken3);
-        var service = CreateService(generator: generator);
-
-        var result = service.Snooze(current, TimeSpan.FromMinutes(10), Now);
-
         Assert.True(result.Succeeded);
-        var instance = result.Instance!;
-        Assert.Equal(TaskState.Scheduled, instance.State);
-        Assert.Equal(Now.AddMinutes(10).ToUniversalTime(), instance.ScheduledFireTime);
-        Assert.Equal(StageToken3, instance.StageToken);
-        Assert.NotEqual(current.StageToken, instance.StageToken);
-        Assert.Null(instance.WarningStartTime);
-        Assert.False(instance.HasExecuted);
-        Assert.Equal(current.InstanceId, instance.InstanceId);
-        Assert.Equal(current.SourceTaskId, instance.SourceTaskId);
-        Assert.Equal(current.ActionSnapshot, instance.ActionSnapshot);
-        Assert.Equal(current.CreatedAt, instance.CreatedAt);
+        Assert.Equal(TaskInstanceState.Waiting, result.Instance!.State);
+        Assert.Empty(machine.Calls); // V2：实例「诞生」于 Waiting，无需从 Idle 的状态机转换。
     }
 
     [Fact]
-    public void Snooze_FromScheduled_UsesRescheduleCause()
+    public void Snooze_FromWaiting_ReschedulesWithoutStateTransition()
     {
         var current = ScheduledInstance();
         var machine = new RecordingStateMachine();
@@ -165,10 +141,25 @@ public sealed class TaskServiceTests
         var result = service.Snooze(current, TimeSpan.FromMinutes(5), Now);
 
         Assert.True(result.Succeeded);
-        Assert.Equal(TaskState.Scheduled, result.Instance!.State);
-        Assert.Contains(
-            (TaskState.Scheduled, TaskState.Scheduled, TaskTransitionCause.Reschedule),
-            machine.Calls);
+        Assert.Equal(TaskInstanceState.Waiting, result.Instance!.State);
+        Assert.Equal(Now.AddMinutes(5).ToUniversalTime(), result.Instance.ScheduledFireTime);
+        Assert.Null(result.Instance.WarningStartTime);
+        Assert.Equal(StageToken3, result.Instance.StageToken);
+        Assert.Empty(machine.Calls); // Waiting→Waiting 是字段级重排，不走状态机。
+    }
+
+    [Fact]
+    public void Snooze_FromConfirming_ReturnsTransitionRejected()
+    {
+        var current = WarningInstance();
+        var service = CreateService();
+
+        var result = service.Snooze(current, TimeSpan.FromMinutes(10), Now);
+
+        // V2 白名单无 confirming→waiting 边：确认态实例不可 snooze。
+        Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
+        Assert.NotNull(result.TransitionDecisionCode);
+        Assert.Null(result.Instance);
     }
 
     [Fact]
@@ -197,13 +188,13 @@ public sealed class TaskServiceTests
     }
 
     [Theory]
-    [InlineData(TaskState.Idle, TaskTransitionDecisionCode.CauseMismatch)]
-    [InlineData(TaskState.Cancelled, TaskTransitionDecisionCode.TransitionNotAllowed)]
-    [InlineData(TaskState.Completed, TaskTransitionDecisionCode.TransitionNotAllowed)]
-    [InlineData(TaskState.Executing, TaskTransitionDecisionCode.TransitionNotAllowed)]
-    public void Snooze_FromOtherState_ReturnsTransitionRejectedWithDecisionCode(
-        TaskState state,
-        TaskTransitionDecisionCode decisionCode)
+    [InlineData(TaskInstanceState.Confirming)]
+    [InlineData(TaskInstanceState.Executing)]
+    [InlineData(TaskInstanceState.Cancelled)]
+    [InlineData(TaskInstanceState.Executed)]
+    [InlineData(TaskInstanceState.Faulted)]
+    [InlineData(TaskInstanceState.Interrupted)]
+    public void Snooze_FromNonWaitingState_ReturnsTransitionRejected(TaskInstanceState state)
     {
         var current = BaseInstance() with { State = state };
         var service = CreateService();
@@ -211,7 +202,7 @@ public sealed class TaskServiceTests
         var result = service.Snooze(current, TimeSpan.FromMinutes(5), Now);
 
         Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
-        Assert.Equal(decisionCode, result.TransitionDecisionCode);
+        Assert.NotNull(result.TransitionDecisionCode);
         Assert.Null(result.Instance);
     }
 
@@ -232,7 +223,7 @@ public sealed class TaskServiceTests
     }
 
     [Fact]
-    public void Cancel_FromScheduledAndWarning_SucceedsAndRefreshesToken()
+    public void Cancel_FromWaitingAndConfirming_SucceedsAndRefreshesToken()
     {
         var generator = new SequentialIdentifierGenerator(StageToken3, StageToken1);
         var service = CreateService(generator: generator);
@@ -241,13 +232,13 @@ public sealed class TaskServiceTests
         var warning = service.Cancel(WarningInstance());
 
         Assert.True(scheduled.Succeeded);
-        Assert.Equal(TaskState.Cancelled, scheduled.Instance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, scheduled.Instance!.State);
         Assert.Equal(StageToken3, scheduled.Instance.StageToken);
         Assert.NotEqual(StageToken2, scheduled.Instance.StageToken);
         Assert.Null(scheduled.Instance.WarningStartTime);
 
         Assert.True(warning.Succeeded);
-        Assert.Equal(TaskState.Cancelled, warning.Instance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, warning.Instance!.State);
         Assert.Equal(StageToken1, warning.Instance.StageToken);
         Assert.NotEqual(StageToken2, warning.Instance.StageToken);
     }
@@ -257,10 +248,10 @@ public sealed class TaskServiceTests
     {
         var service = CreateService();
 
-        var result = service.Cancel(BaseInstance() with { State = TaskState.Idle });
+        var result = service.Cancel(BaseInstance() with { State = TaskInstanceState.Executing });
 
         Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
-        Assert.Equal(TaskTransitionDecisionCode.TransitionNotAllowed, result.TransitionDecisionCode);
+        Assert.Equal(TaskInstanceStateTransitionDecisionCode.TransitionNotAllowed, result.TransitionDecisionCode);
         Assert.Null(result.Instance);
     }
 
@@ -283,7 +274,7 @@ public sealed class TaskServiceTests
         var definition = DailyAtDefinition();
         var current = BaseInstance() with
         {
-            State = TaskState.Idle,
+            State = TaskInstanceState.Executed,
             SourceTaskId = definition.Id,
             ActionSnapshot = definition.Action
         };
@@ -298,7 +289,7 @@ public sealed class TaskServiceTests
 
         Assert.True(result.Succeeded);
         var instance = result.Instance!;
-        Assert.Equal(TaskState.Scheduled, instance.State);
+        Assert.Equal(TaskInstanceState.Waiting, instance.State);
         Assert.Equal(new DateTimeOffset(2024, 1, 15, 15, 0, 0, TimeSpan.Zero), instance.ScheduledFireTime);
         Assert.Equal(StageToken3, instance.StageToken);
         Assert.NotEqual(current.StageToken, instance.StageToken);
@@ -312,37 +303,35 @@ public sealed class TaskServiceTests
     {
         var service = CreateService();
         var definition = DailyAtDefinition();
-        var idle = BaseInstance() with
+        var executed = BaseInstance() with
         {
-            State = TaskState.Idle,
+            State = TaskInstanceState.Executed,
             SourceTaskId = definition.Id,
             ActionSnapshot = definition.Action
         };
 
-        var wrongKind = service.RescheduleDaily(CountdownDefinition(), idle, Now, TimeZoneInfo.Utc);
+        var wrongKind = service.RescheduleDaily(CountdownDefinition(), executed, Now, TimeZoneInfo.Utc);
         Assert.Equal(TaskCommandStatus.InvalidDefinition, wrongKind.Status);
 
-        var wrongId = service.RescheduleDaily(definition with { Id = AnotherTaskId }, idle, Now, TimeZoneInfo.Utc);
+        var wrongId = service.RescheduleDaily(definition with { Id = AnotherTaskId }, executed, Now, TimeZoneInfo.Utc);
         Assert.Equal(TaskCommandStatus.InvalidDefinition, wrongId.Status);
 
-        var wrongAction = service.RescheduleDaily(definition with { Action = PowerAction.Restart }, idle, Now, TimeZoneInfo.Utc);
+        var wrongAction = service.RescheduleDaily(definition with { Action = PowerAction.Restart }, executed, Now, TimeZoneInfo.Utc);
         Assert.Equal(TaskCommandStatus.InvalidDefinition, wrongAction.Status);
 
-        var notIdle = service.RescheduleDaily(definition, idle with { State = TaskState.Scheduled }, Now, TimeZoneInfo.Utc);
-        Assert.Equal(TaskCommandStatus.TransitionRejected, notIdle.Status);
-        Assert.NotNull(notIdle.TransitionDecisionCode);
-
-        var executed = service.RescheduleDaily(definition, idle with { HasExecuted = true }, Now, TimeZoneInfo.Utc);
-        Assert.Equal(TaskCommandStatus.AlreadyExecuted, executed.Status);
+        // V2 仅 executed→waiting 可重排；Waiting 态不可重排。
+        var notExecuted = service.RescheduleDaily(definition, executed with { State = TaskInstanceState.Waiting }, Now, TimeZoneInfo.Utc);
+        Assert.Equal(TaskCommandStatus.TransitionRejected, notExecuted.Status);
+        Assert.NotNull(notExecuted.TransitionDecisionCode);
     }
 
     [Fact]
     public void RescheduleDaily_WhenScheduleFails_ReturnsScheduleCalculationFailed()
     {
         var definition = DailyAtDefinition();
-        var idle = BaseInstance() with
+        var executed = BaseInstance() with
         {
-            State = TaskState.Idle,
+            State = TaskInstanceState.Executed,
             SourceTaskId = definition.Id,
             ActionSnapshot = definition.Action
         };
@@ -351,7 +340,7 @@ public sealed class TaskServiceTests
         var generator = new SequentialIdentifierGenerator(StageToken3);
         var service = CreateService(calculator: calculator, generator: generator);
 
-        var result = service.RescheduleDaily(definition, idle, Now, TimeZoneInfo.Utc);
+        var result = service.RescheduleDaily(definition, executed, Now, TimeZoneInfo.Utc);
 
         Assert.Equal(TaskCommandStatus.ScheduleCalculationFailed, result.Status);
         Assert.Equal(NextExecutionStatus.NoFutureOccurrence, result.ScheduleStatus);
@@ -415,11 +404,11 @@ public sealed class TaskServiceTests
         service.Cancel(original);
         service.RescheduleDaily(
             DailyAtDefinition(),
-            original with { State = TaskState.Idle, SourceTaskId = SourceTaskId, ActionSnapshot = PowerAction.Shutdown },
+            original with { State = TaskInstanceState.Executed, SourceTaskId = SourceTaskId, ActionSnapshot = PowerAction.Shutdown },
             Now,
             TimeZoneInfo.Utc);
 
-        Assert.Equal(TaskState.Scheduled, original.State);
+        Assert.Equal(TaskInstanceState.Waiting, original.State);
         Assert.Equal(StageToken2, original.StageToken);
         Assert.False(original.HasExecuted);
     }
@@ -460,12 +449,12 @@ public sealed class TaskServiceTests
 
     private static TaskService CreateService(
         INextExecutionCalculator? calculator = null,
-        ITaskStateMachine? machine = null,
+        ITaskInstanceStateMachine? machine = null,
         IIdentifierGenerator? generator = null)
     {
         return new TaskService(
             calculator ?? new NextExecutionCalculator(),
-            machine ?? new TaskStateMachine(),
+            machine ?? new TaskInstanceStateMachine(),
             generator ?? new SequentialIdentifierGenerator(InstanceId1, StageToken1, StageToken3));
     }
 
@@ -496,7 +485,7 @@ public sealed class TaskServiceTests
         InstanceId = InstanceId1,
         SourceTaskId = SourceTaskId,
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Scheduled,
+        State = TaskInstanceState.Waiting,
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         WarningStartTime = null,
         StageToken = StageToken2,
@@ -504,9 +493,9 @@ public sealed class TaskServiceTests
         CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
     };
 
-    private static TaskInstance ScheduledInstance() => BaseInstance() with { State = TaskState.Scheduled };
+    private static TaskInstance ScheduledInstance() => BaseInstance() with { State = TaskInstanceState.Waiting };
 
-    private static TaskInstance WarningInstance() => BaseInstance() with { State = TaskState.Warning };
+    private static TaskInstance WarningInstance() => BaseInstance() with { State = TaskInstanceState.Confirming };
 
     private sealed class SequentialIdentifierGenerator : IIdentifierGenerator
     {
@@ -540,35 +529,20 @@ public sealed class TaskServiceTests
             TimeZoneInfo timeZone) => _result;
     }
 
-    private sealed class RejectingStateMachine : ITaskStateMachine
+    private sealed class RecordingStateMachine : ITaskInstanceStateMachine
     {
-        public TaskTransitionResult TryTransition(
-            TaskState current,
-            TaskState target,
-            TaskTransitionCause cause) => new()
-            {
-                Allowed = false,
-                CurrentState = current,
-                TargetState = target,
-                Cause = cause,
-                DecisionCode = TaskTransitionDecisionCode.TransitionNotAllowed,
-                Message = "Simulated rejection."
-            };
-    }
+        private readonly TaskInstanceStateMachine _inner = new();
 
-    private sealed class RecordingStateMachine : ITaskStateMachine
-    {
-        private readonly TaskStateMachine _inner = new();
+        public List<(TaskInstanceState Current, TaskInstanceState Target, TaskInstanceStateTransitionCause Cause)> Calls { get; } = [];
 
-        public List<(TaskState Current, TaskState Target, TaskTransitionCause Cause)> Calls { get; } = [];
-
-        public TaskTransitionResult TryTransition(
-            TaskState current,
-            TaskState target,
-            TaskTransitionCause cause)
+        public TaskInstanceStateTransitionResult TryTransition(
+            TaskInstanceState current,
+            TaskInstanceState target,
+            TaskInstanceStateTransitionCause cause,
+            string? source = null)
         {
             Calls.Add((current, target, cause));
-            return _inner.TryTransition(current, target, cause);
+            return _inner.TryTransition(current, target, cause, source);
         }
     }
 }

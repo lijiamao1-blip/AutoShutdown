@@ -23,7 +23,7 @@ public sealed record TaskCommandResult
 
     public NextExecutionStatus? ScheduleStatus { get; init; }
 
-    public TaskTransitionDecisionCode? TransitionDecisionCode { get; init; }
+    public TaskInstanceStateTransitionDecisionCode? TransitionDecisionCode { get; init; }
 
     public string Message { get; init; } = string.Empty;
 

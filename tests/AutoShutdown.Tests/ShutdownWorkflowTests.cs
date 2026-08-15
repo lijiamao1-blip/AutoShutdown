@@ -63,7 +63,7 @@ public sealed class ShutdownWorkflowTests
         var workflow = new ShutdownWorkflow(new FixedConfigurationService(SuccessResult(ValidConfig())), power);
 
         var outcome = await workflow.ExecuteAsync(
-            ValidInstance() with { State = TaskState.Scheduled },
+            ValidInstance() with { State = TaskInstanceState.Waiting },
             CancellationToken.None);
 
         Assert.Equal(ShutdownDecisionCode.InvalidState, outcome.DecisionCode);
@@ -311,7 +311,7 @@ public sealed class ShutdownWorkflowTests
         InstanceId = InstanceId1,
         SourceTaskId = SourceTaskId,
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Executing,
+        State = TaskInstanceState.Executing,
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         WarningStartTime = null,
         StageToken = StageToken1,

@@ -547,7 +547,7 @@ public sealed class S12_3AutoStartTests
             Snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = null,
+                Instances = new Dictionary<Guid, TaskInstance>(),
                 LastUpdatedAt = new DateTimeOffset(2024, 1, 15, 11, 0, 0, TimeSpan.Zero)
             }
         };

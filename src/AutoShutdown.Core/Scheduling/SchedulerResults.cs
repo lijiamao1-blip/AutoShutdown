@@ -27,13 +27,19 @@ public enum SchedulerCommandStatus
     TransitionRejected = 10
 }
 
+/// <summary>
+/// 调度引擎对外快照。V2 多实例：以任务 id（SourceTaskId）为键的实例集合，
+/// 替代 V1 单实例 CurrentInstance。
+/// </summary>
 public sealed record SchedulerSnapshot
 {
     public static SchedulerSnapshot Empty { get; } = new();
 
     public SchedulerEngineStatus EngineStatus { get; init; } = SchedulerEngineStatus.Unknown;
 
-    public TaskInstance? CurrentInstance { get; init; }
+    /// <summary>运行实例集合，键 = 任务定义 id（SourceTaskId）。</summary>
+    public IReadOnlyDictionary<Guid, TaskInstance> Instances { get; init; } =
+        new Dictionary<Guid, TaskInstance>();
 
     public DateTimeOffset LastUpdatedAt { get; init; }
 
@@ -46,7 +52,7 @@ public sealed record SchedulerCommandResult
 
     public TaskCommandStatus? TaskCommandStatus { get; init; }
 
-    public TaskTransitionDecisionCode? TransitionDecisionCode { get; init; }
+    public TaskInstanceStateTransitionDecisionCode? TransitionDecisionCode { get; init; }
 
     public SchedulerSnapshot Snapshot { get; init; } = SchedulerSnapshot.Empty;
 

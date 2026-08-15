@@ -36,7 +36,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _realPowerConfirmation;
 
     private TaskInstance? _currentInstance;
-    private TaskState _lastState = TaskState.Unknown;
+    private TaskInstanceState _lastState = TaskInstanceState.Unknown;
     private Guid _lastInstanceId;
     private Guid _lastToken;
     private SchedulerEngineStatus _engineStatus = SchedulerEngineStatus.Unknown;
@@ -913,7 +913,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ? (snapshot.FaultMessage ?? "调度服务发生故障")
             : string.Empty;
 
-        var instance = snapshot.CurrentInstance;
+        var instance = SelectPrimaryInstance(snapshot);
         if (instance is null)
         {
             if (_currentInstance is not null)
@@ -956,7 +956,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ? remaining.ToString(@"hh\:mm\:ss")
             : "即将执行";
 
-        CanSnooze = instance.State is TaskState.Scheduled or TaskState.Warning
+        CanSnooze = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming
             && instance.InstanceId != Guid.Empty
             && instance.StageToken != Guid.Empty;
         SnoozeDisabledReason = CanSnooze
@@ -964,9 +964,12 @@ public sealed class MainWindowViewModel : ObservableObject
             : (instance.InstanceId == Guid.Empty || instance.StageToken == Guid.Empty
                 ? "任务标识或阶段令牌缺失"
                 : "当前状态不允许延迟");
-        CanCancel = instance.State is TaskState.Scheduled or TaskState.Warning;
+        CanCancel = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming;
         CancelDisabledReason = CanCancel ? string.Empty : "当前状态不允许取消";
-        CanClear = instance.State is TaskState.Cancelled or TaskState.Completed or TaskState.Failed or TaskState.Interrupted;
+        CanClear = instance.State is TaskInstanceState.Cancelled
+            or TaskInstanceState.Executed
+            or TaskInstanceState.Faulted
+            or TaskInstanceState.Interrupted;
 
         if (instance.State != _lastState
             || instance.InstanceId != _lastInstanceId
@@ -996,7 +999,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return false;
         }
 
-        if (_currentInstance is not null && _currentInstance.State != TaskState.Idle)
+        if (_currentInstance is not null && !IsTerminal(_currentInstance.State))
         {
             reason = "已有活动任务";
             return false;
@@ -1374,6 +1377,36 @@ public sealed class MainWindowViewModel : ObservableObject
             return SchedulerSnapshot.Empty;
         }
     }
+
+    /// <summary>
+    /// 从多实例快照中选择一个「主实例」供单任务仪表盘展示（完整列表交互归 T08）。
+    /// 优先最早到期的非终态实例；无则回退到唯一的终态实例；再否则为 null。
+    /// </summary>
+    private static TaskInstance? SelectPrimaryInstance(SchedulerSnapshot snapshot)
+    {
+        var instances = snapshot.Instances.Values.ToList();
+        if (instances.Count == 0)
+        {
+            return null;
+        }
+
+        var active = instances
+            .Where(instance => !IsTerminal(instance.State))
+            .OrderBy(instance => instance.ScheduledFireTime)
+            .FirstOrDefault();
+        if (active is not null)
+        {
+            return active;
+        }
+
+        return instances.Count == 1 ? instances[0] : null;
+    }
+
+    private static bool IsTerminal(TaskInstanceState state)
+        => state is TaskInstanceState.Cancelled
+            or TaskInstanceState.Executed
+            or TaskInstanceState.Faulted
+            or TaskInstanceState.Interrupted;
 
     private int GetWarningSeconds() => ReminderIndex switch
     {

@@ -80,7 +80,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
             }
         }
 
-        if (instance.State != TaskState.Executing)
+        if (instance.State != TaskInstanceState.Executing)
         {
             return Reject(
                 ShutdownDecisionCode.InvalidState,

@@ -292,17 +292,23 @@ public sealed class S11UiSourceContractTests
 
         engine.Snapshot = engine.Snapshot with
         {
-            CurrentInstance = instance with { StageToken = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") }
+            Instances = new Dictionary<Guid, TaskInstance>
+            {
+                [instance.SourceTaskId] = instance with { StageToken = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") }
+            }
         };
         coordinator.CheckNow();
 
         Assert.Contains(instance.InstanceId, notifications.Closed);
         Assert.Equal(2, notifications.Shown.Count);
 
-        // 状态离开 Warning → 关闭
+        // 状态离开 Confirming → 关闭
         engine.Snapshot = engine.Snapshot with
         {
-            CurrentInstance = instance with { StageToken = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), State = TaskState.Scheduled }
+            Instances = new Dictionary<Guid, TaskInstance>
+            {
+                [instance.SourceTaskId] = instance with { StageToken = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), State = TaskInstanceState.Waiting }
+            }
         };
         coordinator.CheckNow();
 
@@ -413,7 +419,9 @@ public sealed class S11UiSourceContractTests
             Snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
-                CurrentInstance = instance,
+                Instances = instance is null
+                    ? new Dictionary<Guid, TaskInstance>()
+                    : new Dictionary<Guid, TaskInstance> { [instance.SourceTaskId] = instance },
                 LastUpdatedAt = Now
             }
         };
@@ -423,7 +431,7 @@ public sealed class S11UiSourceContractTests
         InstanceId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
         SourceTaskId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Warning,
+        State = TaskInstanceState.Confirming,
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         WarningStartTime = new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero),
         StageToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
@@ -431,7 +439,7 @@ public sealed class S11UiSourceContractTests
         CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
     };
 
-    private static TaskInstance ScheduledInstance() => WarningInstance() with { State = TaskState.Scheduled };
+    private static TaskInstance ScheduledInstance() => WarningInstance() with { State = TaskInstanceState.Waiting };
 
     private static string ReadAppFile(params string[] relativeParts)
     {

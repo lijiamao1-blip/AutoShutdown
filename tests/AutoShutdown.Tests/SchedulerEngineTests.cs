@@ -40,7 +40,7 @@ public sealed class SchedulerEngineTests
 
         var snapshot = engine.GetSnapshot();
         Assert.Equal(SchedulerEngineStatus.Running, snapshot.EngineStatus);
-        Assert.Null(snapshot.CurrentInstance);
+        Assert.Null(Current(snapshot));
         Assert.Equal(0, storage.WriteCount);
         Assert.Equal(0, handler.CallCount);
     }
@@ -67,10 +67,11 @@ public sealed class SchedulerEngineTests
     [Fact(Timeout = 2000)]
     public async Task Run_WhenRuntimeStateIsInvalid_Faults()
     {
-        await AssertInvalidRecoveryFaultsAsync("""{"SchemaVersion":2,"CurrentInstance":null,"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
         await AssertInvalidRecoveryFaultsAsync("null");
         await AssertInvalidRecoveryFaultsAsync(
-            """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"00000000-0000-0000-0000-000000000000","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":2,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
+            """{"SchemaVersion":2,"Instances":null,"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
+        await AssertInvalidRecoveryFaultsAsync(
+            """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"00000000-0000-0000-0000-000000000000","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":1,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""");
     }
 
     [Fact(Timeout = 2000)]
@@ -83,10 +84,10 @@ public sealed class SchedulerEngineTests
         using (var scope = new EngineScope(warningEngine))
         {
             await WaitUntilAsync(() =>
-                warningEngine.GetSnapshot().CurrentInstance?.State == TaskState.Interrupted);
+                Current(warningEngine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
 
-            var interrupted = warningEngine.GetSnapshot().CurrentInstance!;
-            Assert.Equal(TaskState.Interrupted, interrupted.State);
+            var interrupted = Current(warningEngine.GetSnapshot())!;
+            Assert.Equal(TaskInstanceState.Interrupted, interrupted.State);
             Assert.False(interrupted.HasExecuted);
             Assert.Equal(1, warningStorage.WriteCount);
         }
@@ -98,30 +99,11 @@ public sealed class SchedulerEngineTests
         using (var scope = new EngineScope(executingEngine))
         {
             await WaitUntilAsync(() =>
-                executingEngine.GetSnapshot().CurrentInstance?.State == TaskState.Interrupted);
+                Current(executingEngine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
 
-            Assert.True(executingEngine.GetSnapshot().CurrentInstance!.HasExecuted);
+            Assert.True(Current(executingEngine.GetSnapshot())!.HasExecuted);
             Assert.Equal(1, executingStorage.WriteCount);
         }
-    }
-
-    [Fact(Timeout = 2000)]
-    public async Task Run_WhenRecoveredScheduledIsMissed_FaultsWithoutHandler()
-    {
-        var storage = new InMemoryStorage();
-        storage.Seed("runtime.json", MissedScheduledRuntimeJson);
-        var handler = new FakeHandler();
-        var engine = CreateEngine(storage, new FakeClock(ClockBase), new ControllableDeadline(), handler);
-
-        using var scope = new EngineScope(engine);
-        await scope.RunTask;
-
-        var snapshot = engine.GetSnapshot();
-        Assert.Equal(SchedulerEngineStatus.Faulted, snapshot.EngineStatus);
-        Assert.NotNull(snapshot.FaultMessage);
-        Assert.NotNull(snapshot.CurrentInstance);
-        Assert.Equal(TaskState.Scheduled, snapshot.CurrentInstance!.State);
-        Assert.Equal(0, handler.CallCount);
     }
 
     [Fact(Timeout = 2000)]
@@ -136,7 +118,7 @@ public sealed class SchedulerEngineTests
         await WaitUntilAsync(() => deadline.PendingCount >= 1);
 
         Assert.Equal(SchedulerEngineStatus.Running, engine.GetSnapshot().EngineStatus);
-        Assert.Equal(TaskState.Scheduled, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Waiting, Current(engine.GetSnapshot())!.State);
     }
 
     [Fact(Timeout = 2000)]
@@ -154,9 +136,9 @@ public sealed class SchedulerEngineTests
             Assert.True(created.Succeeded);
             Assert.Equal(SchedulerCommandStatus.Success, created.Status);
             Assert.Equal(1, storage.WriteCount);
-            var current = engine.GetSnapshot().CurrentInstance!;
+            var current = Current(engine.GetSnapshot())!;
             Assert.NotNull(current);
-            Assert.Equal(TaskState.Scheduled, current.State);
+            Assert.Equal(TaskInstanceState.Waiting, current.State);
             Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero), current.ScheduledFireTime);
 
             var second = await engine.SubmitAsync(
@@ -176,7 +158,7 @@ public sealed class SchedulerEngineTests
                 CancellationToken.None);
 
             Assert.Equal(SchedulerCommandStatus.PersistenceFailed, result.Status);
-            Assert.Null(failingEngine.GetSnapshot().CurrentInstance);
+            Assert.Null(Current(failingEngine.GetSnapshot()));
             Assert.Equal(SchedulerEngineStatus.Faulted, failingEngine.GetSnapshot().EngineStatus);
         }
     }
@@ -192,13 +174,13 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         Assert.Equal(1, storage.WriteCount);
 
         var wrongId = await engine.SubmitAsync(
             new SnoozeTaskCommand(Guid.NewGuid(), instance.StageToken, TimeSpan.FromMinutes(5)),
             CancellationToken.None);
-        Assert.Equal(SchedulerCommandStatus.StaleCommand, wrongId.Status);
+        Assert.Equal(SchedulerCommandStatus.NoCurrentTask, wrongId.Status);
 
         var wrongToken = await engine.SubmitAsync(
             new SnoozeTaskCommand(instance.InstanceId, Guid.NewGuid(), TimeSpan.FromMinutes(5)),
@@ -226,7 +208,7 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition(warningSeconds: 60)),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         await WaitUntilAsync(() => deadline.PendingCount >= 1);
 
         var snoozed = await engine.SubmitAsync(
@@ -238,8 +220,8 @@ public sealed class SchedulerEngineTests
         await Task.Delay(50);
 
         var snapshot = engine.GetSnapshot();
-        var current = snapshot.CurrentInstance!;
-        Assert.Equal(TaskState.Scheduled, current.State);
+        var current = Current(snapshot)!;
+        Assert.Equal(TaskInstanceState.Waiting, current.State);
         Assert.NotEqual(instance.StageToken, current.StageToken);
         Assert.Equal(ClockBase.AddMinutes(5), current.ScheduledFireTime);
         Assert.Equal(0, handler.CallCount);
@@ -258,7 +240,7 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         await WaitUntilAsync(() => deadline.PendingCount >= 1);
 
         var cancelled = await engine.SubmitAsync(
@@ -268,7 +250,7 @@ public sealed class SchedulerEngineTests
         deadline.CompleteNext();
         await Task.Delay(50);
 
-        Assert.Equal(TaskState.Cancelled, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, Current(engine.GetSnapshot())!.State);
         Assert.Equal(0, handler.CallCount);
     }
 
@@ -291,9 +273,9 @@ public sealed class SchedulerEngineTests
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Warning);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Confirming);
 
-        Assert.Equal(TaskState.Warning, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Confirming, Current(engine.GetSnapshot())!.State);
         Assert.Equal(2, storage.WriteCount);
         Assert.Equal(0, handler.CallCount);
     }
@@ -317,11 +299,11 @@ public sealed class SchedulerEngineTests
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Executed);
 
         Assert.Equal(1, handler.CallCount);
-        var current = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Completed, current.State);
+        var current = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Executed, current.State);
         Assert.True(current.HasExecuted);
         Assert.Equal(3, storage.WriteCount);
         Assert.Equal(SchedulerEngineStatus.Running, engine.GetSnapshot().EngineStatus);
@@ -345,16 +327,16 @@ public sealed class SchedulerEngineTests
 
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero);
         deadline.CompleteNext();
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Warning);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Confirming);
 
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Executed);
 
         Assert.Equal(1, handler.CallCount);
-        var current = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Completed, current.State);
+        var current = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Executed, current.State);
         Assert.True(current.HasExecuted);
         Assert.Equal(4, storage.WriteCount);
         Assert.Equal(SchedulerEngineStatus.Running, engine.GetSnapshot().EngineStatus);
@@ -387,7 +369,7 @@ public sealed class SchedulerEngineTests
 
         Assert.Equal(1, handler.CallCount);
 
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         var rejected = await engine.SubmitAsync(
             new CancelTaskCommand(instance.InstanceId, instance.StageToken),
             CancellationToken.None);
@@ -418,9 +400,9 @@ public sealed class SchedulerEngineTests
         await WaitUntilAsync(() => engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Equal(0, handler.CallCount);
-        var current = engine.GetSnapshot().CurrentInstance!;
+        var current = Current(engine.GetSnapshot())!;
         Assert.False(current.HasExecuted);
-        Assert.Equal(TaskState.Scheduled, current.State);
+        Assert.Equal(TaskInstanceState.Waiting, current.State);
     }
 
     [Fact(Timeout = 2000)]
@@ -445,7 +427,7 @@ public sealed class SchedulerEngineTests
         await WaitUntilAsync(() => engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Equal(1, handler.CallCount);
-        Assert.True(engine.GetSnapshot().CurrentInstance!.HasExecuted);
+        Assert.True(Current(engine.GetSnapshot())!.HasExecuted);
         Assert.NotNull(engine.GetSnapshot().FaultMessage);
     }
 
@@ -463,7 +445,7 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         await WaitUntilAsync(() => deadline.PendingCount >= 1);
 
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
@@ -475,12 +457,12 @@ public sealed class SchedulerEngineTests
         var cancelled = await cancelTask;
 
         Assert.True(cancelled.Succeeded);
-        Assert.Equal(TaskState.Cancelled, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, Current(engine.GetSnapshot())!.State);
         Assert.Equal(0, handler.CallCount);
     }
 
     [Fact(Timeout = 2000)]
-    public async Task ClearTerminal_ValidClearsAndRefreshesToken()
+    public async Task ClearTerminal_ValidClearsInstance()
     {
         var storage = new InMemoryStorage();
         var engine = CreateEngine(storage, new FakeClock(ClockBase), new ControllableDeadline(), new FakeHandler());
@@ -490,24 +472,19 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
 
         var cancelled = await engine.SubmitAsync(
             new CancelTaskCommand(instance.InstanceId, instance.StageToken),
             CancellationToken.None);
         Assert.True(cancelled.Succeeded);
-        var cancelledInstance = engine.GetSnapshot().CurrentInstance!;
 
         var cleared = await engine.SubmitAsync(
             new ClearTerminalTaskCommand(instance.InstanceId),
             CancellationToken.None);
 
         Assert.True(cleared.Succeeded);
-        var clearedInstance = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Idle, clearedInstance.State);
-        Assert.Null(clearedInstance.WarningStartTime);
-        Assert.NotEqual(cancelledInstance.StageToken, clearedInstance.StageToken);
-        Assert.Equal(instance.InstanceId, clearedInstance.InstanceId);
+        Assert.Empty(engine.GetSnapshot().Instances);
     }
 
     [Fact(Timeout = 2000)]
@@ -521,7 +498,7 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
 
         var onActive = await engine.SubmitAsync(
             new ClearTerminalTaskCommand(instance.InstanceId),
@@ -531,7 +508,7 @@ public sealed class SchedulerEngineTests
         var wrongId = await engine.SubmitAsync(
             new ClearTerminalTaskCommand(Guid.NewGuid()),
             CancellationToken.None);
-        Assert.Equal(SchedulerCommandStatus.StaleCommand, wrongId.Status);
+        Assert.Equal(SchedulerCommandStatus.NoCurrentTask, wrongId.Status);
     }
 
     [Fact(Timeout = 2000)]
@@ -545,7 +522,7 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
 
         var cancelled = await engine.SubmitAsync(
             new CancelTaskCommand(instance.InstanceId, instance.StageToken),
@@ -558,7 +535,7 @@ public sealed class SchedulerEngineTests
             CancellationToken.None);
 
         Assert.Equal(SchedulerCommandStatus.PersistenceFailed, cleared.Status);
-        Assert.Equal(TaskState.Cancelled, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, Current(engine.GetSnapshot())!.State);
         Assert.Equal(SchedulerEngineStatus.Faulted, engine.GetSnapshot().EngineStatus);
     }
 
@@ -686,11 +663,11 @@ public sealed class SchedulerEngineTests
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Executed);
 
         Assert.Equal(SchedulerEngineStatus.Running, engine.GetSnapshot().EngineStatus);
-        var completed = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Completed, completed.State);
+        var completed = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Executed, completed.State);
         Assert.True(completed.HasExecuted);
         Assert.Single(power.Invocations);
         Assert.Equal(3, storage.WriteCount);
@@ -721,10 +698,10 @@ public sealed class SchedulerEngineTests
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Faulted);
 
         Assert.Equal(SchedulerEngineStatus.Running, engine.GetSnapshot().EngineStatus);
-        Assert.Equal(TaskState.Failed, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, Current(engine.GetSnapshot())!.State);
         Assert.Empty(power.Invocations);
         Assert.Equal(3, storage.WriteCount);
     }
@@ -758,9 +735,9 @@ public sealed class SchedulerEngineTests
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
 
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Faulted);
 
-        Assert.Equal(TaskState.Failed, engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, Current(engine.GetSnapshot())!.State);
         Assert.Single(power.Requests);
     }
 
@@ -792,8 +769,8 @@ public sealed class SchedulerEngineTests
         await WaitUntilAsync(() => engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Single(power.Invocations);
-        var current = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Executing, current.State);
+        var current = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Executing, current.State);
         Assert.True(current.HasExecuted);
     }
 
@@ -826,8 +803,8 @@ public sealed class SchedulerEngineTests
         await WaitUntilAsync(() => engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Empty(power.Invocations);
-        var current = engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Executing, current.State);
+        var current = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Executing, current.State);
         Assert.True(current.HasExecuted);
     }
 
@@ -850,12 +827,12 @@ public sealed class SchedulerEngineTests
             new CreateTaskCommand(CountdownDefinition()),
             CancellationToken.None);
         Assert.True(created.Succeeded);
-        var instance = engine.GetSnapshot().CurrentInstance!;
+        var instance = Current(engine.GetSnapshot())!;
         await WaitUntilAsync(() => deadline.PendingCount >= 1);
 
         clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         deadline.CompleteNext();
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Executed);
 
         Assert.Single(power.Invocations);
 
@@ -885,7 +862,7 @@ public sealed class SchedulerEngineTests
             new FixedConfigurationService(SuccessConfig()));
 
         using var scope = new EngineScope(engine);
-        await WaitUntilAsync(() => engine.GetSnapshot().CurrentInstance?.State == TaskState.Interrupted);
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Interrupted);
 
         Assert.Empty(power.Invocations);
     }
@@ -960,6 +937,9 @@ public sealed class SchedulerEngineTests
         throw new FileNotFoundException($"{fileName} was not found.");
     }
 
+    private static TaskInstance? Current(SchedulerSnapshot snapshot)
+        => snapshot.Instances.Values.FirstOrDefault();
+
     private static async Task AssertInvalidRecoveryFaultsAsync(string json)
     {
         var storage = new InMemoryStorage();
@@ -980,7 +960,7 @@ public sealed class SchedulerEngineTests
     {
         var taskService = new TaskService(
             new NextExecutionCalculator(),
-            new TaskStateMachine(),
+            new TaskInstanceStateMachine(),
             new SequentialIdentifierGenerator(InstanceId1, StageToken1, StageToken2, StageToken3, StageToken2));
 
         return new SchedulerEngine(
@@ -988,9 +968,10 @@ public sealed class SchedulerEngineTests
             clock,
             deadline,
             taskService,
-            new TaskStateMachine(),
+            new TaskInstanceStateMachine(),
             new SequentialIdentifierGenerator(StageToken1, StageToken2, StageToken3),
-            handler);
+            handler,
+            new NoOpTaskArbitrator());
     }
 
     private static SchedulerEngine CreateWorkflowEngine(
@@ -1005,7 +986,7 @@ public sealed class SchedulerEngineTests
 
         var taskService = new TaskService(
             new NextExecutionCalculator(),
-            new TaskStateMachine(),
+            new TaskInstanceStateMachine(),
             new SequentialIdentifierGenerator(InstanceId1, StageToken1, StageToken2, StageToken3, StageToken2));
 
         return new SchedulerEngine(
@@ -1013,9 +994,10 @@ public sealed class SchedulerEngineTests
             clock,
             deadline,
             taskService,
-            new TaskStateMachine(),
+            new TaskInstanceStateMachine(),
             new SequentialIdentifierGenerator(StageToken1, StageToken2, StageToken3),
-            handler);
+            handler,
+            new NoOpTaskArbitrator());
     }
 
     private static ConfigurationLoadResult SuccessConfig() => new()
@@ -1057,16 +1039,13 @@ public sealed class SchedulerEngineTests
     }
 
     private const string WarningRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
+        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private const string ExecutingRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
-
-    private const string MissedScheduledRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":2,"ScheduledFireTime":"2024-01-15T10:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T09:00:00+00:00"},"LastUpdatedAt":"2024-01-15T09:00:00+00:00"}""";
+        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private const string FutureScheduledRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":2,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
+        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":1,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private sealed class FakeClock : IClock
     {

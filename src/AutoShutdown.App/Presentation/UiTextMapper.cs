@@ -16,16 +16,16 @@ public static class UiTextMapper
         _ => "未知状态"
     };
 
-    public static string Map(TaskState state) => state switch
+    public static string Map(TaskInstanceState state) => state switch
     {
-        TaskState.Idle => "空闲",
-        TaskState.Scheduled => "等待执行",
-        TaskState.Warning => "提醒中",
-        TaskState.Executing => "正在执行",
-        TaskState.Cancelled => "已取消",
-        TaskState.Completed => "已完成",
-        TaskState.Failed => "执行失败",
-        TaskState.Interrupted => "恢复后已中断",
+        TaskInstanceState.Waiting => "等待执行",
+        TaskInstanceState.Running => "准备执行",
+        TaskInstanceState.Confirming => "提醒中",
+        TaskInstanceState.Executing => "正在执行",
+        TaskInstanceState.Executed => "已完成",
+        TaskInstanceState.Cancelled => "已取消",
+        TaskInstanceState.Faulted => "执行失败",
+        TaskInstanceState.Interrupted => "恢复后已中断",
         _ => "状态未知"
     };
 

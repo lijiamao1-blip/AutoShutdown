@@ -112,7 +112,7 @@ public sealed class S12_5WorkflowGateTests
         InstanceId = InstanceId1,
         SourceTaskId = SourceTaskId,
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Executing,
+        State = TaskInstanceState.Executing,
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         WarningStartTime = null,
         StageToken = StageToken1,

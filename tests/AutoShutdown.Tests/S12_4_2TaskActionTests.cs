@@ -124,8 +124,8 @@ public sealed class S12_4_2TaskActionTests
 
         var snooze = Assert.IsType<SnoozeTaskCommand>(engine.Commands.Single());
         Assert.Equal(oldToken, snooze.ExpectedStageToken); // 用旧令牌提交
-        Assert.NotNull(engine.Snapshot.CurrentInstance);
-        Assert.NotEqual(oldToken, engine.Snapshot.CurrentInstance!.StageToken); // 新快照令牌已更新
+        var snoozed = Assert.Single(engine.Snapshot.Instances.Values);
+        Assert.NotEqual(oldToken, snoozed.StageToken); // 新快照令牌已更新
     }
 
     // ---- 8. InstanceId 或 StageToken 缺失时按钮禁用并提供原因 ----
@@ -205,7 +205,7 @@ public sealed class S12_4_2TaskActionTests
         InstanceId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
         SourceTaskId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Scheduled,
+        State = TaskInstanceState.Waiting,
         ScheduledFireTime = Now.AddMinutes(30),
         WarningStartTime = Now.AddMinutes(20),
         StageToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
@@ -216,7 +216,7 @@ public sealed class S12_4_2TaskActionTests
     private static SchedulerSnapshot SnapshotOf(TaskInstance instance) => new()
     {
         EngineStatus = SchedulerEngineStatus.Running,
-        CurrentInstance = instance,
+        Instances = new Dictionary<Guid, TaskInstance> { [instance.SourceTaskId] = instance },
         LastUpdatedAt = Now
     };
 
@@ -289,44 +289,62 @@ public sealed class S12_4_2TaskActionTests
         private static SchedulerSnapshot Apply(
             SchedulerCommand command,
             SchedulerSnapshot current,
-            DateTimeOffset now) => command switch
+            DateTimeOffset now)
         {
-            CancelTaskCommand => current with { CurrentInstance = null, LastUpdatedAt = now },
-            SnoozeTaskCommand snooze when current.CurrentInstance is not null =>
-                current with
-                {
-                    CurrentInstance = current.CurrentInstance with
-                    {
-                        StageToken = Guid.NewGuid(),
-                        State = TaskState.Scheduled,
-                        ScheduledFireTime = current.CurrentInstance.ScheduledFireTime.Add(snooze.Duration),
-                        WarningStartTime = null
-                    },
-                    LastUpdatedAt = now
-                },
-            CreateTaskCommand create => current with
+            switch (command)
             {
-                CurrentInstance = new TaskInstance
-                {
-                    InstanceId = create.Definition.Id,
-                    SourceTaskId = create.Definition.Id,
-                    ActionSnapshot = create.Definition.Action,
-                    State = TaskState.Scheduled,
-                    ScheduledFireTime = create.Definition.CountdownDuration.HasValue
-                        ? now.Add(create.Definition.CountdownDuration.Value)
-                        : now,
-                    WarningStartTime = create.Definition.WarningSeconds > 0
-                        ? now.Add(create.Definition.CountdownDuration ?? TimeSpan.Zero)
-                            .AddSeconds(-(create.Definition.WarningSeconds ?? 0))
-                        : null,
-                    StageToken = Guid.NewGuid(),
-                    HasExecuted = false,
-                    CreatedAt = now
-                },
-                LastUpdatedAt = now
-            },
-            _ => current
-        };
+                case CancelTaskCommand:
+                    return current with
+                    {
+                        Instances = new Dictionary<Guid, TaskInstance>(),
+                        LastUpdatedAt = now
+                    };
+
+                case SnoozeTaskCommand snooze when current.Instances.Count == 1:
+                    var (taskId, existing) = current.Instances.Single();
+                    return current with
+                    {
+                        Instances = new Dictionary<Guid, TaskInstance>
+                        {
+                            [taskId] = existing with
+                            {
+                                StageToken = Guid.NewGuid(),
+                                State = TaskInstanceState.Waiting,
+                                ScheduledFireTime = existing.ScheduledFireTime.Add(snooze.Duration),
+                                WarningStartTime = null
+                            }
+                        },
+                        LastUpdatedAt = now
+                    };
+
+                case CreateTaskCommand create:
+                    var created = new TaskInstance
+                    {
+                        InstanceId = create.Definition.Id,
+                        SourceTaskId = create.Definition.Id,
+                        ActionSnapshot = create.Definition.Action,
+                        State = TaskInstanceState.Waiting,
+                        ScheduledFireTime = create.Definition.CountdownDuration.HasValue
+                            ? now.Add(create.Definition.CountdownDuration.Value)
+                            : now,
+                        WarningStartTime = create.Definition.WarningSeconds > 0
+                            ? now.Add(create.Definition.CountdownDuration ?? TimeSpan.Zero)
+                                .AddSeconds(-(create.Definition.WarningSeconds ?? 0))
+                            : null,
+                        StageToken = Guid.NewGuid(),
+                        HasExecuted = false,
+                        CreatedAt = now
+                    };
+                    return current with
+                    {
+                        Instances = new Dictionary<Guid, TaskInstance> { [created.SourceTaskId] = created },
+                        LastUpdatedAt = now
+                    };
+
+                default:
+                    return current;
+            }
+        }
     }
 
     private sealed class StubConfigurationService : IConfigurationService

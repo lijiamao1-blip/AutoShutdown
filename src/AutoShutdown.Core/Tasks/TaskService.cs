@@ -5,16 +5,18 @@ namespace AutoShutdown.Core.Tasks;
 
 public sealed class TaskService : ITaskService
 {
+    private const string SourceName = "TaskService";
+
     private static readonly TimeSpan MaxSnoozeDuration = TimeSpan.FromDays(7);
 
     private readonly INextExecutionCalculator _nextExecutionCalculator;
-    private readonly ITaskStateMachine _stateMachine;
+    private readonly ITaskInstanceStateMachine _stateMachine;
     private readonly IIdentifierGenerator _identifierGenerator;
     private readonly TaskCollection _tasks = new();
 
     public TaskService(
         INextExecutionCalculator nextExecutionCalculator,
-        ITaskStateMachine stateMachine,
+        ITaskInstanceStateMachine stateMachine,
         IIdentifierGenerator identifierGenerator)
     {
         ArgumentNullException.ThrowIfNull(nextExecutionCalculator);
@@ -65,20 +67,6 @@ public sealed class TaskService : ITaskService
             };
         }
 
-        var transition = _stateMachine.TryTransition(
-            TaskState.Idle,
-            TaskState.Scheduled,
-            TaskTransitionCause.Schedule);
-        if (!transition.Allowed)
-        {
-            return new TaskCommandResult
-            {
-                Status = TaskCommandStatus.TransitionRejected,
-                TransitionDecisionCode = transition.DecisionCode,
-                Message = transition.Message
-            };
-        }
-
         var instanceId = _identifierGenerator.NewId();
         var stageToken = _identifierGenerator.NewId();
         if (instanceId == Guid.Empty || stageToken == Guid.Empty || instanceId == stageToken)
@@ -91,12 +79,13 @@ public sealed class TaskService : ITaskService
         var fireTime = schedule.ScheduledFireTime!.Value;
         var warningStartTime = ComputeWarningStartTime(definition.WarningSeconds, fireTime, now);
 
+        // V2：实例「诞生」于 Waiting 态；无需从 Idle 的状态机转换（V2 无 Idle）。
         var instance = new TaskInstance
         {
             InstanceId = instanceId,
             SourceTaskId = definition.Id,
             ActionSnapshot = definition.Action,
-            State = TaskState.Scheduled,
+            State = TaskInstanceState.Waiting,
             ScheduledFireTime = fireTime,
             WarningStartTime = warningStartTime,
             StageToken = stageToken,
@@ -132,20 +121,19 @@ public sealed class TaskService : ITaskService
                 "Snooze duration must be greater than zero and at most 7 days.");
         }
 
-        var cause = current.State switch
+        if (current.State != TaskInstanceState.Waiting)
         {
-            TaskState.Warning => TaskTransitionCause.SnoozeByUser,
-            _ => TaskTransitionCause.Reschedule
-        };
-
-        var transition = _stateMachine.TryTransition(current.State, TaskState.Scheduled, cause);
-        if (!transition.Allowed)
-        {
+            // V2 白名单无 confirming→waiting 边：确认/终态实例不可 snooze，仅 Waiting 可顺延。
+            var rejected = _stateMachine.TryTransition(
+                current.State,
+                TaskInstanceState.Waiting,
+                TaskInstanceStateTransitionCause.Reschedule,
+                SourceName);
             return new TaskCommandResult
             {
                 Status = TaskCommandStatus.TransitionRejected,
-                TransitionDecisionCode = transition.DecisionCode,
-                Message = transition.Message
+                TransitionDecisionCode = rejected.DecisionCode,
+                Message = "Only Waiting instances can be snoozed: " + rejected.Reason
             };
         }
 
@@ -157,9 +145,9 @@ public sealed class TaskService : ITaskService
                 "The generated stage token is not valid.");
         }
 
+        // Waiting → Waiting：仅顺延触发时间并刷新 StageToken（字段级重排，非状态转换）。
         var snoozed = current with
         {
-            State = TaskState.Scheduled,
             ScheduledFireTime = now.ToUniversalTime().Add(duration),
             WarningStartTime = null,
             StageToken = stageToken
@@ -182,17 +170,22 @@ public sealed class TaskService : ITaskService
             return Failure(TaskCommandStatus.AlreadyExecuted, "An executed instance cannot be cancelled.");
         }
 
+        var cause = current.State == TaskInstanceState.Confirming
+            ? TaskInstanceStateTransitionCause.CancelledDuringConfirmation
+            : TaskInstanceStateTransitionCause.CancelByUser;
+
         var transition = _stateMachine.TryTransition(
             current.State,
-            TaskState.Cancelled,
-            TaskTransitionCause.CancelByUser);
+            TaskInstanceState.Cancelled,
+            cause,
+            SourceName);
         if (!transition.Allowed)
         {
             return new TaskCommandResult
             {
                 Status = TaskCommandStatus.TransitionRejected,
                 TransitionDecisionCode = transition.DecisionCode,
-                Message = transition.Message
+                Message = transition.Reason
             };
         }
 
@@ -206,7 +199,7 @@ public sealed class TaskService : ITaskService
 
         var cancelled = current with
         {
-            State = TaskState.Cancelled,
+            State = TaskInstanceState.Cancelled,
             WarningStartTime = null,
             StageToken = stageToken
         };
@@ -243,39 +236,19 @@ public sealed class TaskService : ITaskService
                 "The definition identity or action does not match the current instance.");
         }
 
-        if (current.HasExecuted)
-        {
-            return Failure(
-                TaskCommandStatus.AlreadyExecuted,
-                "An executed instance cannot be rescheduled.");
-        }
-
-        if (current.State != TaskState.Idle)
-        {
-            var rejected = _stateMachine.TryTransition(
-                current.State,
-                TaskState.Scheduled,
-                TaskTransitionCause.Schedule);
-
-            return new TaskCommandResult
-            {
-                Status = TaskCommandStatus.TransitionRejected,
-                TransitionDecisionCode = rejected.DecisionCode,
-                Message = rejected.Message
-            };
-        }
-
+        // V2：executed → waiting（Reschedule，刷新 StageToken）。仅 Executed 可重排。
         var transition = _stateMachine.TryTransition(
-            TaskState.Idle,
-            TaskState.Scheduled,
-            TaskTransitionCause.Schedule);
+            current.State,
+            TaskInstanceState.Waiting,
+            TaskInstanceStateTransitionCause.Reschedule,
+            SourceName);
         if (!transition.Allowed)
         {
             return new TaskCommandResult
             {
                 Status = TaskCommandStatus.TransitionRejected,
                 TransitionDecisionCode = transition.DecisionCode,
-                Message = transition.Message
+                Message = transition.Reason
             };
         }
 
@@ -303,7 +276,7 @@ public sealed class TaskService : ITaskService
 
         var rescheduled = current with
         {
-            State = TaskState.Scheduled,
+            State = TaskInstanceState.Waiting,
             ScheduledFireTime = fireTime,
             WarningStartTime = warningStartTime,
             StageToken = stageToken,

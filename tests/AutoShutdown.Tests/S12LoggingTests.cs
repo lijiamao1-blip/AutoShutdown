@@ -536,7 +536,7 @@ public sealed class S12LoggingTests
         InstanceId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
         SourceTaskId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
         ActionSnapshot = PowerAction.Shutdown,
-        State = TaskState.Executing,
+        State = TaskInstanceState.Executing,
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         StageToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         HasExecuted = true,

@@ -45,7 +45,12 @@ public static class ServiceRegistration
             new ConfigurationService(
                 provider.GetRequiredService<IStorage>(),
                 Array.Empty<IConfigurationMigration>()));
-        services.AddSingleton<ITaskStateMachine, TaskStateMachine>();
+        services.AddSingleton<TaskInstanceStateMachine>();
+        services.AddSingleton<ITaskInstanceStateMachine>(provider =>
+            new LoggingTaskInstanceStateMachineDecorator(
+                provider.GetRequiredService<TaskInstanceStateMachine>(),
+                provider.GetRequiredService<IApplicationLogger>()));
+        services.AddSingleton<ITaskArbitrator, NoOpTaskArbitrator>();
         services.AddSingleton<INextExecutionCalculator, NextExecutionCalculator>();
         services.AddSingleton<IIdentifierGenerator, GuidIdentifierGenerator>();
         services.AddSingleton<ITaskService, TaskService>();

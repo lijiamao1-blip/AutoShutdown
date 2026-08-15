@@ -10,7 +10,7 @@ public sealed class NotificationCoordinator : IDisposable
     private readonly INotificationService _notifications;
     private readonly IApplicationLogger _logger;
     private readonly object _sync = new();
-    private readonly HashSet<(Guid InstanceId, Guid StageToken, TaskState State)> _shownKeys = new();
+    private readonly HashSet<(Guid InstanceId, Guid StageToken, TaskInstanceState State)> _shownKeys = new();
 
     private (Guid InstanceId, Guid StageToken)? _activeReminder;
     private readonly CancellationTokenSource _cts = new();
@@ -51,7 +51,7 @@ public sealed class NotificationCoordinator : IDisposable
     {
         try
         {
-            Process(_engine.GetSnapshot().CurrentInstance);
+            Process(_engine.GetSnapshot().Instances.Values);
         }
         catch (Exception)
         {
@@ -109,33 +109,29 @@ public sealed class NotificationCoordinator : IDisposable
         }
     }
 
-    internal void Process(TaskInstance? instance)
+    internal void Process(IEnumerable<TaskInstance> instances)
     {
         lock (_sync)
         {
-            if (instance is null)
+            // 多实例：任一实例进入 Confirming（提醒中）即弹提醒；无提醒实例则收起。
+            // 完整列表交互（多实例并排展示）留待 T08 UI 切片。
+            var confirming = instances.FirstOrDefault(i => i.State == TaskInstanceState.Confirming);
+            if (confirming is null)
             {
                 CloseActiveReminder();
                 return;
             }
 
-            if (instance.State == TaskState.Warning)
+            var key = (confirming.InstanceId, confirming.StageToken, confirming.State);
+            if (_shownKeys.Add(key))
             {
-                var key = (instance.InstanceId, instance.StageToken, instance.State);
-                if (_shownKeys.Add(key))
-                {
-                    CloseActiveReminder();
-                    _logger.Info(
-                        "ReminderShown",
-                        "显示关机前提醒，动作：" + instance.ActionSnapshot);
-                    _notifications.ShowReminder(instance);
-                    _activeReminder = (instance.InstanceId, instance.StageToken);
-                }
-
-                return;
+                CloseActiveReminder();
+                _logger.Info(
+                    "ReminderShown",
+                    "显示关机前提醒，动作：" + confirming.ActionSnapshot);
+                _notifications.ShowReminder(confirming);
+                _activeReminder = (confirming.InstanceId, confirming.StageToken);
             }
-
-            CloseActiveReminder();
         }
     }
 

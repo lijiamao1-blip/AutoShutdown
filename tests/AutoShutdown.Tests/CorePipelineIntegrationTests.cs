@@ -36,24 +36,24 @@ public sealed class CorePipelineIntegrationTests
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition());
         Assert.True(created.Succeeded);
-        Assert.Equal(TaskState.Scheduled, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Waiting, harness.CurrentInstance!.State);
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
 
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
-        Assert.Equal(TaskState.Completed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Executed, harness.CurrentInstance!.State);
         Assert.Equal(1, harness.Power.CallCount);
         Assert.Equal(PowerAction.Shutdown, harness.Power.Requests[0].Action);
         Assert.Equal(harness.CreatedInstanceId, harness.Power.Requests[0].InstanceId);
         Assert.False(string.IsNullOrEmpty(harness.Power.Requests[0].Reason));
 
         var states = harness.Storage.WrittenRuntimeStates;
-        var executingIndex = states.FindIndex(s => s.CurrentInstance?.State == TaskState.Executing && s.CurrentInstance.HasExecuted);
-        var completedIndex = states.FindIndex(s => s.CurrentInstance?.State == TaskState.Completed);
+        var executingIndex = states.FindIndex(s => s.Instances.Values.Any(i => i.State == TaskInstanceState.Executing && i.HasExecuted));
+        var completedIndex = states.FindIndex(s => s.Instances.Values.Any(i => i.State == TaskInstanceState.Executed));
         Assert.True(executingIndex >= 0, "Executing must be persisted.");
         Assert.True(completedIndex > executingIndex, "Executing must be persisted before Completed.");
 
@@ -74,13 +74,13 @@ public sealed class CorePipelineIntegrationTests
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition());
         Assert.True(created.Succeeded);
-        var instance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var instance = harness.CurrentInstance!;
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
 
         var cancelled = await harness.SubmitAsync(
             new CancelTaskCommand(instance.InstanceId, instance.StageToken));
         Assert.True(cancelled.Succeeded);
-        Assert.Equal(TaskState.Cancelled, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, harness.CurrentInstance!.State);
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
@@ -88,45 +88,41 @@ public sealed class CorePipelineIntegrationTests
         await Task.Delay(50);
 
         Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(TaskState.Cancelled, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, harness.CurrentInstance!.State);
         var states = harness.Storage.WrittenRuntimeStates;
-        Assert.DoesNotContain(states, s => s.CurrentInstance?.State == TaskState.Executing);
-        Assert.DoesNotContain(states, s => s.CurrentInstance?.State == TaskState.Completed);
+        Assert.DoesNotContain(states, s => s.Instances.Values.Any(i => i.State == TaskInstanceState.Executing));
+        Assert.DoesNotContain(states, s => s.Instances.Values.Any(i => i.State == TaskInstanceState.Executed));
     }
 
     // ---- C. 延迟后旧时间零执行，新时间一次 ----
 
     [Fact(Timeout = 2000)]
-    public async Task C_SnoozeAfterWarning_OldDeadlinesZero_NewFireOnce()
+    public async Task C_SnoozeFromWaiting_OldDeadlinesZero_NewFireOnce()
     {
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition(warningSeconds: 60));
         Assert.True(created.Succeeded);
-        var instance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var instance = harness.CurrentInstance!;
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
-
-        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero);
-        harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Warning);
 
         var snoozed = await harness.SubmitAsync(
             new SnoozeTaskCommand(instance.InstanceId, instance.StageToken, TimeSpan.FromMinutes(30)));
         Assert.True(snoozed.Succeeded);
-        var snoozedInstance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var snoozedInstance = harness.CurrentInstance!;
         Assert.NotEqual(instance.StageToken, snoozedInstance.StageToken);
-        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 29, 0, TimeSpan.Zero), snoozedInstance.ScheduledFireTime);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 11, 30, 0, TimeSpan.Zero), snoozedInstance.ScheduledFireTime);
 
         harness.Deadline.CompleteNext();
         harness.Deadline.CompleteAll();
         await Task.Delay(50);
         Assert.Equal(0, harness.Power.CallCount);
 
-        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 29, 0, TimeSpan.Zero);
+        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 30, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
 
         Assert.Equal(1, harness.Power.CallCount);
-        Assert.Equal(TaskState.Completed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Executed, harness.CurrentInstance!.State);
     }
 
     // ---- D. 配置损坏或不可用零执行 ----
@@ -147,10 +143,10 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Faulted);
 
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
-        Assert.Equal(TaskState.Failed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, harness.CurrentInstance!.State);
         Assert.Equal(0, harness.Power.CallCount);
         Assert.Equal(1, harness.Configuration.LoadCount);
     }
@@ -166,10 +162,10 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Faulted);
 
         Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(TaskState.Failed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, harness.CurrentInstance!.State);
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
     }
 
@@ -185,10 +181,10 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Faulted);
 
         Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(TaskState.Failed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, harness.CurrentInstance!.State);
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
     }
 
@@ -223,11 +219,11 @@ public sealed class CorePipelineIntegrationTests
         storage.Seed("runtime.json", WarningRuntimeJson);
         using var harness = new Harness(storage: storage, startRunning: true);
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Interrupted);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Interrupted);
 
         Assert.Equal(0, harness.Power.CallCount);
         Assert.Equal(0, harness.Configuration.LoadCount);
-        Assert.False(harness.Engine.GetSnapshot().CurrentInstance!.HasExecuted);
+        Assert.False(harness.CurrentInstance!.HasExecuted);
     }
 
     [Fact(Timeout = 2000)]
@@ -237,26 +233,11 @@ public sealed class CorePipelineIntegrationTests
         storage.Seed("runtime.json", ExecutingRuntimeJson);
         using var harness = new Harness(storage: storage, startRunning: true);
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Interrupted);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Interrupted);
 
         Assert.Equal(0, harness.Power.CallCount);
         Assert.Equal(0, harness.Configuration.LoadCount);
-        Assert.True(harness.Engine.GetSnapshot().CurrentInstance!.HasExecuted);
-    }
-
-    [Fact(Timeout = 2000)]
-    public async Task F_RecoverMissedScheduled_Faults_PreservingInstance_NoExecution()
-    {
-        var storage = new InMemoryStorage();
-        storage.Seed("runtime.json", MissedScheduledRuntimeJson);
-        using var harness = new Harness(storage: storage, startRunning: true);
-        await harness.RunTask;
-
-        var snapshot = harness.Engine.GetSnapshot();
-        Assert.Equal(SchedulerEngineStatus.Faulted, snapshot.EngineStatus);
-        Assert.Equal(TaskState.Scheduled, snapshot.CurrentInstance!.State);
-        Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(0, harness.Configuration.LoadCount);
+        Assert.True(harness.CurrentInstance!.HasExecuted);
     }
 
     // ---- G. 重复与过期回调 ----
@@ -270,7 +251,7 @@ public sealed class CorePipelineIntegrationTests
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
         Assert.Equal(1, harness.Power.CallCount);
 
         harness.Deadline.CompleteNext();
@@ -281,17 +262,13 @@ public sealed class CorePipelineIntegrationTests
     }
 
     [Fact(Timeout = 2000)]
-    public async Task G_OldStageTokenCallback_AfterSnooze_PowerZero()
+    public async Task G_OldDeadlineAfterSnooze_PowerZero()
     {
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition(warningSeconds: 60));
         Assert.True(created.Succeeded);
-        var instance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var instance = harness.CurrentInstance!;
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
-
-        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 59, 0, TimeSpan.Zero);
-        harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Warning);
 
         var snoozed = await harness.SubmitAsync(
             new SnoozeTaskCommand(instance.InstanceId, instance.StageToken, TimeSpan.FromMinutes(30)));
@@ -299,11 +276,10 @@ public sealed class CorePipelineIntegrationTests
 
         harness.Deadline.CompleteNext();
         harness.Deadline.CompleteAll();
-        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         await Task.Delay(50);
 
         Assert.Equal(0, harness.Power.CallCount);
-        Assert.Equal(TaskState.Scheduled, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Waiting, harness.CurrentInstance!.State);
     }
 
     [Fact(Timeout = 2000)]
@@ -312,7 +288,7 @@ public sealed class CorePipelineIntegrationTests
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition());
         Assert.True(created.Succeeded);
-        var instance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var instance = harness.CurrentInstance!;
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
@@ -323,7 +299,7 @@ public sealed class CorePipelineIntegrationTests
         var cancelled = await cancelTask;
 
         Assert.True(cancelled.Succeeded);
-        Assert.Equal(TaskState.Cancelled, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Cancelled, harness.CurrentInstance!.State);
         Assert.Equal(0, harness.Power.CallCount);
     }
 
@@ -340,7 +316,7 @@ public sealed class CorePipelineIntegrationTests
         Assert.Equal(SchedulerCommandStatus.PersistenceFailed, created.Status);
         Assert.Equal(0, harness.Power.CallCount);
         Assert.Equal(SchedulerEngineStatus.Faulted, harness.Engine.GetSnapshot().EngineStatus);
-        Assert.Null(harness.Engine.GetSnapshot().CurrentInstance);
+        Assert.Null(harness.CurrentInstance);
     }
 
     [Fact(Timeout = 2000)]
@@ -359,8 +335,8 @@ public sealed class CorePipelineIntegrationTests
         await WaitUntilAsync(() => harness.Engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Equal(0, harness.Power.CallCount);
-        var current = harness.Engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Scheduled, current.State);
+        var current = harness.CurrentInstance!;
+        Assert.Equal(TaskInstanceState.Waiting, current.State);
         Assert.False(current.HasExecuted);
     }
 
@@ -380,8 +356,8 @@ public sealed class CorePipelineIntegrationTests
         await WaitUntilAsync(() => harness.Engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Equal(1, harness.Power.CallCount);
-        var current = harness.Engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Executing, current.State);
+        var current = harness.CurrentInstance!;
+        Assert.Equal(TaskInstanceState.Executing, current.State);
         Assert.True(current.HasExecuted);
         await Task.Delay(50);
         Assert.Equal(1, harness.Power.CallCount);
@@ -405,8 +381,8 @@ public sealed class CorePipelineIntegrationTests
         await WaitUntilAsync(() => harness.Engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Faulted);
 
         Assert.Equal(0, harness.Power.CallCount);
-        var current = harness.Engine.GetSnapshot().CurrentInstance!;
-        Assert.Equal(TaskState.Executing, current.State);
+        var current = harness.CurrentInstance!;
+        Assert.Equal(TaskInstanceState.Executing, current.State);
         Assert.True(current.HasExecuted);
         await Task.Delay(50);
         Assert.Equal(0, harness.Power.CallCount);
@@ -434,9 +410,9 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Faulted);
 
-        Assert.Equal(TaskState.Failed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, harness.CurrentInstance!.State);
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
         Assert.Equal(1, harness.Power.CallCount);
         await Task.Delay(50);
@@ -454,9 +430,9 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Failed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Faulted);
 
-        Assert.Equal(TaskState.Failed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Faulted, harness.CurrentInstance!.State);
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
         Assert.Equal(1, harness.Power.CallCount);
         await Task.Delay(50);
@@ -474,9 +450,9 @@ public sealed class CorePipelineIntegrationTests
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
 
-        Assert.Equal(TaskState.Completed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Executed, harness.CurrentInstance!.State);
         Assert.Equal(SchedulerEngineStatus.Running, harness.Engine.GetSnapshot().EngineStatus);
         Assert.Equal(1, harness.Power.CallCount);
     }
@@ -490,7 +466,7 @@ public sealed class CorePipelineIntegrationTests
         using var harness = new Harness(utcNow: now, localTimeZone: TestZone);
         var created = await harness.SubmitCreateAsync(DailyAtDefinition());
         Assert.True(created.Succeeded);
-        var instance = harness.Engine.GetSnapshot().CurrentInstance!;
+        var instance = harness.CurrentInstance!;
         Assert.Equal(new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero), instance.ScheduledFireTime);
         Assert.Equal(0, harness.Power.CallCount);
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
@@ -502,10 +478,10 @@ public sealed class CorePipelineIntegrationTests
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Engine.GetSnapshot().CurrentInstance?.State == TaskState.Completed);
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
 
         Assert.Equal(1, harness.Power.CallCount);
-        Assert.Equal(TaskState.Completed, harness.Engine.GetSnapshot().CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Executed, harness.CurrentInstance!.State);
         Assert.Contains(new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero), harness.Deadline.WaitedDeadlines);
     }
 
@@ -554,13 +530,10 @@ public sealed class CorePipelineIntegrationTests
     }
 
     private const string WarningRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
+        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":3,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":"2024-01-15T11:59:00+00:00","StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private const string ExecutingRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
-
-    private const string MissedScheduledRuntimeJson =
-        """{"SchemaVersion":1,"CurrentInstance":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":2,"ScheduledFireTime":"2024-01-15T10:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":false,"CreatedAt":"2024-01-15T09:00:00+00:00"},"LastUpdatedAt":"2024-01-15T09:00:00+00:00"}""";
+        """{"SchemaVersion":2,"Instances":{"99999999-9999-9999-9999-999999999999":{"InstanceId":"11111111-1111-1111-1111-111111111111","SourceTaskId":"99999999-9999-9999-9999-999999999999","ActionSnapshot":1,"State":4,"ScheduledFireTime":"2024-01-15T12:00:00+00:00","WarningStartTime":null,"StageToken":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","HasExecuted":true,"CreatedAt":"2024-01-15T10:00:00+00:00"}},"LastUpdatedAt":"2024-01-15T10:00:00+00:00"}""";
 
     private sealed class Harness : IDisposable
     {
@@ -590,7 +563,7 @@ public sealed class CorePipelineIntegrationTests
                 ? new RecordingPowerService(powerCustom)
                 : new RecordingPowerService(powerResult ?? SimulatedResult());
 
-            var stateMachine = new TaskStateMachine();
+            var stateMachine = new TaskInstanceStateMachine();
             var calculator = new NextExecutionCalculator();
             var taskService = new TaskService(
                 calculator,
@@ -606,7 +579,8 @@ public sealed class CorePipelineIntegrationTests
                 taskService,
                 stateMachine,
                 new SequentialIdentifierGenerator(StageToken1, StageToken2, StageToken3),
-                handler);
+                handler,
+                new NoOpTaskArbitrator());
 
             RunTask = startRunning ? Engine.RunAsync(_cts.Token) : Task.CompletedTask;
         }
@@ -625,7 +599,9 @@ public sealed class CorePipelineIntegrationTests
 
         public Task RunTask { get; }
 
-        public Guid CreatedInstanceId => Engine.GetSnapshot().CurrentInstance?.InstanceId ?? Guid.Empty;
+        public TaskInstance? CurrentInstance => Engine.GetSnapshot().Instances.Values.FirstOrDefault();
+
+        public Guid CreatedInstanceId => CurrentInstance?.InstanceId ?? Guid.Empty;
 
         public Task<SchedulerCommandResult> SubmitAsync(SchedulerCommand command)
             => Engine.SubmitAsync(command, CancellationToken.None);
