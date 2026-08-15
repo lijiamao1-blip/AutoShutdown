@@ -16,6 +16,9 @@ public sealed class TasksDocumentStoreTests : IDisposable
     private const string ValidTasksJson =
         """{"SchemaVersion":1,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0},{"Id":"22222222-2222-2222-2222-222222222222","Kind":3,"Action":2,"CountdownDuration":null,"TargetTimeOfDay":"20:00:00","WarningSeconds":300,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":50}]}""";
 
+    private const string CountdownTaskJson =
+        """{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0}""";
+
     [Fact]
     public async Task LoadAsync_WhenFileMissing_ReturnsNotFound()
     {
@@ -104,6 +107,29 @@ public sealed class TasksDocumentStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_WhenTaskItemIsNull_ReturnsInvalid()
+    {
+        await SeedAsync("""{"SchemaVersion":1,"Tasks":[null]}""");
+
+        var result = await CreateStore().LoadAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.Invalid, result.Status);
+        Assert.Null(result.Document);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhenTaskIdsAreDuplicated_ReturnsInvalid()
+    {
+        await SeedAsync(
+            $$"""{"SchemaVersion":1,"Tasks":[{{CountdownTaskJson}},{{CountdownTaskJson}}]}""");
+
+        var result = await CreateStore().LoadAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.Invalid, result.Status);
+        Assert.Null(result.Document);
+    }
+
+    [Fact]
     public async Task SaveAsync_WhenValid_WritesAndRoundTrips()
     {
         var store = CreateStore();
@@ -173,6 +199,43 @@ public sealed class TasksDocumentStoreTests : IDisposable
         Assert.False(save.Succeeded);
     }
 
+    [Fact]
+    public async Task SaveAsync_WhenTaskItemIsNull_DoesNotWrite()
+    {
+        var store = CreateStore();
+        var document = new TasksDocument
+        {
+            Tasks = new TaskDefinition[] { null! }
+        };
+
+        var save = await store.SaveAsync(document, CancellationToken.None);
+
+        Assert.Equal(TasksSaveStatus.Invalid, save.Status);
+        Assert.False(save.Succeeded);
+        Assert.False(File.Exists(Path.Combine(_root, TasksDocumentStore.FileName)));
+    }
+
+    [Fact]
+    public async Task SaveAsync_WhenTaskIdsAreDuplicated_DoesNotWrite()
+    {
+        var store = CreateStore();
+        var id = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var document = new TasksDocument
+        {
+            Tasks =
+            [
+                ValidCountdown(id),
+                ValidCountdown(id)
+            ]
+        };
+
+        var save = await store.SaveAsync(document, CancellationToken.None);
+
+        Assert.Equal(TasksSaveStatus.Invalid, save.Status);
+        Assert.False(save.Succeeded);
+        Assert.False(File.Exists(Path.Combine(_root, TasksDocumentStore.FileName)));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -182,6 +245,17 @@ public sealed class TasksDocumentStoreTests : IDisposable
     }
 
     private TasksDocumentStore CreateStore() => new(new FileStorage(_root));
+
+    private static TaskDefinition ValidCountdown(Guid id) => new()
+    {
+        Id = id,
+        Kind = TaskKind.Countdown,
+        Action = PowerAction.Shutdown,
+        CountdownDuration = TimeSpan.FromHours(2),
+        WarningSeconds = 60,
+        CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
+        Priority = 0
+    };
 
     private async Task SeedAsync(string json)
     {

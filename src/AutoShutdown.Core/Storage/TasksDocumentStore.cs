@@ -87,15 +87,10 @@ public sealed class TasksDocumentStore
             return Failure(TasksLoadStatus.Invalid, "Tasks must not be null.");
         }
 
-        foreach (var task in document.Tasks)
+        var taskErrors = ValidateTasks(document.Tasks);
+        if (taskErrors.Count > 0)
         {
-            var error = TaskDefinitionValidator.GetStructuralError(task);
-            if (error is not null)
-            {
-                return Failure(
-                    TasksLoadStatus.Invalid,
-                    $"Task {task.Id} is structurally invalid: {error}");
-            }
+            return Failure(TasksLoadStatus.Invalid, taskErrors);
         }
 
         return new TasksLoadResult
@@ -148,13 +143,36 @@ public sealed class TasksDocumentStore
         }
         else
         {
-            foreach (var task in document.Tasks)
+            errors.AddRange(ValidateTasks(document.Tasks));
+        }
+
+        return errors;
+    }
+
+    private static IReadOnlyList<string> ValidateTasks(IReadOnlyList<TaskDefinition> tasks)
+    {
+        var errors = new List<string>();
+        var seenIds = new HashSet<Guid>();
+
+        for (var index = 0; index < tasks.Count; index++)
+        {
+            var task = tasks[index];
+            if (task is null)
             {
-                var error = TaskDefinitionValidator.GetStructuralError(task);
-                if (error is not null)
-                {
-                    errors.Add($"Task {task.Id} is structurally invalid: {error}");
-                }
+                errors.Add($"Tasks[{index}] must not be null.");
+                continue;
+            }
+
+            var structuralError = TaskDefinitionValidator.GetStructuralError(task);
+            if (structuralError is not null)
+            {
+                errors.Add($"Task {task.Id} is structurally invalid: {structuralError}");
+                continue;
+            }
+
+            if (!seenIds.Add(task.Id))
+            {
+                errors.Add($"Task id {task.Id} is duplicated.");
             }
         }
 
@@ -189,6 +207,14 @@ public sealed class TasksDocumentStore
             Errors = errors
         };
     }
+
+    private static TasksLoadResult Failure(
+        TasksLoadStatus status,
+        IReadOnlyList<string> errors) => new()
+        {
+            Status = status,
+            Errors = errors
+        };
 }
 
 public enum TasksLoadStatus
