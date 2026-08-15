@@ -260,29 +260,286 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return false;
         }
 
+        // 待决仲裁（用户决策）期间：已纳入候选的实例不再重复仲裁，等待
+        // ResolveArbitrationCommand；其它非候选到期实例按单实例正常推进。
+        if (GetSnapshot().PendingArbitration is { } pending)
+        {
+            var unresolved = due
+                .Where(instance => !pending.CandidateTaskIds.Contains(instance.SourceTaskId))
+                .ToList();
+            if (unresolved.Count == 0)
+            {
+                return false;
+            }
+
+            if (unresolved.Count == 1)
+            {
+                await AdvanceInstanceAsync(unresolved[0], now, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+
+            due = unresolved;
+        }
+
         if (due.Count == 1)
         {
             await AdvanceInstanceAsync(due[0], now, cancellationToken).ConfigureAwait(false);
             return true;
         }
 
-        // 仲裁调用点：多个实例同时到期。
+        // 仲裁调用点（S13-T06 决策器，T09 消费）：多个实例同时到期必须先仲裁，
+        // 禁止并发绕过仲裁进入电源执行。
         var arbitration = _arbitrator.Arbitrate(due, now);
-        if (arbitration.WinnerTaskId is { } winnerId && !arbitration.RequiresUserDecision)
+
+        if (arbitration.RequiresUserDecision)
         {
-            // 正式赢家 + 重排逻辑归 T06；T04 占位仲裁（NoOp）对多到期恒返回 RequiresUserDecision。
-            SetFaulted(
-                $"Arbitration selected winner {winnerId}, but automatic winner/loser scheduling is not implemented (T06): "
-                + arbitration.DecisionReason);
-        }
-        else
-        {
-            SetFaulted(
-                "Multiple tasks are due simultaneously and require user arbitration: "
-                + arbitration.DecisionReason);
+            // 强制冲突：不执行电源、不 SetFaulted；挂起并交由 UI 询问用户。
+            SetPendingArbitration(arbitration, due);
+            return false;
         }
 
+        if (arbitration.WinnerTaskId is { } winnerId)
+        {
+            var applied = await ApplyArbitrationAsync(arbitration, due, now, cancellationToken)
+                .ConfigureAwait(false);
+            if (applied)
+            {
+                return true;
+            }
+        }
+
+        SetFaulted(
+            "Multiple tasks are due simultaneously but arbitration produced no actionable winner: "
+            + arbitration.DecisionReason);
         return true;
+    }
+
+    /// <summary>
+    /// 消费仲裁结果（S13-T09）：赢家推进执行；合并（MergedTaskIds）任务在冻结状态机
+    /// 内以取消承载「并入赢家执行」；改期（RescheduledTaskIds）的 Waiting 落选任务
+    /// 字段级改期 ≥5 分钟并刷新 StageToken，Confirming 落选任务因白名单无回边而取消。
+    /// </summary>
+    private async Task<bool> ApplyArbitrationAsync(
+        TaskArbitrationResult arbitration,
+        IReadOnlyList<TaskInstance> due,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var winnerId = arbitration.WinnerTaskId!.Value;
+        var winner = due.FirstOrDefault(instance => instance.SourceTaskId == winnerId);
+        if (winner is null)
+        {
+            return false;
+        }
+
+        var next = new Dictionary<Guid, TaskInstance>(GetSnapshot().Instances);
+        var errors = new List<string>();
+
+        foreach (var taskId in arbitration.MergedTaskIds)
+        {
+            if (taskId == winnerId || !next.TryGetValue(taskId, out var loser))
+            {
+                continue;
+            }
+
+            // 同动作合并：落选任务并入赢家的一次电源操作，不再单独执行
+            // （冻结白名单内唯一合法的「停止其独立执行」表达是 Cancelled）。
+            var merged = _taskService.Cancel(loser);
+            if (merged.Succeeded && merged.Instance is { } mergedInstance)
+            {
+                next[taskId] = mergedInstance;
+            }
+            else
+            {
+                errors.Add($"merged task {taskId} could not be cancelled");
+            }
+        }
+
+        foreach (var taskId in arbitration.RescheduledTaskIds)
+        {
+            if (taskId == winnerId || !next.TryGetValue(taskId, out var loser))
+            {
+                continue;
+            }
+
+            if (loser.State == TaskInstanceState.Waiting)
+            {
+                var rescheduled = _taskService.RescheduleAfterArbitration(
+                    loser,
+                    TaskArbitrator.MinimumRescheduleDelay,
+                    now);
+                if (rescheduled.Succeeded && rescheduled.Instance is { } rescheduledInstance)
+                {
+                    next[taskId] = rescheduledInstance;
+                }
+                else
+                {
+                    errors.Add($"loser task {taskId} could not be rescheduled");
+                }
+            }
+            else
+            {
+                // Confirming 落选任务已进入提醒窗口，无法在冻结白名单内改期回 Waiting；
+                // 为防双重电源执行，按取消处理并如实记录。
+                var cancelled = _taskService.Cancel(loser);
+                if (cancelled.Succeeded && cancelled.Instance is { } cancelledInstance)
+                {
+                    next[taskId] = cancelledInstance;
+                }
+                else
+                {
+                    errors.Add($"confirming loser task {taskId} could not be cancelled");
+                }
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            SetFaulted("Arbitration loser handling failed: " + string.Join("; ", errors));
+            return false;
+        }
+
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        await AdvanceInstanceAsync(winner, now, cancellationToken).ConfigureAwait(false);
+        SetLastArbitration(arbitration);
+        return true;
+    }
+
+    /// <summary>
+    /// 用户对强制冲突仲裁的决策：赢家立即执行，其余候选按 Waiting 改期 ≥5 分钟 /
+    /// Confirming 取消；无待决仲裁或赢家不在候选中时拒绝。
+    /// </summary>
+    private async Task<SchedulerCommandResult> HandleResolveArbitrationAsync(
+        ResolveArbitrationCommand command,
+        CancellationToken cancellationToken)
+    {
+        var pending = GetSnapshot().PendingArbitration;
+        if (pending is null)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.InvalidCommand,
+                "No arbitration decision is pending.");
+        }
+
+        if (!pending.CandidateTaskIds.Contains(command.WinnerTaskId))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.InvalidCommand,
+                "The chosen task is not part of the pending arbitration.");
+        }
+
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = new Dictionary<Guid, TaskInstance>(GetSnapshot().Instances);
+        foreach (var taskId in pending.CandidateTaskIds)
+        {
+            if (taskId == command.WinnerTaskId || !next.TryGetValue(taskId, out var loser))
+            {
+                continue;
+            }
+
+            if (loser.State == TaskInstanceState.Waiting)
+            {
+                var rescheduled = _taskService.RescheduleAfterArbitration(
+                    loser,
+                    TaskArbitrator.MinimumRescheduleDelay,
+                    now);
+                if (rescheduled.Succeeded && rescheduled.Instance is { } rescheduledInstance)
+                {
+                    next[taskId] = rescheduledInstance;
+                }
+                else
+                {
+                    return Rejected(
+                        GetSnapshot(),
+                        SchedulerCommandStatus.TaskServiceRejected,
+                        "Failed to reschedule the losing task: " + rescheduled.Message);
+                }
+            }
+            else
+            {
+                var cancelled = _taskService.Cancel(loser);
+                if (cancelled.Succeeded && cancelled.Instance is { } cancelledInstance)
+                {
+                    next[taskId] = cancelledInstance;
+                }
+                else
+                {
+                    return Rejected(
+                        GetSnapshot(),
+                        SchedulerCommandStatus.TaskServiceRejected,
+                        "Failed to cancel the losing task: " + cancelled.Message);
+                }
+            }
+        }
+
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the arbitration resolution.");
+        }
+
+        var resolvedLosers = pending.CandidateTaskIds
+            .Where(taskId => taskId != command.WinnerTaskId)
+            .ToList();
+        SetLastArbitration(new ArbitrationOutcome
+        {
+            WinnerTaskId = command.WinnerTaskId,
+            RescheduledTaskIds = resolvedLosers,
+            DecisionReason = "Forced conflict resolved by user: winner " + command.WinnerTaskId
+                + " executes now; " + resolvedLosers.Count + " other(s) rescheduled by at least "
+                + TaskArbitrator.MinimumRescheduleDelay.TotalMinutes + " minute(s) (Confirming losers cancelled)."
+        });
+
+        return Success("The arbitration decision was applied.");
+    }
+
+    private void SetPendingArbitration(
+        TaskArbitrationResult arbitration,
+        IReadOnlyList<TaskInstance> due)
+    {
+        lock (_sync)
+        {
+            _snapshot = _snapshot with
+            {
+                EngineStatus = SchedulerEngineStatus.Running,
+                PendingArbitration = new PendingArbitration
+                {
+                    CandidateTaskIds = due.Select(instance => instance.SourceTaskId).ToList(),
+                    DecisionReason = arbitration.DecisionReason
+                },
+                LastArbitration = null
+            };
+        }
+    }
+
+    private void SetLastArbitration(TaskArbitrationResult arbitration)
+        => SetLastArbitration(new ArbitrationOutcome
+        {
+            WinnerTaskId = arbitration.WinnerTaskId,
+            MergedTaskIds = arbitration.MergedTaskIds,
+            RescheduledTaskIds = arbitration.RescheduledTaskIds,
+            RequiresUserDecision = arbitration.RequiresUserDecision,
+            DecisionReason = arbitration.DecisionReason
+        });
+
+    private void SetLastArbitration(ArbitrationOutcome outcome)
+    {
+        lock (_sync)
+        {
+            _snapshot = _snapshot with
+            {
+                LastArbitration = outcome,
+                PendingArbitration = null
+            };
+        }
     }
 
     private async Task AdvanceInstanceAsync(
@@ -483,6 +740,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
             CancelTaskCommand cancel => await HandleCancelAsync(cancel, cancellationToken).ConfigureAwait(false),
             ClearTerminalTaskCommand clear => await HandleClearTerminalAsync(clear, cancellationToken).ConfigureAwait(false),
             SetTaskEnabledCommand setEnabled => HandleSetEnabledAsync(setEnabled),
+            ResolveArbitrationCommand resolve => await HandleResolveArbitrationAsync(resolve, cancellationToken).ConfigureAwait(false),
             _ => Rejected(GetSnapshot(), SchedulerCommandStatus.InvalidCommand, "Unknown command type.")
         };
     }
@@ -718,11 +976,15 @@ public sealed class SchedulerEngine : ISchedulerEngine
 
         lock (_sync)
         {
+            // PendingArbitration / LastArbitration 是瞬态 UI 呈现字段，不持久化；
+            // 由 SetPendingArbitration / SetLastArbitration 显式管理，持久化操作携带保留。
             _snapshot = new SchedulerSnapshot
             {
                 EngineStatus = SchedulerEngineStatus.Running,
                 Instances = instances,
-                LastUpdatedAt = now
+                LastUpdatedAt = now,
+                PendingArbitration = _snapshot.PendingArbitration,
+                LastArbitration = _snapshot.LastArbitration
             };
         }
 

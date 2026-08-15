@@ -17,6 +17,16 @@ public interface ITaskService
 
     TaskCommandResult Cancel(TaskInstance current);
 
+    /// <summary>
+    /// 仲裁落选改期（S13-T09）：将 Waiting 实例字段级重排到 now+delay（须 ≥5 分钟，
+    /// 与 <see cref="AutoShutdown.Core.Scheduling.TaskArbitrator.MinimumRescheduleDelay"/> 一致），
+    /// 刷新 StageToken 并清除告警窗口；仅 Waiting 允许（冻结白名单无回边）。
+    /// </summary>
+    TaskCommandResult RescheduleAfterArbitration(
+        TaskInstance current,
+        TimeSpan delay,
+        DateTimeOffset now);
+
     TaskCommandResult RescheduleDaily(
         TaskDefinition definition,
         TaskInstance current,

@@ -1,4 +1,5 @@
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 
 namespace AutoShutdown.Core.Tasks;
@@ -209,6 +210,57 @@ public sealed class TaskService : ITaskService
             Status = TaskCommandStatus.Success,
             Instance = cancelled,
             Message = "The task instance was cancelled."
+        };
+    }
+
+    public TaskCommandResult RescheduleAfterArbitration(
+        TaskInstance current,
+        TimeSpan delay,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+
+        if (delay < TaskArbitrator.MinimumRescheduleDelay)
+        {
+            return Failure(
+                TaskCommandStatus.InvalidDuration,
+                "Arbitration reschedule delay must be at least 5 minutes.");
+        }
+
+        if (current.State != TaskInstanceState.Waiting)
+        {
+            // 落选改期仅在 Waiting 成立：Confirming 已进提醒窗口，冻结白名单无回边，
+            // 无法字段级改期，由引擎按取消承载（防双重电源执行），此处结构拒绝。
+            return new TaskCommandResult
+            {
+                Status = TaskCommandStatus.TransitionRejected,
+                Message = "Only Waiting instances can be rescheduled after arbitration."
+            };
+        }
+
+        var stageToken = _identifierGenerator.NewId();
+        if (!IsDistinctStageToken(stageToken, current))
+        {
+            return Failure(
+                TaskCommandStatus.InvalidCurrentInstance,
+                "The generated stage token is not valid.");
+        }
+
+        // Waiting → Waiting：字段级重排（非状态转换），刷新 StageToken 并清除告警窗口。
+        var rescheduled = current with
+        {
+            State = TaskInstanceState.Waiting,
+            ScheduledFireTime = now.ToUniversalTime().Add(delay),
+            WarningStartTime = null,
+            StageToken = stageToken,
+            HasExecuted = false
+        };
+
+        return new TaskCommandResult
+        {
+            Status = TaskCommandStatus.Success,
+            Instance = rescheduled,
+            Message = "The task instance was rescheduled after arbitration."
         };
     }
 
