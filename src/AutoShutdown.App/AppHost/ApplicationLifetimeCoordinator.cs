@@ -94,7 +94,12 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     {
         try
         {
-            var result = _crashRecoveryManager.RecoverAsync(_appCts.Token).GetAwaiter().GetResult();
+            // 后台线程执行恢复：若在 UI 线程上 GetResult()，任何未使用
+            // ConfigureAwait(false) 的存储 await 都会把 continuation 投递回已阻塞的
+            // 调度器而永久挂起。线程池线程无 SynchronizationContext，杜绝该类死锁，
+            // 同时保留「恢复完成后再启动调度」的同步顺序保证。
+            var result = Task.Run(() => _crashRecoveryManager.RecoverAsync(_appCts.Token))
+                .GetAwaiter().GetResult();
 
             // 恢复通知交给 UI 检查点（T08）呈现横幅；只读，不持久化。
             _recoveryNotice.Notice = result.InterruptedTaskIds.Count > 0

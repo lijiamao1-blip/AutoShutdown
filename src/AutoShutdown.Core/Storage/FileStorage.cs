@@ -46,7 +46,7 @@ public sealed class FileStorage : IStorage, IDisposable
             var value = await JsonSerializer.DeserializeAsync<T>(
                 stream,
                 _jsonOptions,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             return value is null
                 ? new StorageReadResult<T>
@@ -98,14 +98,14 @@ public sealed class FileStorage : IStorage, IDisposable
             targetDirectory,
             $".{Path.GetFileName(targetPath)}.{Guid.NewGuid():N}.tmp");
 
-        await _writeGate.WaitAsync(cancellationToken);
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             Directory.CreateDirectory(targetDirectory);
 
             try
             {
-                await WriteAndFlushAsync(temporaryPath, value, cancellationToken);
+                await WriteAndFlushAsync(temporaryPath, value, cancellationToken).ConfigureAwait(false);
             }
             catch (JsonException exception)
             {
@@ -116,7 +116,7 @@ public sealed class FileStorage : IStorage, IDisposable
                 return FailedWrite(StorageWriteStatus.SerializationFailure, exception);
             }
 
-            if (!await CanDeserializeAsync<T>(temporaryPath, cancellationToken))
+            if (!await CanDeserializeAsync<T>(temporaryPath, cancellationToken).ConfigureAwait(false))
             {
                 return new StorageWriteResult
                 {
@@ -173,8 +173,8 @@ public sealed class FileStorage : IStorage, IDisposable
             bufferSize: 4096,
             options: FileOptions.Asynchronous | FileOptions.WriteThrough);
 
-        await JsonSerializer.SerializeAsync(stream, value, _jsonOptions, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
+        await JsonSerializer.SerializeAsync(stream, value, _jsonOptions, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         stream.Flush(flushToDisk: true);
     }
 
@@ -188,7 +188,7 @@ public sealed class FileStorage : IStorage, IDisposable
             return await JsonSerializer.DeserializeAsync<T>(
                 stream,
                 _jsonOptions,
-                cancellationToken) is not null;
+                cancellationToken).ConfigureAwait(false) is not null;
         }
         catch (JsonException)
         {

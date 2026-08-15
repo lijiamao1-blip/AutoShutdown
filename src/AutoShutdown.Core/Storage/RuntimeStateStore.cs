@@ -29,7 +29,7 @@ public sealed class RuntimeStateStore
 
     public async Task<RuntimeStateLoadResult> LoadAsync(CancellationToken cancellationToken)
     {
-        var read = await _storage.ReadAsync<JsonElement>(FileName, cancellationToken);
+        var read = await _storage.ReadAsync<JsonElement>(FileName, cancellationToken).ConfigureAwait(false);
 
         switch (read.Status)
         {
