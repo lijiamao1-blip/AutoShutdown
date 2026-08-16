@@ -3,10 +3,12 @@ using System.Runtime.InteropServices;
 namespace AutoShutdown.App.Infrastructure.Power;
 
 /// <summary>
-/// 真实 Windows 电源 API 的唯一实现。本文件是全代码库唯一允许包含电源 P/Invoke 的位置：
-/// <see cref="ExitWindowsEx"/>（关机/重启）、<see cref="SetSuspendState"/>（睡眠/休眠），
-/// 以及获取 SE_SHUTDOWN_NAME 权限所需的 token 操作。
-/// 禁止在本文件之外出现任何真实电源调用；禁止通过系统命令行、脚本或进程启动方式执行电源操作。
+/// 真实 Windows 电源 API 的唯一实现。本文件是全代码库唯一允许包含 P/Invoke 的位置
+/// （冻结安全契约：DllImport 只允许存在于本文件），承载：
+/// <see cref="ExitWindowsEx"/>（关机/重启）、<see cref="SetSuspendState"/>（睡眠/休眠）、
+/// 获取 SE_SHUTDOWN_NAME 权限所需的 token 操作，以及 S15 空闲检测的
+/// <see cref="GetLastInputInfo"/>（见 <see cref="Win32IdleNativeApi"/>）。
+/// 禁止在本文件之外出现任何真实电源调用或 DllImport；禁止通过系统命令行、脚本或进程启动方式执行电源操作。
 /// </summary>
 public sealed class Win32PowerNativeApi : IPowerNativeApi
 {
@@ -160,4 +162,30 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
         public uint PrivilegeCount;
         public LUID_AND_ATTRIBUTES Privileges;
     }
+}
+
+/// <summary>
+/// 空闲检测的 Win32 原生互操作（GetLastInputInfo）。为满足「DllImport 只允许存在于
+/// Win32PowerNativeApi.cs」的冻结安全契约，空闲检测的 P/Invoke 与电源调用收敛于同一文件；
+/// 业务侧通过 <c>Win32IdleInputSource</c> 消费，绝不直接接触 P/Invoke。
+/// </summary>
+internal sealed class Win32IdleNativeApi
+{
+    /// <summary>返回系统上次输入时刻（GetTickCount 时间基准，32 位 tick）；API 失败返回 null。</summary>
+    public uint? GetLastInputTick()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        return GetLastInputInfo(ref info) ? info.dwTime : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 }

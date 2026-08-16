@@ -17,7 +17,10 @@ public enum TaskKind
     NthWorkdayOfMonth = 6,
 
     /// <summary>一次性指定日期时间（schedule.type=oneday）：date+time 精确；过期即终结，不追溯执行。</summary>
-    OneTime = 7
+    OneTime = 7,
+
+    /// <summary>空闲关机（S15）：系统连续无输入达到阈值后触发；用户恢复输入取消空闲倒计时。</summary>
+    Idle = 8
 }
 
 public enum PowerAction

@@ -18,6 +18,10 @@ internal static class TaskDefinitionValidator
     public const int MinNthWorkday = 1;
     public const int MaxNthWorkday = 23;
 
+    /// <summary>空闲触发阈值的合法秒数范围（1 秒 ~ 7 天）。</summary>
+    public const int MinIdleThresholdSeconds = 1;
+    public const int MaxIdleThresholdSeconds = 604800;
+
     private static readonly HashSet<PowerAction> AllowedActions =
         [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate];
 
@@ -110,6 +114,16 @@ internal static class TaskDefinitionValidator
                 if (definition.OneTimeDateTime is null)
                 {
                     return $"{definition.Kind} tasks require OneTimeDateTime.";
+                }
+
+                break;
+
+            case TaskKind.Idle:
+                // 阈值可空（继承全局默认）；一旦指定必须为正且不超过上限（否则默认不触发）。
+                if (definition.IdleThresholdSeconds is { } idleThreshold
+                    && idleThreshold is < MinIdleThresholdSeconds or > MaxIdleThresholdSeconds)
+                {
+                    return $"IdleThresholdSeconds must be between {MinIdleThresholdSeconds} and {MaxIdleThresholdSeconds} when specified; got {idleThreshold}.";
                 }
 
                 break;

@@ -30,6 +30,12 @@ public sealed record TaskDefinition
     /// <summary>节假日/例外日集合（S14）。周期规则遇节假日跳过；一次性日期不受影响。</summary>
     public IReadOnlyList<DateOnly>? HolidayDates { get; init; }
 
+    /// <summary>
+    /// 空闲触发阈值（秒，S15，TaskKind.Idle 专用）。null 表示继承全局默认阈值。
+    /// 指定时必须为正，否则视为无效（默认不触发，绝不静默回退）。
+    /// </summary>
+    public int? IdleThresholdSeconds { get; init; }
+
     public int? WarningSeconds { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; }

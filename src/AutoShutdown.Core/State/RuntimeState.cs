@@ -39,6 +39,12 @@ public sealed record TaskInstance
 
     public bool HasExecuted { get; init; }
 
+    /// <summary>
+    /// 该实例的倒计时是否由空闲触发形成（S15）。仅空闲触发的 confirming/countdown
+    /// 在输入恢复时被取消；非空闲任务此标志恒为 false，不受影响。
+    /// </summary>
+    public bool IsIdleTriggered { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>真实电源执行是否已获用户明确确认（双闸门之二）。默认 false，向后兼容。</summary>

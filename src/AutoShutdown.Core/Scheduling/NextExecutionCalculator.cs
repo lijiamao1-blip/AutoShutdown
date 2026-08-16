@@ -1,4 +1,5 @@
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Tasks;
 
@@ -33,6 +34,7 @@ public sealed class NextExecutionCalculator : INextExecutionCalculator
             TaskKind.NextWorkday => CalculateNextWorkday(definition, now, timeZone),
             TaskKind.NthWorkdayOfMonth => CalculateNthWorkdayOfMonth(definition, now, timeZone),
             TaskKind.OneTime => CalculateOneTime(definition, now, timeZone),
+            TaskKind.Idle => CalculateIdle(definition, now),
             _ => Failure(
                 NextExecutionStatus.InvalidTaskKind,
                 $"Task kind {definition.Kind} is not supported.")
@@ -66,6 +68,25 @@ public sealed class NextExecutionCalculator : INextExecutionCalculator
         }
 
         return Success(fireTime);
+    }
+
+    private static NextExecutionResult CalculateIdle(
+        TaskDefinition definition,
+        DateTimeOffset now)
+    {
+        var threshold = IdleShutdownRule.ResolveThreshold(
+            definition,
+            IdleShutdownRule.GlobalDefaultThreshold);
+        if (threshold is null)
+        {
+            return Failure(
+                NextExecutionStatus.MissingIdleThreshold,
+                "Idle tasks require a valid threshold (task-specific or global default).");
+        }
+
+        // 空闲任务的实际触发由调度器按真实空闲时长动态评估；此处仅给出最早可达时刻
+        // （假设系统已空闲），作为实例的占位 fire time，供展示与安全下限使用。
+        return Success((now + threshold.Value).ToUniversalTime());
     }
 
     private static NextExecutionResult CalculateTodayAt(

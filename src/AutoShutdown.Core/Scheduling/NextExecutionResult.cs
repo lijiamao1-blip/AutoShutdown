@@ -31,7 +31,10 @@ public enum NextExecutionStatus
     OneTimeExpired = 13,
 
     /// <summary>在可搜索范围内不存在满足规则的工作日（例如第 N 个工作日长期不存在）。</summary>
-    NoWorkdayOccurrence = 14
+    NoWorkdayOccurrence = 14,
+
+    /// <summary>Idle 规则缺少有效阈值（自身未指定且无全局默认）。</summary>
+    MissingIdleThreshold = 15
 }
 
 public sealed record NextExecutionResult
