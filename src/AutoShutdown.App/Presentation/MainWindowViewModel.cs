@@ -8,6 +8,7 @@ using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
+using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
 
 namespace AutoShutdown.App.Presentation;
@@ -16,7 +17,19 @@ public enum TimeMode
 {
     Countdown = 0,
     TodayAt = 1,
-    DailyAt = 2
+    DailyAt = 2,
+
+    /// <summary>每周工作日（周一~周五可选）固定时刻，可叠加节假日例外。</summary>
+    Weekdays = 3,
+
+    /// <summary>下个工作日固定时刻（一次性）。</summary>
+    NextWorkday = 4,
+
+    /// <summary>每月第 N 个工作日固定时刻（周期）。</summary>
+    NthWorkdayOfMonth = 5,
+
+    /// <summary>一次性指定日期时间（过期即终结，不追溯）。</summary>
+    OneTime = 6
 }
 
 public sealed record NavItem(string Title, string Icon, string PageKey, bool IsPlaceholder);
@@ -232,6 +245,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ModeIsCountdown));
                 OnPropertyChanged(nameof(ModeIsTodayAt));
                 OnPropertyChanged(nameof(ModeIsDailyAt));
+                OnPropertyChanged(nameof(ModeIsWeekdays));
+                OnPropertyChanged(nameof(ModeIsNextWorkday));
+                OnPropertyChanged(nameof(ModeIsNthWorkdayOfMonth));
+                OnPropertyChanged(nameof(ModeIsOneTime));
+                OnPropertyChanged(nameof(IsWeekdaySelectorVisible));
+                OnPropertyChanged(nameof(IsNthWorkdaySelectorVisible));
+                OnPropertyChanged(nameof(IsOneTimeDateVisible));
+                OnPropertyChanged(nameof(IsHolidayInputVisible));
                 RefreshCreateState();
             }
         }
@@ -272,6 +293,64 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    public bool ModeIsWeekdays
+    {
+        get => SelectedMode == TimeMode.Weekdays;
+        set
+        {
+            if (value)
+            {
+                SelectedMode = TimeMode.Weekdays;
+            }
+        }
+    }
+
+    public bool ModeIsNextWorkday
+    {
+        get => SelectedMode == TimeMode.NextWorkday;
+        set
+        {
+            if (value)
+            {
+                SelectedMode = TimeMode.NextWorkday;
+            }
+        }
+    }
+
+    public bool ModeIsNthWorkdayOfMonth
+    {
+        get => SelectedMode == TimeMode.NthWorkdayOfMonth;
+        set
+        {
+            if (value)
+            {
+                SelectedMode = TimeMode.NthWorkdayOfMonth;
+            }
+        }
+    }
+
+    public bool ModeIsOneTime
+    {
+        get => SelectedMode == TimeMode.OneTime;
+        set
+        {
+            if (value)
+            {
+                SelectedMode = TimeMode.OneTime;
+            }
+        }
+    }
+
+    public bool IsWeekdaySelectorVisible => SelectedMode == TimeMode.Weekdays;
+
+    public bool IsNthWorkdaySelectorVisible => SelectedMode == TimeMode.NthWorkdayOfMonth;
+
+    public bool IsOneTimeDateVisible => SelectedMode == TimeMode.OneTime;
+
+    /// <summary>节假日例外输入仅对支持节假日的规则显示（DailyAt/Weekdays/NextWorkday/NthWorkdayOfMonth）。</summary>
+    public bool IsHolidayInputVisible
+        => SelectedMode is TimeMode.DailyAt or TimeMode.Weekdays or TimeMode.NextWorkday or TimeMode.NthWorkdayOfMonth;
 
     public IReadOnlyList<string> CountdownHourOptions { get; } =
         Enumerable.Range(0, 169).Select(value => $"{value:00} 小时").ToArray();
@@ -363,6 +442,119 @@ public sealed class MainWindowViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _timeSecondsText, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    // ---- S14 复杂排程输入（Weekdays / NthWorkdayOfMonth / OneTime / 节假日例外） ----
+
+    private bool _weekdayMonday = true;
+    private bool _weekdayTuesday = true;
+    private bool _weekdayWednesday = true;
+    private bool _weekdayThursday = true;
+    private bool _weekdayFriday = true;
+
+    public bool WeekdayMonday
+    {
+        get => _weekdayMonday;
+        set
+        {
+            if (SetProperty(ref _weekdayMonday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    public bool WeekdayTuesday
+    {
+        get => _weekdayTuesday;
+        set
+        {
+            if (SetProperty(ref _weekdayTuesday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    public bool WeekdayWednesday
+    {
+        get => _weekdayWednesday;
+        set
+        {
+            if (SetProperty(ref _weekdayWednesday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    public bool WeekdayThursday
+    {
+        get => _weekdayThursday;
+        set
+        {
+            if (SetProperty(ref _weekdayThursday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    public bool WeekdayFriday
+    {
+        get => _weekdayFriday;
+        set
+        {
+            if (SetProperty(ref _weekdayFriday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> NthWorkdayOptions { get; } =
+        Enumerable.Range(1, 23).Select(value => $"第 {value} 个工作日").ToArray();
+
+    private int _nthWorkdayIndex;
+
+    public int NthWorkdayIndex
+    {
+        get => _nthWorkdayIndex;
+        set
+        {
+            if (SetProperty(ref _nthWorkdayIndex, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    private DateTime? _oneTimeDate;
+
+    public DateTime? OneTimeDate
+    {
+        get => _oneTimeDate;
+        set
+        {
+            if (SetProperty(ref _oneTimeDate, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    private string _holidayDatesText = string.Empty;
+
+    public string HolidayDatesText
+    {
+        get => _holidayDatesText;
+        set
+        {
+            if (SetProperty(ref _holidayDatesText, value))
             {
                 RefreshCreateState();
             }
@@ -680,8 +872,17 @@ public sealed class MainWindowViewModel : ObservableObject
     public string CreateDisabledReason
     {
         get => _createDisabledReason;
-        private set => SetProperty(ref _createDisabledReason, value);
+        private set
+        {
+            if (SetProperty(ref _createDisabledReason, value))
+            {
+                OnPropertyChanged(nameof(HasCreateError));
+            }
+        }
     }
+
+    /// <summary>创建按钮禁用原因是否可见（作为表单错误提示）。</summary>
+    public bool HasCreateError => !string.IsNullOrEmpty(_createDisabledReason);
 
     private string _statusMessage = string.Empty;
 
@@ -1130,6 +1331,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        if (!TryValidateRuleFields(out var ruleError))
+        {
+            reason = ruleError;
+            return false;
+        }
+
         reason = string.Empty;
         return true;
     }
@@ -1188,6 +1395,30 @@ public sealed class MainWindowViewModel : ObservableObject
         return true;
     }
 
+    /// <summary>校验 S14 复杂排程的附加字段（工作日/一次性日期/节假日），无副作用。</summary>
+    public bool TryValidateRuleFields(out string error)
+    {
+        if (SelectedMode == TimeMode.Weekdays && GetSelectedWeekdays().Count == 0)
+        {
+            error = "请至少选择一个工作日";
+            return false;
+        }
+
+        if (SelectedMode == TimeMode.OneTime && OneTimeDate is null)
+        {
+            error = "请选择一次性执行的日期";
+            return false;
+        }
+
+        if (!TryParseHolidayDates(out _, out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
     public bool TryBuildDefinition(out TaskDefinition definition, out string error)
     {
         definition = null!;
@@ -1203,11 +1434,20 @@ public sealed class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        if (!TryValidateRuleFields(out error))
+        {
+            return false;
+        }
+
         var kind = SelectedMode switch
         {
             TimeMode.Countdown => TaskKind.Countdown,
             TimeMode.TodayAt => TaskKind.TodayAt,
-            _ => TaskKind.DailyAt
+            TimeMode.DailyAt => TaskKind.DailyAt,
+            TimeMode.Weekdays => TaskKind.Weekdays,
+            TimeMode.NextWorkday => TaskKind.NextWorkday,
+            TimeMode.NthWorkdayOfMonth => TaskKind.NthWorkdayOfMonth,
+            _ => TaskKind.OneTime
         };
 
         // 真实电源模式：创建真实任务前必须获得用户明确人工确认（双闸门之二）。
@@ -1230,18 +1470,89 @@ public sealed class MainWindowViewModel : ObservableObject
             realPowerConfirmed = true;
         }
 
+        TryParseHolidayDates(out var holidays, out _);
+
         definition = new TaskDefinition
         {
             Id = Guid.NewGuid(),
             Kind = kind,
             Action = SelectedAction,
             CountdownDuration = kind == TaskKind.Countdown ? duration : null,
-            TargetTimeOfDay = kind == TaskKind.Countdown ? null : target,
+            TargetTimeOfDay = kind is TaskKind.Countdown or TaskKind.OneTime ? null : target,
+            Weekdays = kind == TaskKind.Weekdays ? GetSelectedWeekdays() : null,
+            NthWorkday = kind == TaskKind.NthWorkdayOfMonth ? NthWorkdayIndex + 1 : null,
+            OneTimeDateTime = kind == TaskKind.OneTime ? BuildOneTimeDateTime(target!.Value) : null,
+            HolidayDates = kind == TaskKind.Countdown ? null : holidays,
             WarningSeconds = GetWarningSeconds(),
             CreatedAt = _clock.UtcNow,
             RealPowerConfirmed = realPowerConfirmed
         };
 
+        error = string.Empty;
+        return true;
+    }
+
+    private IReadOnlyList<DayOfWeek> GetSelectedWeekdays()
+    {
+        var days = new List<DayOfWeek>(5);
+        if (WeekdayMonday)
+        {
+            days.Add(DayOfWeek.Monday);
+        }
+
+        if (WeekdayTuesday)
+        {
+            days.Add(DayOfWeek.Tuesday);
+        }
+
+        if (WeekdayWednesday)
+        {
+            days.Add(DayOfWeek.Wednesday);
+        }
+
+        if (WeekdayThursday)
+        {
+            days.Add(DayOfWeek.Thursday);
+        }
+
+        if (WeekdayFriday)
+        {
+            days.Add(DayOfWeek.Friday);
+        }
+
+        return days;
+    }
+
+    private DateTime BuildOneTimeDateTime(TimeOnly target)
+        => OneTimeDate!.Value.Date + target.ToTimeSpan();
+
+    private bool TryParseHolidayDates(out IReadOnlyList<DateOnly>? holidays, out string error)
+    {
+        holidays = null;
+        var text = (HolidayDatesText ?? string.Empty).Trim();
+        if (text.Length == 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        var lines = text.Split(
+            new[] { '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var result = new List<DateOnly>();
+        foreach (var line in lines)
+        {
+            if (!DateOnly.TryParseExact(line, "yyyy-MM-dd", out var date))
+            {
+                error = $"例外日期「{line}」格式无效，请使用 yyyy-MM-dd";
+                return false;
+            }
+
+            result.Add(date);
+        }
+
+        holidays = result;
         error = string.Empty;
         return true;
     }
@@ -1267,7 +1578,64 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await SubmitCommandAsync(new CreateTaskCommand(definition), "创建任务");
+        var submitted = await SubmitCommandAsync(new CreateTaskCommand(definition), "创建任务");
+        if (submitted)
+        {
+            await PersistDefinitionAsync(definition);
+        }
+    }
+
+    /// <summary>
+    /// 将已成功创建的任务定义持久化到 tasks.json（S14 checkpoint 4 的"保存/恢复"）。
+    /// 引擎只做内存登记与运行态写入；定义持久化由应用层负责，保证重启后周期规则仍可改期。
+    /// 损坏/非法/版本不支持的 tasks.json 绝不覆盖，仅记录告警。
+    /// </summary>
+    private async Task PersistDefinitionAsync(TaskDefinition definition)
+    {
+        try
+        {
+            var load = await _configurationService.LoadTasksAsync(CancellationToken.None);
+            List<TaskDefinition> tasks;
+            if (load.Status == TasksLoadStatus.Success && load.Document is not null)
+            {
+                tasks = load.Document.Tasks.ToList();
+            }
+            else if (load.Status == TasksLoadStatus.NotFound)
+            {
+                tasks = [];
+            }
+            else
+            {
+                TryLog(logger => logger.Warning(
+                    "TaskDefinitionPersistSkipped",
+                    "任务定义未持久化：tasks.json 状态为 " + load.Status + "。"));
+                return;
+            }
+
+            tasks.RemoveAll(task => task.Id == definition.Id);
+            tasks.Add(definition);
+
+            var save = await _configurationService.SaveTasksAsync(
+                new TasksDocument { Tasks = tasks },
+                CancellationToken.None);
+
+            if (save.Succeeded)
+            {
+                AppendActivity("任务规则已保存");
+            }
+            else
+            {
+                TryLog(logger => logger.Warning(
+                    "TaskDefinitionPersistFailed",
+                    "任务定义保存失败：" + string.Join("；", save.Errors)));
+            }
+        }
+        catch (Exception exception)
+        {
+            TryLog(logger => logger.Warning(
+                "TaskDefinitionPersistFailed",
+                "任务定义持久化异常：" + exception.Message));
+        }
     }
 
     private async Task ExecuteSnoozeAsync()
@@ -1508,20 +1876,22 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private static string ShortId(Guid id) => id.ToString("N")[..8].ToUpperInvariant();
 
-    private async Task SubmitCommandAsync(SchedulerCommand command, string displayName)
+    private async Task<bool> SubmitCommandAsync(SchedulerCommand command, string displayName)
     {
         if (_isSubmitting)
         {
-            return;
+            return false;
         }
 
         LogCommandRequested(command);
         _isSubmitting = true;
         RaiseAllCommands();
+        var succeeded = false;
 
         try
         {
             var result = await _engine.SubmitAsync(command, CancellationToken.None);
+            succeeded = result.Succeeded;
             if (result.Succeeded)
             {
                 LogCommandAccepted(command);
@@ -1548,6 +1918,8 @@ public sealed class MainWindowViewModel : ObservableObject
             RaiseAllCommands();
             Refresh(GetSnapshot(), _clock.UtcNow);
         }
+
+        return succeeded;
     }
 
     private void LogCommandRequested(SchedulerCommand command)

@@ -105,10 +105,14 @@
                                     <StackPanel>
                                         <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,14"/>
                                         <TextBlock Text="时间模式" Style="{StaticResource FieldLabelStyle}"/>
-                                        <UniformGrid Columns="3" Margin="0,7,0,12">
+                                        <UniformGrid Columns="4" Margin="0,7,0,12">
                                             <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                             <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                             <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="每周工作日" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                         </UniformGrid>
                                         <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
                                             <Grid>
@@ -120,14 +124,36 @@
                                                     </UniformGrid>
                                                 </StackPanel>
                                                 <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <DatePicker SelectedDate="{Binding OneTimeDate}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}"/>
                                                     <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
                                                     <UniformGrid Columns="3">
                                                         <StackPanel Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}"/></StackPanel>
                                                         <StackPanel Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}"/></StackPanel>
                                                         <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}"/></StackPanel>
                                                     </UniformGrid>
+                                                    <StackPanel Margin="0,10,0,0" Visibility="{Binding IsWeekdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="触发星期" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
+                                                        <UniformGrid Columns="5">
+                                                            <CheckBox Content="周一" IsChecked="{Binding WeekdayMonday}" VerticalAlignment="Center"/>
+                                                            <CheckBox Content="周二" IsChecked="{Binding WeekdayTuesday}" VerticalAlignment="Center"/>
+                                                            <CheckBox Content="周三" IsChecked="{Binding WeekdayWednesday}" VerticalAlignment="Center"/>
+                                                            <CheckBox Content="周四" IsChecked="{Binding WeekdayThursday}" VerticalAlignment="Center"/>
+                                                            <CheckBox Content="周五" IsChecked="{Binding WeekdayFriday}" VerticalAlignment="Center"/>
+                                                        </UniformGrid>
+                                                    </StackPanel>
+                                                    <StackPanel Margin="0,10,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
+                                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
+                                                    </StackPanel>
                                                 </StackPanel>
                                             </Grid>
+                                        </Border>
+                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
+                                            <StackPanel>
+                                                <TextBlock Text="例外日历（节假日）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
+                                                <TextBlock Text="每行一个日期（yyyy-MM-dd），这些日期不执行；留空表示无例外。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                                <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
+                                            </StackPanel>
                                         </Border>
                                         <UniformGrid Columns="4" Margin="0,0,0,12">
                                             <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
@@ -138,6 +164,7 @@
                                         <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
                                         <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
                                         <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                        <TextBlock Text="{Binding CreateDisabledReason}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="{Binding HasCreateError, Converter={StaticResource BoolToVisibility}}"/>
                                         <Button Content="创建任务" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}" HorizontalAlignment="Stretch"/>
                                     </StackPanel>
                                 </Border>

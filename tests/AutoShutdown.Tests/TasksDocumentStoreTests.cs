@@ -184,6 +184,90 @@ public sealed class TasksDocumentStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_WhenS14ComplexRules_WritesAndRoundTrips()
+    {
+        var store = CreateStore();
+        var weekdaysId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var nextWorkdayId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var nthWorkdayId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var oneTimeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+        var document = new TasksDocument
+        {
+            Tasks =
+            [
+                new TaskDefinition
+                {
+                    Id = weekdaysId,
+                    Kind = TaskKind.Weekdays,
+                    Action = PowerAction.Shutdown,
+                    TargetTimeOfDay = new TimeOnly(9, 30),
+                    Weekdays = [DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday],
+                    HolidayDates = [new DateOnly(2024, 5, 1)],
+                    CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
+                    Priority = 10
+                },
+                new TaskDefinition
+                {
+                    Id = nextWorkdayId,
+                    Kind = TaskKind.NextWorkday,
+                    Action = PowerAction.Restart,
+                    TargetTimeOfDay = new TimeOnly(8, 0),
+                    HolidayDates = [new DateOnly(2024, 1, 1)],
+                    CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
+                },
+                new TaskDefinition
+                {
+                    Id = nthWorkdayId,
+                    Kind = TaskKind.NthWorkdayOfMonth,
+                    Action = PowerAction.Sleep,
+                    TargetTimeOfDay = new TimeOnly(18, 15),
+                    NthWorkday = 5,
+                    CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
+                },
+                new TaskDefinition
+                {
+                    Id = oneTimeId,
+                    Kind = TaskKind.OneTime,
+                    Action = PowerAction.Hibernate,
+                    OneTimeDateTime = new DateTime(2024, 12, 24, 22, 0, 0),
+                    CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
+                }
+            ]
+        };
+
+        var save = await store.SaveAsync(document, CancellationToken.None);
+
+        Assert.True(save.Succeeded);
+        Assert.Equal(TasksSaveStatus.Success, save.Status);
+
+        var read = await store.LoadAsync(CancellationToken.None);
+        Assert.Equal(TasksLoadStatus.Success, read.Status);
+        Assert.Equal(4, read.Document!.Tasks.Count);
+
+        var weekdays = read.Document.Tasks.Single(task => task.Id == weekdaysId);
+        Assert.Equal(TaskKind.Weekdays, weekdays.Kind);
+        Assert.Equal(new TimeOnly(9, 30), weekdays.TargetTimeOfDay);
+        Assert.Equal(
+            new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday },
+            weekdays.Weekdays);
+        Assert.Equal(new[] { new DateOnly(2024, 5, 1) }, weekdays.HolidayDates);
+
+        var nextWorkday = read.Document.Tasks.Single(task => task.Id == nextWorkdayId);
+        Assert.Equal(TaskKind.NextWorkday, nextWorkday.Kind);
+        Assert.Equal(new[] { new DateOnly(2024, 1, 1) }, nextWorkday.HolidayDates);
+
+        var nthWorkday = read.Document.Tasks.Single(task => task.Id == nthWorkdayId);
+        Assert.Equal(TaskKind.NthWorkdayOfMonth, nthWorkday.Kind);
+        Assert.Equal(5, nthWorkday.NthWorkday);
+        Assert.Equal(new TimeOnly(18, 15), nthWorkday.TargetTimeOfDay);
+
+        var oneTime = read.Document.Tasks.Single(task => task.Id == oneTimeId);
+        Assert.Equal(TaskKind.OneTime, oneTime.Kind);
+        Assert.Equal(new DateTime(2024, 12, 24, 22, 0, 0), oneTime.OneTimeDateTime);
+    }
+
+    [Fact]
     public async Task SaveAsync_WhenDocumentStructurallyInvalid_DoesNotWrite()
     {
         var store = CreateStore();
