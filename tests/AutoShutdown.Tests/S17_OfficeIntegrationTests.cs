@@ -109,6 +109,43 @@ public sealed class S17_OfficeIntegrationTests
         Assert.Single(power.Requests);
     }
 
+    [Fact(Timeout = 2000)]
+    public async Task OfficeSave_CleanupFault_PropagatesOce_PowerNotCalled()
+    {
+        // D5：内部超时清理安全故障（OCE 子类）从 Runner/Workflow 原样传播，
+        // 终止整个工作流，唯一电源出口调用 0 次（绝不 Block 后继续或降级为 Continue）。
+        var automation = new CleanupFaultAutomation();
+        var runner = new PrePipelineRunner([new OfficeSaveAction(automation)]);
+        var power = new RecordingPowerService(SimulatedResult());
+        var workflow = new ShutdownWorkflow(
+            new FixedConfigurationService(SuccessResult(ValidConfig())),
+            power,
+            runner);
+
+        await Assert.ThrowsAsync<OfficeHelperCleanupFailedException>(
+            () => workflow.ExecuteAsync(ValidInstance(), CancellationToken.None));
+
+        Assert.Empty(power.Requests);
+    }
+
+    [Fact(Timeout = 2000)]
+    public async Task OfficeSave_ExternalCancel_PropagatesOce_PowerNotCalled()
+    {
+        // D5：外部取消仍传播普通 OCE（绝不转 NotDetected/Continue），唯一电源出口调用 0 次。
+        var automation = new FakeOfficeAutomation(SuccessResult());
+        var runner = new PrePipelineRunner([new OfficeSaveAction(automation)]);
+        var power = new RecordingPowerService(SimulatedResult());
+        var workflow = new ShutdownWorkflow(
+            new FixedConfigurationService(SuccessResult(ValidConfig())),
+            power,
+            runner);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => workflow.ExecuteAsync(ValidInstance(), new CancellationToken(canceled: true)));
+
+        Assert.Empty(power.Requests);
+    }
+
     private static ConfigurationLoadResult SuccessResult(AppConfig config) => new()
     {
         Status = ConfigurationLoadStatus.Success,
@@ -178,6 +215,18 @@ public sealed class S17_OfficeIntegrationTests
             _onSave?.Invoke();
             return _result;
         }
+    }
+
+    /// <summary>内部超时清理安全故障替身：SaveOpenDocuments 抛 OCE 子类安全故障。</summary>
+    private sealed class CleanupFaultAutomation : IOfficeAutomation
+    {
+        public IReadOnlyList<OfficeApplicationKind> DetectAvailableApplications()
+            => [OfficeApplicationKind.Word];
+
+        public OfficeApplicationSaveResult SaveOpenDocuments(
+            OfficeApplicationKind application,
+            CancellationToken cancellationToken)
+            => throw new OfficeHelperCleanupFailedException("helper cleanup failed");
     }
 
     private sealed class NamedAction : IPreShutdownAction

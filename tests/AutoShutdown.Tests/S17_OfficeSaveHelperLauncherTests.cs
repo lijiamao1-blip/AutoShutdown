@@ -357,26 +357,97 @@ public sealed class S17_OfficeSaveHelperLauncherTests
     [InlineData(CleanupFailureMode.UnconfirmedExit)]
     [InlineData(CleanupFailureMode.KillTreeThrows)]
     [InlineData(CleanupFailureMode.ConfirmExitThrows)]
-    public async Task EndToEnd_CleanupFailure_BlocksPipeline_AndNeverAllowsPower(CleanupFailureMode mode)
+    public async Task EndToEnd_CleanupFailure_PropagatesOce_AndStopsWorkflow(CleanupFailureMode mode)
     {
         // 端到端（SaveOpenDocuments → OfficeDocumentSaver → OfficeSaveAction → PrePipelineRunner）：
-        // 内部硬超时 + 清理失败必须 fail-closed（Block），PowerAllowed=false（唯一电源出口不触发），
-        // 绝不作为普通 Continue 结果继续；且辅助进程整棵树被终止。
+        // 内部硬超时 + 清理失败必须作为 OCE 子类（OfficeHelperCleanupFailedException）原样传播，
+        // 终止工作流（Runner 不返回结果 → 唯一电源出口不触发），绝不作为普通 Continue 结果继续。
         var process = CreateFailingProcess(mode);
         var launcher = new FakeLauncher(process);
         var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
         var action = new OfficeSaveAction(automation, perAppTimeout: TimeSpan.FromMilliseconds(80));
         var runner = new PrePipelineRunner([action]);
 
-        var result = await runner.RunAsync(Context(), CancellationToken.None);
+        await Assert.ThrowsAsync<OfficeHelperCleanupFailedException>(
+            () => runner.RunAsync(Context(), CancellationToken.None));
 
-        Assert.Equal(PrePipelineRunStatus.Blocked, result.Status);
-        Assert.False(result.PowerAllowed);
-        var recorded = Assert.Single(result.Actions);
-        Assert.False(recorded.Succeeded);
-        Assert.Equal(FailurePolicy.Block, recorded.FailurePolicy);
         Assert.Equal(1, process.KillCount);
         Assert.Equal(1, process.DisposeCount);
+    }
+
+    // ---- D5 聚焦回归：安全故障作为 OCE 传播（无跨任务可变状态污染） ----
+
+    [Fact]
+    public async Task SaveAll_NormalTimeout_CleanupSucceeds_IsTimedOut()
+    {
+        // 普通内部硬超时且 Helper 成功终止：仍为 TimedOut（可继续），绝不升级为安全故障。
+        var process = new FakeProcess(exitImmediately: false); // 清理成功（confirmExit 默认 true）
+        var launcher = new FakeLauncher(process);
+        var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
+        var saver = new OfficeDocumentSaver(automation, TimeSpan.FromMilliseconds(80));
+
+        var report = await saver.SaveAllAsync(CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal("Word: timed out", report.Summary);
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
+    }
+
+    [Fact]
+    public async Task EndToEnd_OrdinaryFailure_ContinuesPipeline()
+    {
+        // 普通 Office 保存失败（非清理安全故障）→ 默认 Continue：Runner 走完（Completed），不 Block。
+        var launcher = new FakeLauncher(exception: new InvalidOperationException("boom"));
+        var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
+        var action = new OfficeSaveAction(automation, perAppTimeout: TimeSpan.FromMilliseconds(80));
+        var runner = new PrePipelineRunner([action]);
+
+        var result = await runner.RunAsync(Context(), CancellationToken.None);
+
+        Assert.Equal(PrePipelineRunStatus.Completed, result.Status);
+        Assert.True(result.PowerAllowed);
+        var recorded = Assert.Single(result.Actions);
+        Assert.False(recorded.Succeeded);
+        Assert.Equal(FailurePolicy.Continue, recorded.FailurePolicy);
+    }
+
+    [Fact]
+    public async Task Action_CleanupFault_ThenNormalRun_IsNotPolluted()
+    {
+        // 同一 OfficeSaveAction：第一次清理安全故障后，第二次正常执行不受前次状态污染；
+        // FailurePolicy 始终保持不可变 Continue（无共享可变字段）。
+        var action = new OfficeSaveAction(new FailOnceThenSucceedAutomation());
+
+        await Assert.ThrowsAsync<OfficeHelperCleanupFailedException>(
+            () => action.ExecuteAsync(Context(), CancellationToken.None));
+
+        Assert.Equal(FailurePolicy.Continue, action.FailurePolicy);
+
+        var second = await action.ExecuteAsync(Context(), CancellationToken.None);
+        Assert.True(second.Succeeded);
+        Assert.Equal(FailurePolicy.Continue, action.FailurePolicy);
+    }
+
+    [Fact]
+    public async Task Action_Concurrent_FaultAndNormal_NoInterference()
+    {
+        // 同一 Action 并发执行：一个清理安全故障、一个正常完成，两者互不影响（无共享可变状态）。
+        var action = new OfficeSaveAction(new FailOnceThenSucceedAutomation());
+
+        var task1 = action.ExecuteAsync(Context(), CancellationToken.None);
+        var task2 = action.ExecuteAsync(Context(), CancellationToken.None);
+
+        var outcome1 = await Record.ExceptionAsync(async () => await task1);
+        var outcome2 = await Record.ExceptionAsync(async () => await task2);
+
+        Assert.Equal(
+            1,
+            new[] { outcome1, outcome2 }.Count(exception => exception is OfficeHelperCleanupFailedException));
+        Assert.Equal(
+            1,
+            new[] { outcome1, outcome2 }.Count(exception => exception is null));
+        Assert.Equal(FailurePolicy.Continue, action.FailurePolicy);
     }
 
     // ---- 结构契约 ----
@@ -492,6 +563,35 @@ public sealed class S17_OfficeSaveHelperLauncherTests
             OfficeApplicationKind application,
             CancellationToken cancellationToken)
             => _inner.SaveOpenDocuments(application, cancellationToken);
+    }
+
+    /// <summary>
+    /// 第一次 SaveOpenDocuments 抛清理安全故障、之后正常成功的替身，用于验证 OfficeSaveAction
+    /// 无跨调用可变状态（D5：状态污染 / 并发互不影响均不得发生）。
+    /// </summary>
+    private sealed class FailOnceThenSucceedAutomation : IOfficeAutomation
+    {
+        private int _saveCalls;
+
+        public IReadOnlyList<OfficeApplicationKind> DetectAvailableApplications()
+            => [OfficeApplicationKind.Word];
+
+        public OfficeApplicationSaveResult SaveOpenDocuments(
+            OfficeApplicationKind application,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _saveCalls) == 1)
+            {
+                throw new OfficeHelperCleanupFailedException("cleanup fault");
+            }
+
+            return new OfficeApplicationSaveResult
+            {
+                Application = application,
+                Status = OfficeAppStatus.Success,
+                SavedCount = 1
+            };
+        }
     }
 
     private sealed class FakeLauncher : IOfficeSaveHelperLauncher

@@ -12,8 +12,6 @@ namespace AutoShutdown.Core.Office;
 public sealed class OfficeSaveAction : IPreShutdownAction
 {
     private readonly OfficeDocumentSaver _saver;
-    private readonly FailurePolicy _configuredPolicy;
-    private bool _helperCleanupFailed;
 
     public OfficeSaveAction(
         IOfficeAutomation automation,
@@ -22,19 +20,12 @@ public sealed class OfficeSaveAction : IPreShutdownAction
     {
         ArgumentNullException.ThrowIfNull(automation);
         _saver = new OfficeDocumentSaver(automation, perAppTimeout);
-        _configuredPolicy = failurePolicy;
+        FailurePolicy = failurePolicy;
     }
 
     public string Name => "OfficeSave";
 
-    /// <summary>
-    /// 默认 <see cref="_configuredPolicy"/>（Continue）。仅当本次运行发生「Helper 未确认退出」
-    /// 安全故障（<see cref="OfficeHelperCleanupFailedException"/>）时 fail-closed 为 Block
-    /// （S17 独立验收 D4）；普通 Office 保存失败仍保持 Continue。Runner 在动作返回后读取本属性
-    /// 决定 block/continue，故本覆盖不改变 Runner 通用语义。
-    /// </summary>
-    public FailurePolicy FailurePolicy =>
-        _helperCleanupFailed ? FailurePolicy.Block : _configuredPolicy;
+    public FailurePolicy FailurePolicy { get; }
 
     public async Task<PrePipelineActionResult> ExecuteAsync(
         PrePipelineContext context,
@@ -42,22 +33,7 @@ public sealed class OfficeSaveAction : IPreShutdownAction
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        OfficeSaveReport report;
-        try
-        {
-            report = await _saver.SaveAllAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OfficeHelperCleanupFailedException exception)
-        {
-            // D4：内部硬超时期间无法确认 Helper 退出——安全故障，fail-closed（Block）。
-            // 仅此异常覆盖默认 Continue；普通 Office 保存失败仍 Continue。
-            _helperCleanupFailed = true;
-            return new PrePipelineActionResult
-            {
-                Succeeded = false,
-                ErrorMessage = exception.Message
-            };
-        }
+        var report = await _saver.SaveAllAsync(cancellationToken).ConfigureAwait(false);
 
         return new PrePipelineActionResult
         {
