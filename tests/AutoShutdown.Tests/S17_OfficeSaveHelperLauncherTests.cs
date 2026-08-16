@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using AutoShutdown.App.Infrastructure.Office;
+using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Office;
+using AutoShutdown.Core.PrePipeline;
+using AutoShutdown.Core.State;
 using AutoShutdown.OfficeSaveHelper;
 using AutoShutdown.OfficeSaveHelper.Office;
 using Xunit;
@@ -215,13 +218,14 @@ public sealed class S17_OfficeSaveHelperLauncherTests
     public void Cancel_KillTreeThrows_StillPropagatesOce()
     {
         // D3：KillTree 抛异常时，外部取消仍以 OCE 传播，不被转换为 NotDetected 等普通结果。
+        // D4：清理失败升级为可识别 OCE 子类 OfficeHelperCleanupFailedException（仍属 OCE），改用 ThrowsAny。
         var process = new FakeProcess(throwOnKillTree: true);
         var launcher = new FakeLauncher(process);
         var automation = new ComOfficeAutomation(launcher);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        Assert.Throws<OperationCanceledException>(
+        Assert.ThrowsAny<OperationCanceledException>(
             () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
 
         Assert.Equal(1, process.KillCount);
@@ -232,13 +236,14 @@ public sealed class S17_OfficeSaveHelperLauncherTests
     public void Cancel_ConfirmExitThrows_StillPropagatesOce()
     {
         // D3：确认退出抛异常时，外部取消仍以 OCE 传播。
+        // D4：清理失败升级为可识别 OCE 子类 OfficeHelperCleanupFailedException（仍属 OCE），改用 ThrowsAny。
         var process = new FakeProcess(throwOnWaitForExitAfterKill: true);
         var launcher = new FakeLauncher(process);
         var automation = new ComOfficeAutomation(launcher);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        Assert.Throws<OperationCanceledException>(
+        Assert.ThrowsAny<OperationCanceledException>(
             () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
 
         Assert.Equal(1, process.KillCount);
@@ -284,6 +289,94 @@ public sealed class S17_OfficeSaveHelperLauncherTests
         var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.TimedOut, result.Status);
+    }
+
+    // ---- D4 聚焦回归：清理失败不被空 catch 丢弃，形成可识别安全失败（fail-closed） ----
+
+    [Theory]
+    [InlineData(CleanupFailureMode.UnconfirmedExit)]
+    [InlineData(CleanupFailureMode.KillTreeThrows)]
+    [InlineData(CleanupFailureMode.ConfirmExitThrows)]
+    public async Task HardTimeout_CleanupFailure_ThrowsOfficeHelperCleanupFailed(CleanupFailureMode mode)
+    {
+        // 内部硬超时 + 清理失败（无法确认退出 / Kill 异常 / 确认退出异常）：
+        // SaveOpenDocuments 必须抛可识别安全故障（OCE 子类），绝不被空 catch 丢弃、绝不伪装成功。
+        var process = CreateFailingProcess(mode);
+        var launcher = new FakeLauncher(process);
+        var automation = new ComOfficeAutomation(launcher);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(80));
+
+        var task = Task.Run(() => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
+
+        var exception = await Record.ExceptionAsync(async () => await task);
+
+        Assert.IsType<OfficeHelperCleanupFailedException>(exception);
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData(CleanupFailureMode.UnconfirmedExit)]
+    [InlineData(CleanupFailureMode.KillTreeThrows)]
+    [InlineData(CleanupFailureMode.ConfirmExitThrows)]
+    public async Task SaveAll_InternalTimeoutCleanupFailure_PropagatesNotConverted(CleanupFailureMode mode)
+    {
+        // 内部逐应用硬超时 + 清理失败：OfficeDocumentSaver 必须向上传播安全故障，
+        // 绝不降级为 TimedOut/NotDetected 等普通可继续结果。
+        var process = CreateFailingProcess(mode);
+        var launcher = new FakeLauncher(process);
+        var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
+        var saver = new OfficeDocumentSaver(automation, TimeSpan.FromMilliseconds(80));
+
+        await Assert.ThrowsAsync<OfficeHelperCleanupFailedException>(
+            () => saver.SaveAllAsync(CancellationToken.None));
+
+        Assert.Equal(1, process.KillCount);
+    }
+
+    [Theory]
+    [InlineData(CleanupFailureMode.UnconfirmedExit)]
+    [InlineData(CleanupFailureMode.KillTreeThrows)]
+    [InlineData(CleanupFailureMode.ConfirmExitThrows)]
+    public async Task SaveAll_ExternalCancelCleanupFailure_PropagatesOce(CleanupFailureMode mode)
+    {
+        // 外部取消 + 清理失败：仍以 OCE 传播，绝不转 NotDetected（D4 要求 2）；且清理已被尝试。
+        var process = CreateFailingProcess(mode);
+        var launcher = new FakeLauncher(process);
+        var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
+        var saver = new OfficeDocumentSaver(automation, TimeSpan.FromMilliseconds(1000));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => saver.SaveAllAsync(cts.Token));
+
+        Assert.Equal(1, process.KillCount);
+    }
+
+    [Theory]
+    [InlineData(CleanupFailureMode.UnconfirmedExit)]
+    [InlineData(CleanupFailureMode.KillTreeThrows)]
+    [InlineData(CleanupFailureMode.ConfirmExitThrows)]
+    public async Task EndToEnd_CleanupFailure_BlocksPipeline_AndNeverAllowsPower(CleanupFailureMode mode)
+    {
+        // 端到端（SaveOpenDocuments → OfficeDocumentSaver → OfficeSaveAction → PrePipelineRunner）：
+        // 内部硬超时 + 清理失败必须 fail-closed（Block），PowerAllowed=false（唯一电源出口不触发），
+        // 绝不作为普通 Continue 结果继续；且辅助进程整棵树被终止。
+        var process = CreateFailingProcess(mode);
+        var launcher = new FakeLauncher(process);
+        var automation = new SingleAppAutomation(new ComOfficeAutomation(launcher));
+        var action = new OfficeSaveAction(automation, perAppTimeout: TimeSpan.FromMilliseconds(80));
+        var runner = new PrePipelineRunner([action]);
+
+        var result = await runner.RunAsync(Context(), CancellationToken.None);
+
+        Assert.Equal(PrePipelineRunStatus.Blocked, result.Status);
+        Assert.False(result.PowerAllowed);
+        var recorded = Assert.Single(result.Actions);
+        Assert.False(recorded.Succeeded);
+        Assert.Equal(FailurePolicy.Block, recorded.FailurePolicy);
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.DisposeCount);
     }
 
     // ---- 结构契约 ----
@@ -357,6 +450,48 @@ public sealed class S17_OfficeSaveHelperLauncherTests
         }
 
         throw new DirectoryNotFoundException($"The {projectName} source directory was not found.");
+    }
+
+    public enum CleanupFailureMode
+    {
+        UnconfirmedExit,
+        KillTreeThrows,
+        ConfirmExitThrows
+    }
+
+    private static FakeProcess CreateFailingProcess(CleanupFailureMode mode) => mode switch
+    {
+        CleanupFailureMode.UnconfirmedExit => new FakeProcess(exitImmediately: false, confirmExit: false),
+        CleanupFailureMode.KillTreeThrows => new FakeProcess(exitImmediately: false, throwOnKillTree: true),
+        CleanupFailureMode.ConfirmExitThrows => new FakeProcess(exitImmediately: false, throwOnWaitForExitAfterKill: true),
+        _ => throw new ArgumentOutOfRangeException(nameof(mode))
+    };
+
+    private static PrePipelineContext Context() => new()
+    {
+        InstanceId = Guid.NewGuid(),
+        SourceTaskId = Guid.NewGuid(),
+        Action = PowerAction.Shutdown,
+        ScheduledFireTime = DateTimeOffset.UtcNow
+    };
+
+    /// <summary>
+    /// 强制探测到单个 Word 应用、保存委托给真实 <see cref="ComOfficeAutomation"/> 的替身，
+    /// 用于端到端测试（真实编排路径 + 替身启动器/进程，不触碰真实 Office/COM）。
+    /// </summary>
+    private sealed class SingleAppAutomation : IOfficeAutomation
+    {
+        private readonly IOfficeAutomation _inner;
+
+        public SingleAppAutomation(IOfficeAutomation inner) => _inner = inner;
+
+        public IReadOnlyList<OfficeApplicationKind> DetectAvailableApplications()
+            => [OfficeApplicationKind.Word];
+
+        public OfficeApplicationSaveResult SaveOpenDocuments(
+            OfficeApplicationKind application,
+            CancellationToken cancellationToken)
+            => _inner.SaveOpenDocuments(application, cancellationToken);
     }
 
     private sealed class FakeLauncher : IOfficeSaveHelperLauncher

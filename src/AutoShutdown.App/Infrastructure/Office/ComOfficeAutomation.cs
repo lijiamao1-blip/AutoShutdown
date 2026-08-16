@@ -79,18 +79,22 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         catch (OperationCanceledException)
         {
             // 硬超时或上层取消：先清理辅助进程（终止整棵树 + 有界等待确认退出），再传播取消。
-            // 清理无论成功与否、是否抛异常，外部取消都仍以 OCE 传播：被上层识别为取消/TimedOut，
-            // 绝不被转换为 NotDetected 等普通结果；也绝不遗留仍在运行的辅助进程、绝不终止用户 Office。
+            // 绝不遗留仍在运行的辅助进程、绝不终止用户 Office。
             try
             {
                 CleanupAfterCancellation(process);
             }
-            catch (Exception)
+            catch (HelperCleanupFailedException cleanupFailure)
             {
-                // 清理异常（含无法确认退出抛出的 HelperCleanupFailedException）不得覆盖原始取消：
-                // 仍以 OCE 传播（明确失败路径已在 CleanupAfterCancellation 边界标记，见 D3）。
+                // D4：清理失败（无法终止或确认 Helper 退出）不得被空 catch 丢弃。
+                // 抛可识别的安全故障（OCE 子类）：外部取消仍以 OCE 语义传播（不转 NotDetected），
+                // 下游据此识别安全故障并 fail-closed，绝不静默退化为 TimedOut/NotDetected→Continue。
+                throw new OfficeHelperCleanupFailedException(
+                    "The Office save helper could not be confirmed to have exited after cancellation.",
+                    cleanupFailure);
             }
 
+            // 清理成功：正常取消/硬超时，传播原始取消。
             throw;
         }
         finally

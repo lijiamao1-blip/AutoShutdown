@@ -58,8 +58,25 @@ public sealed class OfficeDocumentSaver
                 () => _automation.SaveOpenDocuments(application, timeoutCts.Token),
                 timeoutCts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OfficeHelperCleanupFailedException) when (cancellationToken.IsCancellationRequested)
         {
+            // 外部取消期间的清理失败：仍以纯 OCE 传播（D4 要求 2），绝不转 NotDetected。
+            throw new OperationCanceledException("The operation was cancelled.", cancellationToken);
+        }
+        catch (OfficeHelperCleanupFailedException)
+        {
+            // 内部逐应用硬超时期间无法确认 Helper 退出：安全故障，向上传播（D4 要求 3），
+            // 绝不降级为 TimedOut/NotDetected 进入默认 Continue。
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 外部取消（清理成功）：传播 OCE，绝不转 NotDetected（D4 要求 2）。
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // 内部逐应用超时（清理成功）：正常 TimedOut（可继续）。
             return new OfficeApplicationSaveResult
             {
                 Application = application,
