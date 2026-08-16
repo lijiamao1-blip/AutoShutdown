@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
@@ -11,6 +12,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
 {
     private const string SourceName = "SchedulerEngine";
 
+    private static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(1);
+
     private readonly Channel<PendingCommand> _channel;
     private readonly IClock _clock;
     private readonly IAsyncDeadline _deadline;
@@ -21,6 +24,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private readonly ITaskArbitrator _arbitrator;
     private readonly RuntimeStateStore _runtimeStateStore;
     private readonly TasksDocumentStore _tasksDocumentStore;
+    private readonly IIdleMonitor? _idleMonitor;
+    private readonly TimeSpan _globalDefaultIdleThreshold;
     private readonly object _sync = new();
 
     private SchedulerSnapshot _snapshot = SchedulerSnapshot.Empty;
@@ -34,7 +39,9 @@ public sealed class SchedulerEngine : ISchedulerEngine
         ITaskInstanceStateMachine stateMachine,
         IIdentifierGenerator identifierGenerator,
         IScheduledTaskHandler handler,
-        ITaskArbitrator arbitrator)
+        ITaskArbitrator arbitrator,
+        IIdleMonitor? idleMonitor = null,
+        TimeSpan? globalDefaultIdleThreshold = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(clock);
@@ -52,6 +59,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
         _identifierGenerator = identifierGenerator;
         _handler = handler;
         _arbitrator = arbitrator;
+        _idleMonitor = idleMonitor;
+        _globalDefaultIdleThreshold = globalDefaultIdleThreshold ?? IdleShutdownRule.GlobalDefaultThreshold;
         _runtimeStateStore = new RuntimeStateStore(storage);
         _tasksDocumentStore = new TasksDocumentStore(storage);
 
@@ -78,6 +87,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
             loop = _runTask;
         }
 
+        _idleMonitor?.Start();
         try
         {
             await loop.ConfigureAwait(false);
@@ -89,6 +99,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
         finally
         {
             await ShutdownPendingCommandsAsync().ConfigureAwait(false);
+            _idleMonitor?.Stop();
         }
     }
 
@@ -164,6 +175,11 @@ public sealed class SchedulerEngine : ISchedulerEngine
             }
 
             if (await TryProcessDueAsync(cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            if (await TryEvaluateIdleAsync(cancellationToken).ConfigureAwait(false))
             {
                 continue;
             }
@@ -357,6 +373,130 @@ public sealed class SchedulerEngine : ISchedulerEngine
             + arbitration.DecisionReason);
         return true;
     }
+
+    /// <summary>
+    /// 空闲评估（S15）：仅作用于 Idle 任务。Waiting 且空闲时长达到阈值 → 触发进入
+    /// 倒计时/确认窗口（IsIdleTriggered）；由空闲触发的 Confirming 在输入恢复（空闲时长
+    /// 回落到阈值以下）时取消。检测失败（idleDuration=null）默认不触发、不取消（fail-closed）。
+    /// 非 Idle 任务完全不受影响。
+    /// </summary>
+    private async Task<bool> TryEvaluateIdleAsync(CancellationToken cancellationToken)
+    {
+        if (_idleMonitor is null)
+        {
+            return false;
+        }
+
+        var now = _clock.UtcNow.ToUniversalTime();
+        var idleCandidates = GetActiveInstances()
+            .Select(instance => (Instance: instance, Definition: _taskService.Get(instance.SourceTaskId)))
+            .Where(candidate => candidate.Definition?.Kind == TaskKind.Idle)
+            .ToList();
+
+        if (idleCandidates.Count == 0)
+        {
+            return false;
+        }
+
+        var idleDuration = _idleMonitor.GetIdleDuration();
+        var changed = false;
+
+        foreach (var (instance, definition) in idleCandidates)
+        {
+            if (definition is null)
+            {
+                continue;
+            }
+
+            switch (instance.State)
+            {
+                case TaskInstanceState.Waiting:
+                    if (IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
+                    {
+                        changed |= await ArmIdleAsync(instance, definition, now, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
+                    break;
+
+                case TaskInstanceState.Confirming when instance.IsIdleTriggered:
+                    if (!IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
+                    {
+                        changed |= await CancelIdleTriggeredAsync(instance, now, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
+                    break;
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// 触发空闲任务：Waiting → Confirming（倒计时/确认窗口），并设置真实触发时刻
+    /// （now + 告警窗口；无告警窗口则立即到期）与 IsIdleTriggered 标记。字段级更新，
+    /// 不改变冻结状态机白名单。
+    /// </summary>
+    private async Task<bool> ArmIdleAsync(
+        TaskInstance instance,
+        TaskDefinition definition,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var running = _stateMachine.TryTransition(
+            instance.State,
+            TaskInstanceState.Running,
+            TaskInstanceStateTransitionCause.ScheduleTriggered,
+            SourceName);
+        if (!running.Allowed)
+        {
+            return false;
+        }
+
+        var confirming = _stateMachine.TryTransition(
+            TaskInstanceState.Running,
+            TaskInstanceState.Confirming,
+            TaskInstanceStateTransitionCause.PipelineCompleted,
+            SourceName);
+        if (!confirming.Allowed)
+        {
+            return false;
+        }
+
+        var warning = definition.WarningSeconds is > 0
+            ? TimeSpan.FromSeconds(definition.WarningSeconds.Value)
+            : TimeSpan.Zero;
+
+        var armed = instance with
+        {
+            State = TaskInstanceState.Confirming,
+            ScheduledFireTime = now.Add(warning).ToUniversalTime(),
+            WarningStartTime = warning > TimeSpan.Zero ? now.ToUniversalTime() : null,
+            IsIdleTriggered = true
+        };
+
+        return await PersistAndCommitInstanceAsync(armed, now, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>输入恢复取消：由空闲触发的 Confirming 通过冻结白名单 Confirming→Cancelled 终结。</summary>
+    private async Task<bool> CancelIdleTriggeredAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cancelled = _taskService.Cancel(instance);
+        if (!cancelled.Succeeded || cancelled.Instance is null)
+        {
+            return false;
+        }
+
+        return await PersistAndCommitInstanceAsync(cancelled.Instance, now, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private bool IsIdleInstance(TaskInstance instance)
+        => _taskService.Get(instance.SourceTaskId)?.Kind == TaskKind.Idle;
 
     /// <summary>
     /// 消费仲裁结果（S13-T09）：赢家推进执行；合并（MergedTaskIds）任务在冻结状态机
@@ -1128,8 +1268,15 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private DateTimeOffset? ComputeNextDeadline(DateTimeOffset now)
     {
         DateTimeOffset? next = null;
+        var idleToMonitor = false;
+
         foreach (var instance in GetActiveInstances())
         {
+            if (IsIdleInstance(instance))
+            {
+                idleToMonitor = true;
+            }
+
             var deadline = ComputeFutureDeadline(instance, now);
             if (deadline is null)
             {
@@ -1142,13 +1289,26 @@ public sealed class SchedulerEngine : ISchedulerEngine
             }
         }
 
+        // Idle 任务的触发/取消依赖外部输入（非墙钟），无法由 deadline 精确表达；
+        // 存在待监控的 Idle 实例时，加入短轮询 deadline 以周期性重新评估空闲时长。
+        if (idleToMonitor && _idleMonitor is not null)
+        {
+            var poll = now.Add(IdlePollInterval).ToUniversalTime();
+            if (next is null || poll < next.Value)
+            {
+                next = poll;
+            }
+        }
+
         return next;
     }
 
-    private static bool IsDueNow(TaskInstance instance, DateTimeOffset now)
+    private bool IsDueNow(TaskInstance instance, DateTimeOffset now)
     {
         return instance.State switch
         {
+            // Idle 任务的 Waiting 占位 fire time 不代表真实触发；仅由空闲评估触发。
+            TaskInstanceState.Waiting when IsIdleInstance(instance) => false,
             TaskInstanceState.Waiting => instance.ScheduledFireTime <= now
                 || (instance.WarningStartTime is { } warningStart && warningStart <= now),
             TaskInstanceState.Confirming => instance.ScheduledFireTime <= now,
@@ -1156,10 +1316,12 @@ public sealed class SchedulerEngine : ISchedulerEngine
         };
     }
 
-    private static DateTimeOffset? ComputeFutureDeadline(TaskInstance instance, DateTimeOffset now)
+    private DateTimeOffset? ComputeFutureDeadline(TaskInstance instance, DateTimeOffset now)
     {
         return instance.State switch
         {
+            // Idle 任务的 Waiting 占位 fire time 不产生墙钟 deadline；由轮询驱动空闲评估。
+            TaskInstanceState.Waiting when IsIdleInstance(instance) => null,
             TaskInstanceState.Waiting when instance.WarningStartTime is { } warningStart && warningStart > now =>
                 warningStart,
             TaskInstanceState.Waiting when instance.ScheduledFireTime > now => instance.ScheduledFireTime,

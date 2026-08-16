@@ -2,12 +2,14 @@ using System.IO;
 using System.Windows.Threading;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
+using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
+using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.Recovery;
 using AutoShutdown.Core.Scheduling;
@@ -62,6 +64,8 @@ public static class ServiceRegistration
         services.AddSingleton<ITaskService, TaskService>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IAsyncDeadline, SystemAsyncDeadline>();
+        services.AddSingleton<IIdleInputSource, Win32IdleInputSource>();
+        services.AddSingleton<IIdleMonitor, IdleMonitor>();
 
         // Application log infrastructure. The logger is a Singleton; App.xaml.cs
         // may override this registration with a pre-created instance so startup
@@ -80,7 +84,17 @@ public static class ServiceRegistration
                 provider.GetRequiredService<ShutdownWorkflow>(),
                 provider.GetRequiredService<IApplicationLogger>()));
         services.AddSingleton<IScheduledTaskHandler, ShutdownScheduledTaskHandler>();
-        services.AddSingleton<ISchedulerEngine, SchedulerEngine>();
+        services.AddSingleton<ISchedulerEngine>(provider => new SchedulerEngine(
+            provider.GetRequiredService<IStorage>(),
+            provider.GetRequiredService<IClock>(),
+            provider.GetRequiredService<IAsyncDeadline>(),
+            provider.GetRequiredService<ITaskService>(),
+            provider.GetRequiredService<ITaskInstanceStateMachine>(),
+            provider.GetRequiredService<IIdentifierGenerator>(),
+            provider.GetRequiredService<IScheduledTaskHandler>(),
+            provider.GetRequiredService<ITaskArbitrator>(),
+            provider.GetRequiredService<IIdleMonitor>(),
+            IdleShutdownRule.GlobalDefaultThreshold));
 
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();
