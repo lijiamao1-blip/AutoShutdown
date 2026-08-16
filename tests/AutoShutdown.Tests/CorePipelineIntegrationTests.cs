@@ -448,10 +448,12 @@ public sealed class CorePipelineIntegrationTests
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
+        await WaitUntilAsync(() => harness.Power.CallCount == 1);
 
+        // S14：DailyAt 为周期规则，触发后 executed→waiting 并重排到下一日（跨午夜后仍为 23:30 UTC）。
         Assert.Equal(1, harness.Power.CallCount);
-        Assert.Equal(TaskInstanceState.Executed, harness.CurrentInstance!.State);
+        Assert.Equal(TaskInstanceState.Waiting, harness.CurrentInstance!.State);
+        Assert.Equal(new DateTimeOffset(2024, 1, 16, 23, 30, 0, TimeSpan.Zero), harness.CurrentInstance.ScheduledFireTime);
         Assert.Contains(new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero), harness.Deadline.WaitedDeadlines);
     }
 

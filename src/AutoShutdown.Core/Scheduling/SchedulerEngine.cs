@@ -20,6 +20,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private readonly IScheduledTaskHandler _handler;
     private readonly ITaskArbitrator _arbitrator;
     private readonly RuntimeStateStore _runtimeStateStore;
+    private readonly TasksDocumentStore _tasksDocumentStore;
     private readonly object _sync = new();
 
     private SchedulerSnapshot _snapshot = SchedulerSnapshot.Empty;
@@ -52,6 +53,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
         _handler = handler;
         _arbitrator = arbitrator;
         _runtimeStateStore = new RuntimeStateStore(storage);
+        _tasksDocumentStore = new TasksDocumentStore(storage);
 
         var options = new UnboundedChannelOptions
         {
@@ -220,7 +222,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
                     };
                 }
 
-                return true;
+                break;
             case RuntimeStateLoadStatus.Success:
             case RuntimeStateLoadStatus.Migrated:
                 lock (_sync)
@@ -233,7 +235,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
                     };
                 }
 
-                return true;
+                break;
             case RuntimeStateLoadStatus.Corrupt:
                 SetFaulted("The runtime state file is corrupt: " + JoinErrors(load.Errors));
                 return false;
@@ -246,6 +248,48 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 SetFaulted("The runtime state is invalid: " + JoinErrors(load.Errors));
                 return false;
         }
+
+        // S14：载入任务定义（tasks.json）并登记到领域集合，供周期改期与重启恢复使用。
+        return await TryLoadDefinitionsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 载入任务定义（tasks.json）到 <see cref="ITaskService"/> 领域集合。NotFound 视为空清单；
+    /// Corrupt/Invalid/UnsupportedVersion/IoFailure 一律 SetFaulted（损坏数据绝不静默回退）。
+    /// 单个规则登记失败不 SetFaulted 整机——损坏规则只使对应任务无法改期，不影响其他任务。
+    /// </summary>
+    private async Task<bool> TryLoadDefinitionsAsync(CancellationToken cancellationToken)
+    {
+        var load = await _tasksDocumentStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+
+        switch (load.Status)
+        {
+            case TasksLoadStatus.NotFound:
+                return true;
+            case TasksLoadStatus.Success:
+            case TasksLoadStatus.Migrated:
+                break;
+            case TasksLoadStatus.Corrupt:
+                SetFaulted("The task definitions file is corrupt: " + JoinErrors(load.Errors));
+                return false;
+            case TasksLoadStatus.IoFailure:
+                SetFaulted("Failed to read the task definitions file: " + JoinErrors(load.Errors));
+                return false;
+            case TasksLoadStatus.Invalid:
+            case TasksLoadStatus.UnsupportedVersion:
+            default:
+                SetFaulted("The task definitions are invalid: " + JoinErrors(load.Errors));
+                return false;
+        }
+
+        foreach (var definition in load.Document!.Tasks)
+        {
+            // 结构校验已在 TasksDocumentStore.LoadAsync 完成；此处登记失败（重复 Id 等）
+            // 属防御性兜底，跳过该规则而不影响其它规则。
+            _ = RegisterDefinition(definition);
+        }
+
+        return true;
     }
 
     private async Task<bool> TryProcessDueAsync(CancellationToken cancellationToken)
@@ -677,17 +721,20 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return;
         }
 
-        await EnterTerminalAsync(
+        var executed = await EnterTerminalAsync(
             executing,
             TaskInstanceState.Executed,
             TaskInstanceStateTransitionCause.PowerCompleted,
             _clock.UtcNow.ToUniversalTime(),
             cancellationToken).ConfigureAwait(false);
 
-        await TryRescheduleRecurringAsync(executing, cancellationToken).ConfigureAwait(false);
+        if (executed is not null)
+        {
+            await TryRescheduleRecurringAsync(executed, cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private async Task EnterTerminalAsync(
+    private async Task<TaskInstance?> EnterTerminalAsync(
         TaskInstance instance,
         TaskInstanceState target,
         TaskInstanceStateTransitionCause cause,
@@ -698,25 +745,41 @@ public sealed class SchedulerEngine : ISchedulerEngine
         if (!transition.Allowed)
         {
             SetFaulted("The state machine rejected the terminal transition: " + transition.Reason);
-            return;
+            return null;
         }
 
         var terminal = instance with { State = target };
-        await PersistAndCommitInstanceAsync(terminal, now, cancellationToken).ConfigureAwait(false);
+        if (!await PersistAndCommitInstanceAsync(terminal, now, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return terminal;
     }
 
+    /// <summary>
+    /// 周期规则改期（S14）：执行后为周期规则（DailyAt/Weekdays/NthWorkdayOfMonth）计算下次触发
+    /// 并 executed→waiting；一次性/倒计时/下个工作日规则触发后终结（不再重排）。
+    /// 无后续触发或损坏规则时任务保持已执行终态，不 SetFaulted 整机、不影响其他任务
+    /// （冻结状态机无 executed→faulted 边，故以“保持终态”表达安全终结）。
+    /// </summary>
     private async Task TryRescheduleRecurringAsync(
         TaskInstance executed,
         CancellationToken cancellationToken)
     {
         var definition = _taskService.Get(executed.SourceTaskId);
-        if (definition is null || !definition.IsEnabled || definition.Kind != TaskKind.DailyAt)
+        if (definition is null || !definition.IsEnabled)
+        {
+            return;
+        }
+
+        if (!TaskDefinitionValidator.IsRecurringKind(definition.Kind))
         {
             return;
         }
 
         var now = _clock.UtcNow.ToUniversalTime();
-        var result = _taskService.RescheduleDaily(
+        var result = _taskService.RescheduleRecurring(
             definition,
             executed,
             now,
@@ -773,6 +836,17 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 taskResult.TransitionDecisionCode);
         }
 
+        // S14：登记定义到领域集合（供周期改期/启停）。定义持久化（tasks.json）由应用层
+        // 负责（checkpoint 4 的“保存/恢复”），引擎此处仅做内存登记，不触碰运行态写入序列。
+        var register = RegisterDefinition(command.Definition);
+        if (!register.Succeeded)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.TaskServiceRejected,
+                register.Message);
+        }
+
         var now = _clock.UtcNow.ToUniversalTime();
         var next = WithInstance(instances, taskResult.Instance!);
         if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
@@ -783,7 +857,10 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 "Failed to persist the created task.");
         }
 
-        return Success("The task was created.");
+        // 过期一次性任务诞生即 Cancelled（终态），如实告知而非笼统“已创建”。
+        return taskResult.Instance!.State == TaskInstanceState.Cancelled
+            ? Success(taskResult.Message)
+            : Success("The task was created.");
     }
 
     private async Task<SchedulerCommandResult> HandleSnoozeAsync(
@@ -1033,6 +1110,15 @@ public sealed class SchedulerEngine : ISchedulerEngine
 
     private TaskInstance? FindInstance(Guid instanceId)
         => GetSnapshot().Instances.Values.FirstOrDefault(instance => instance.InstanceId == instanceId);
+
+    /// <summary>登记任务定义到领域集合：新增；已存在则刷新（重创建同一 Id 的场景）。</summary>
+    private TaskCollectionResult RegisterDefinition(TaskDefinition definition)
+    {
+        var add = _taskService.Add(definition);
+        return add.Status == TaskCollectionStatus.DuplicateId
+            ? _taskService.Update(definition)
+            : add;
+    }
 
     private IReadOnlyList<TaskInstance> GetActiveInstances()
         => GetSnapshot().Instances.Values

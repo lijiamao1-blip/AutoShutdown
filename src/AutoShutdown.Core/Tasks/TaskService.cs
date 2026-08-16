@@ -58,6 +58,59 @@ public sealed class TaskService : ITaskService
         }
 
         var schedule = _nextExecutionCalculator.Calculate(definition, now, timeZone);
+
+        // 过期一次性任务不追溯执行：诞生为 Waiting 后按冻结白名单
+        // Waiting→Cancelled（OneTimeExpired）终结并告知（S14 契约）。
+        if (schedule.Status == NextExecutionStatus.OneTimeExpired)
+        {
+            var expiredInstanceId = _identifierGenerator.NewId();
+            var expiredStageToken = _identifierGenerator.NewId();
+            if (expiredInstanceId == Guid.Empty
+                || expiredStageToken == Guid.Empty
+                || expiredInstanceId == expiredStageToken)
+            {
+                return Failure(
+                    TaskCommandStatus.InvalidCurrentInstance,
+                    "The generated identifiers are not valid.");
+            }
+
+            var expiredTransition = _stateMachine.TryTransition(
+                TaskInstanceState.Waiting,
+                TaskInstanceState.Cancelled,
+                TaskInstanceStateTransitionCause.OneTimeExpired,
+                SourceName);
+            if (!expiredTransition.Allowed)
+            {
+                return new TaskCommandResult
+                {
+                    Status = TaskCommandStatus.TransitionRejected,
+                    TransitionDecisionCode = expiredTransition.DecisionCode,
+                    Message = expiredTransition.Reason
+                };
+            }
+
+            var expiredInstance = new TaskInstance
+            {
+                InstanceId = expiredInstanceId,
+                SourceTaskId = definition.Id,
+                ActionSnapshot = definition.Action,
+                State = TaskInstanceState.Cancelled,
+                ScheduledFireTime = now.ToUniversalTime(),
+                WarningStartTime = null,
+                StageToken = expiredStageToken,
+                HasExecuted = false,
+                CreatedAt = now.ToUniversalTime(),
+                RealPowerConfirmed = definition.RealPowerConfirmed
+            };
+
+            return new TaskCommandResult
+            {
+                Status = TaskCommandStatus.Success,
+                Instance = expiredInstance,
+                Message = "The one-time task has already expired and was cancelled."
+            };
+        }
+
         if (!schedule.Succeeded)
         {
             return new TaskCommandResult
@@ -340,6 +393,85 @@ public sealed class TaskService : ITaskService
             Status = TaskCommandStatus.Success,
             Instance = rescheduled,
             Message = "The daily task was rescheduled."
+        };
+    }
+
+    public TaskCommandResult RescheduleRecurring(
+        TaskDefinition definition,
+        TaskInstance current,
+        DateTimeOffset now,
+        TimeZoneInfo timeZone)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(timeZone);
+
+        if (!TaskDefinitionValidator.IsRecurringKind(definition.Kind))
+        {
+            return Failure(
+                TaskCommandStatus.InvalidDefinition,
+                "RescheduleRecurring only supports recurring tasks (DailyAt, Weekdays, NthWorkdayOfMonth).");
+        }
+
+        if (definition.Id != current.SourceTaskId || definition.Action != current.ActionSnapshot)
+        {
+            return Failure(
+                TaskCommandStatus.InvalidDefinition,
+                "The definition identity or action does not match the current instance.");
+        }
+
+        // 周期规则：executed → waiting（Reschedule，刷新 StageToken）。仅 Executed 可重排。
+        var transition = _stateMachine.TryTransition(
+            current.State,
+            TaskInstanceState.Waiting,
+            TaskInstanceStateTransitionCause.Reschedule,
+            SourceName);
+        if (!transition.Allowed)
+        {
+            return new TaskCommandResult
+            {
+                Status = TaskCommandStatus.TransitionRejected,
+                TransitionDecisionCode = transition.DecisionCode,
+                Message = transition.Reason
+            };
+        }
+
+        var schedule = _nextExecutionCalculator.Calculate(definition, now, timeZone);
+        if (!schedule.Succeeded)
+        {
+            return new TaskCommandResult
+            {
+                Status = TaskCommandStatus.ScheduleCalculationFailed,
+                ScheduleStatus = schedule.Status,
+                Message = schedule.Message
+            };
+        }
+
+        var stageToken = _identifierGenerator.NewId();
+        if (!IsDistinctStageToken(stageToken, current))
+        {
+            return Failure(
+                TaskCommandStatus.InvalidCurrentInstance,
+                "The generated stage token is not valid.");
+        }
+
+        var fireTime = schedule.ScheduledFireTime!.Value;
+        var warningStartTime = ComputeWarningStartTime(definition.WarningSeconds, fireTime, now);
+
+        var rescheduled = current with
+        {
+            State = TaskInstanceState.Waiting,
+            ScheduledFireTime = fireTime,
+            WarningStartTime = warningStartTime,
+            StageToken = stageToken,
+            HasExecuted = false
+        };
+
+        return new TaskCommandResult
+        {
+            Status = TaskCommandStatus.Success,
+            Instance = rescheduled,
+            Message = "The recurring task was rescheduled."
         };
     }
 

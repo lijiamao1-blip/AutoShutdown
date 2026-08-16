@@ -33,6 +33,16 @@ public interface ITaskService
         DateTimeOffset now,
         TimeZoneInfo timeZone);
 
+    /// <summary>
+    /// 周期规则重排（S14）：DailyAt / Weekdays / NthWorkdayOfMonth 执行后计算下次触发，
+    /// executed→waiting 并刷新 StageToken。仅周期规则允许；一次性/倒计时规则触发后终结。
+    /// </summary>
+    TaskCommandResult RescheduleRecurring(
+        TaskDefinition definition,
+        TaskInstance current,
+        DateTimeOffset now,
+        TimeZoneInfo timeZone);
+
     // ===== 任务定义领域模型集合化 CRUD（S13-T02A，内存领域模型，无持久化） =====
 
     /// <summary>新增任务定义（Id 已存在则拒绝）。</summary>
