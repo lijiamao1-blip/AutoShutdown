@@ -1,15 +1,14 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Office;
 
 namespace AutoShutdown.App.Infrastructure.Office;
 
 /// <summary>
-/// 真实 Office COM 自动化（S17）。只对「已安装且正在运行」的 Office 应用做 COM 附加保存：
-/// 通过进程探测限定目标，绝不新建隐藏进程（从根上避免遗留进程），也绝不 Quit 用户已打开的
-/// Office 应用（关闭归 S18）。在明确 STA 边界内执行，逐对象释放 COM 引用。此实现为真机路径，
-/// S17 自动化测试不调用它。
+/// 真实 Office 自动保存编排（S17 独立验收修复）。只对「已安装且正在运行」的 Office 应用，
+/// 通过 <see cref="IOfficeComGateway"/> 附加 Running Object Table 中已运行实例并保存；
+/// 绝不新建实例、绝不 Quit（关闭归 S18）。逐文档/逐应用异常隔离，全部取得的 COM 包装
+/// 在成功、异常与取消路径均释放。此实现为真机路径，S17 自动化测试不调用它。
 /// </summary>
 public sealed class ComOfficeAutomation : IOfficeAutomation
 {
@@ -19,6 +18,14 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         (OfficeApplicationKind.Excel, "Excel.Application", "EXCEL"),
         (OfficeApplicationKind.PowerPoint, "PowerPoint.Application", "POWERPNT"),
     ];
+
+    private readonly IOfficeComGateway _gateway;
+
+    public ComOfficeAutomation(IOfficeComGateway gateway)
+    {
+        ArgumentNullException.ThrowIfNull(gateway);
+        _gateway = gateway;
+    }
 
     public IReadOnlyList<OfficeApplicationKind> DetectAvailableApplications()
     {
@@ -41,73 +48,66 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         return StaThreadRunner.Run(() => SaveOnStaThread(application, cancellationToken));
     }
 
-    private static OfficeApplicationSaveResult SaveOnStaThread(
+    private OfficeApplicationSaveResult SaveOnStaThread(
         OfficeApplicationKind application,
         CancellationToken cancellationToken)
     {
-        var progId = ResolveProgId(application);
-        if (progId is null)
-        {
-            return NotDetected(application);
-        }
-
-        var type = Type.GetTypeFromProgID(progId);
-        if (type is null)
-        {
-            return NotDetected(application);
-        }
-
-        object? applicationObject = null;
-        object? documentsObject = null;
-
+        IOfficeComApplication? officeApplication = null;
         try
         {
-            // 附加到正在运行的实例（Detect 已确认进程存在）；不新建隐藏进程。
-            applicationObject = Activator.CreateInstance(type);
-            if (applicationObject is null)
+            // 仅附加 ROT 中已运行实例；网关无创建路径，进程探测与附加间竞态安全失败为 null。
+            officeApplication = _gateway.TryAttach(application);
+            if (officeApplication is null)
             {
                 return NotDetected(application);
             }
 
-            dynamic app = applicationObject;
-            documentsObject = GetDocuments(app, application);
-            dynamic documents = documentsObject;
+            IReadOnlyList<IOfficeComDocument> documents;
+            try
+            {
+                documents = officeApplication.GetOpenDocuments();
+            }
+            catch (Exception)
+            {
+                return NotDetected(application);
+            }
 
             var saved = 0;
             var noPath = 0;
             var failed = 0;
-            var count = (int)documents.Count;
-            for (var index = 1; index <= count; index++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                object? documentObject = null;
-                try
+                foreach (var document in documents)
                 {
-                    documentObject = documents.Item(index);
-                    dynamic document = documentObject;
-                    var path = document.Path as string;
-                    if (string.IsNullOrEmpty(path))
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
                     {
-                        noPath++;
+                        if (!document.HasPath)
+                        {
+                            noPath++;
+                        }
+                        else
+                        {
+                            document.Save();
+                            saved++;
+                        }
                     }
-                    else
+                    catch (OperationCanceledException)
                     {
-                        document.Save();
-                        saved++;
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        failed++;
                     }
                 }
-                catch (OperationCanceledException)
+            }
+            finally
+            {
+                // 成功 / 异常 / 取消路径均释放全部取得的文档包装。
+                foreach (var document in documents)
                 {
-                    throw;
-                }
-                catch (Exception)
-                {
-                    failed++;
-                }
-                finally
-                {
-                    Release(documentObject);
+                    document.Dispose();
                 }
             }
 
@@ -122,36 +122,13 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         }
         finally
         {
-            // 仅释放 COM 引用；绝不 Quit（关闭用户 Office 应用归 S18）。
-            Release(documentsObject);
-            Release(applicationObject);
+            // 仅释放本程序取得的 COM 引用；绝不 Quit。
+            officeApplication?.Dispose();
         }
     }
-
-    private static object GetDocuments(dynamic application, OfficeApplicationKind applicationKind)
-        => applicationKind switch
-        {
-            OfficeApplicationKind.Word => application.Documents,
-            OfficeApplicationKind.Excel => application.Workbooks,
-            OfficeApplicationKind.PowerPoint => application.Presentations,
-            _ => throw new InvalidOperationException($"Unknown Office application: {applicationKind}.")
-        };
 
     private static OfficeApplicationSaveResult NotDetected(OfficeApplicationKind application)
         => new() { Application = application, Status = OfficeAppStatus.NotDetected };
-
-    private static string? ResolveProgId(OfficeApplicationKind application)
-    {
-        foreach (var (kind, progId, _) in Programs)
-        {
-            if (kind == application)
-            {
-                return progId;
-            }
-        }
-
-        return null;
-    }
 
     private static bool IsProgIdRegistered(string progId)
     {
@@ -174,14 +151,6 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         catch
         {
             return false;
-        }
-    }
-
-    private static void Release(object? comObject)
-    {
-        if (comObject is not null && Marshal.IsComObject(comObject))
-        {
-            Marshal.ReleaseComObject(comObject);
         }
     }
 }

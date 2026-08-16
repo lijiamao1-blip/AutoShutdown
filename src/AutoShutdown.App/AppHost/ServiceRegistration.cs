@@ -86,6 +86,7 @@ public static class ServiceRegistration
         // 异常隔离、block/continue 语义由 Runner 层保证。Office 自动化走
         // 抽象 IOfficeAutomation（真机 COM 实现为 ComOfficeAutomation，惰性，
         // 解析时不触碰 COM），自动化测试注入替身。
+        services.AddSingleton<IOfficeComGateway, RotOfficeComGateway>();
         services.AddSingleton<IOfficeAutomation, ComOfficeAutomation>();
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
