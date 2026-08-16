@@ -14,6 +14,10 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <!-- 允许测试项目访问内部清理逻辑（CleanupAfterCancellation / HelperCleanupFailedException）做聚焦回归测试。 -->
+    <InternalsVisibleTo Include="AutoShutdown.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- 同一份多尺寸 ICO：作为 WPF 资源嵌入，供主窗口/提醒窗口/托盘共用；EXE 图标由 ApplicationIcon 嵌入 -->
     <Resource Include="..\..\assets\icon.ico">
       <LogicalName>assets/icon.ico</LogicalName>

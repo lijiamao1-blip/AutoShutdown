@@ -166,6 +166,7 @@ public sealed class S17_OfficeSaveHelperLauncherTests
 
         Assert.IsType<OperationCanceledException>(exception);
         Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
         Assert.Equal(1, process.DisposeCount);
     }
 
@@ -182,7 +183,83 @@ public sealed class S17_OfficeSaveHelperLauncherTests
             () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
 
         Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
         Assert.Equal(1, process.DisposeCount);
+    }
+
+    // ---- D3 聚焦回归测试：取消清理不覆盖 OCE / 解析前取消竞态 ----
+
+    [Fact]
+    public void Cleanup_UnconfirmedExit_ThrowsHelperCleanupFailed_NotSilentlyIgnored()
+    {
+        // D3：WaitForExitAfterKill 返回 false（无法确认退出）时必须成为明确失败路径，
+        // 绝不静默忽略确认结果、绝不伪装成功。
+        var process = new FakeProcess(confirmExit: false);
+
+        var exception = Assert.Throws<ComOfficeAutomation.HelperCleanupFailedException>(
+            () => ComOfficeAutomation.CleanupAfterCancellation(process));
+
+        Assert.Contains("did not confirm exit", exception.Message);
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
+    }
+
+    [Fact]
+    public void Cleanup_NullProcess_IsNoOp()
+    {
+        // 未启动辅助进程：无可清理目标，视为完成，不抛异常。
+        ComOfficeAutomation.CleanupAfterCancellation(null);
+    }
+
+    [Fact]
+    public void Cancel_KillTreeThrows_StillPropagatesOce()
+    {
+        // D3：KillTree 抛异常时，外部取消仍以 OCE 传播，不被转换为 NotDetected 等普通结果。
+        var process = new FakeProcess(throwOnKillTree: true);
+        var launcher = new FakeLauncher(process);
+        var automation = new ComOfficeAutomation(launcher);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(
+            () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
+
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.DisposeCount);
+    }
+
+    [Fact]
+    public void Cancel_ConfirmExitThrows_StillPropagatesOce()
+    {
+        // D3：确认退出抛异常时，外部取消仍以 OCE 传播。
+        var process = new FakeProcess(throwOnWaitForExitAfterKill: true);
+        var launcher = new FakeLauncher(process);
+        var automation = new ComOfficeAutomation(launcher);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(
+            () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
+
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
+    }
+
+    [Fact]
+    public void HelperExited_ThenCancelled_BeforeParse_StillPropagatesOce()
+    {
+        // D3：Helper 已退出（WaitForExit 返回 true）、解析 stdout 前取消到达时仍传播 OCE，
+        // 绝不返回可能掩盖取消的正常结果；并仍执行取消清理（终止+确认）。
+        using var cts = new CancellationTokenSource();
+        var process = new FakeProcess("0|1|0|0", exitImmediately: true, cancelSource: cts);
+        var launcher = new FakeLauncher(process);
+        var automation = new ComOfficeAutomation(launcher);
+
+        Assert.Throws<OperationCanceledException>(
+            () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
+
+        Assert.Equal(1, process.KillCount);
+        Assert.Equal(1, process.WaitForExitAfterKillCount);
     }
 
     [Fact]
@@ -310,10 +387,24 @@ public sealed class S17_OfficeSaveHelperLauncherTests
     private sealed class FakeProcess : IOfficeSaveHelperProcess
     {
         private readonly string _stdout;
+        private readonly bool _throwOnKillTree;
+        private readonly bool _throwOnWaitForExitAfterKill;
+        private readonly bool _confirmExit;
+        private readonly CancellationTokenSource? _cancelSource;
 
-        public FakeProcess(string stdout = "", bool exitImmediately = false)
+        public FakeProcess(
+            string stdout = "",
+            bool exitImmediately = false,
+            bool throwOnKillTree = false,
+            bool throwOnWaitForExitAfterKill = false,
+            bool confirmExit = true,
+            CancellationTokenSource? cancelSource = null)
         {
             _stdout = stdout;
+            _throwOnKillTree = throwOnKillTree;
+            _throwOnWaitForExitAfterKill = throwOnWaitForExitAfterKill;
+            _confirmExit = confirmExit;
+            _cancelSource = cancelSource;
             Exited = exitImmediately;
         }
 
@@ -323,11 +414,15 @@ public sealed class S17_OfficeSaveHelperLauncherTests
 
         public int DisposeCount { get; private set; }
 
+        public int WaitForExitAfterKillCount { get; private set; }
+
         public bool HasExited => Exited;
 
         public bool WaitForExit(int milliseconds)
         {
             Thread.Sleep(5); // 模拟真实轮询等待
+            // 模拟「Helper 已退出、解析前取消到达」的竞态：退出瞬间取消令牌。
+            _cancelSource?.Cancel();
             return Exited;
         }
 
@@ -336,13 +431,24 @@ public sealed class S17_OfficeSaveHelperLauncherTests
         public void KillTree()
         {
             KillCount++;
+            if (_throwOnKillTree)
+            {
+                throw new InvalidOperationException("kill boom");
+            }
+
             Exited = true;
         }
 
         public bool WaitForExitAfterKill(TimeSpan timeout)
         {
+            WaitForExitAfterKillCount++;
+            if (_throwOnWaitForExitAfterKill)
+            {
+                throw new InvalidOperationException("wait boom");
+            }
+
             Exited = true;
-            return true;
+            return _confirmExit;
         }
 
         public void Dispose() => DisposeCount++;
