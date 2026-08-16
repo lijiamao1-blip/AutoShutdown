@@ -117,7 +117,7 @@ public sealed class CommandRunner : ICommandRunner
         {
             // 超时（非外部取消）：终止整棵进程树并有界确认根进程与全部已识别后代退出。
             // 仅当根 + 全部已识别后代均确认退出才返回 TimedOut；任何未确认 → CleanupNotConfirmed。
-            var (confirmed, _) = KillTreeAndConfirmExit(process);
+            var (confirmed, _, reason) = KillTreeAndConfirmExit(process);
             return new CommandRunResult
             {
                 Status = confirmed ? CommandRunStatus.TimedOut : CommandRunStatus.CleanupNotConfirmed,
@@ -125,6 +125,7 @@ public sealed class CommandRunner : ICommandRunner
                 ErrorOutput = errorOutput.ToString(),
                 OutputTruncated = output.Truncated || errorOutput.Truncated,
                 Duration = stopwatch.Elapsed,
+                CleanupFailureReason = confirmed ? null : reason,
                 Message = confirmed
                     ? "timed out; process tree terminated."
                     : "timed out; process tree exit not confirmed."
@@ -135,7 +136,7 @@ public sealed class CommandRunner : ICommandRunner
             // 外部取消：清理失败不得被静默丢弃，也不得把取消替换为普通异常。
             // 清理已确认 → 原始 OCE 原样传播；清理未确认/清理抛异常 → 可识别 OCE 子类传播
             // （仍满足 OperationCanceledException，携带「进程树清理未确认」语义，绝不携带参数/secret/token/输出）。
-            var (confirmed, failure) = KillTreeAndConfirmExit(process);
+            var (confirmed, failure, _) = KillTreeAndConfirmExit(process);
             if (confirmed)
             {
                 throw;
@@ -164,11 +165,12 @@ public sealed class CommandRunner : ICommandRunner
 
     /// <summary>
     /// 受控进程树快照 → 整树终止 → 有界确认全部已识别身份退出（S19-D1 方案A）。
-    /// 返回 (Confirmed, Failure)：Confirmed 仅当「根 + 全部已识别后代」都确认退出时为 true；
-    /// 枚举失败、终止失败、任一身份存活/未知均 fail-closed（Confirmed=false，附带失败信息）。
+    /// 返回 (Confirmed, Failure, Reason)：Confirmed 仅当「根 + 全部已识别后代」都确认退出时为 true；
+    /// 枚举失败、终止失败、任一身份存活/未知均 fail-closed（Confirmed=false，附带脱敏结构化原因）。
     /// 绝不通过根进程的 WaitForExit/HasExited 单独判定整树成功。
     /// </summary>
-    private (bool Confirmed, Exception? Failure) KillTreeAndConfirmExit(Process process)
+    private (bool Confirmed, Exception? Failure, CommandCleanupFailureReason Reason) KillTreeAndConfirmExit(
+        Process process)
     {
         IReadOnlyList<ProcessIdentity> identities;
         try
@@ -178,7 +180,7 @@ public sealed class CommandRunner : ICommandRunner
         catch (Exception exception)
         {
             // 根/后代枚举失败：无法确认整树，fail-closed。
-            return (false, exception);
+            return (false, exception, CommandCleanupFailureReason.SnapshotFailed);
         }
 
         try
@@ -192,22 +194,26 @@ public sealed class CommandRunner : ICommandRunner
         catch (Exception exception)
         {
             // 终止失败（Win32Exception/AggregateException/NotSupportedException 等）：fail-closed。
-            return (false, exception);
+            return (false, exception, CommandCleanupFailureReason.KillFailed);
         }
 
-        return ConfirmAllExited(identities);
+        return ConfirmAllExited(identities, process.Id);
     }
 
-    private (bool Confirmed, Exception? Failure) ConfirmAllExited(IReadOnlyList<ProcessIdentity> identities)
+    private (bool Confirmed, Exception? Failure, CommandCleanupFailureReason Reason) ConfirmAllExited(
+        IReadOnlyList<ProcessIdentity> identities,
+        int rootProcessId)
     {
         if (identities.Count == 0)
         {
             // 未识别到任何进程（含根）：异常状态，fail-closed。
-            return (false, new InvalidOperationException("No process tree members were identified."));
+            return (false, new InvalidOperationException("No process tree members were identified."),
+                CommandCleanupFailureReason.SnapshotFailed);
         }
 
         var deadline = Environment.TickCount64 + KillConfirmTimeoutMs;
         Exception? failure = null;
+        CommandCleanupFailureReason lastReason = CommandCleanupFailureReason.ConfirmationTimedOut;
 
         while (true)
         {
@@ -229,19 +235,27 @@ public sealed class CommandRunner : ICommandRunner
                 if (liveness != ProcessLiveness.Exited)
                 {
                     allExited = false;
+                    lastReason = liveness switch
+                    {
+                        ProcessLiveness.Alive => identity.ProcessId == rootProcessId
+                            ? CommandCleanupFailureReason.RootAlive
+                            : CommandCleanupFailureReason.ChildAlive,
+                        _ => CommandCleanupFailureReason.LivenessUnknown
+                    };
                     break;
                 }
             }
 
             if (allExited)
             {
-                return (true, null);
+                return (true, null, CommandCleanupFailureReason.Unknown);
             }
 
             if (Environment.TickCount64 >= deadline)
             {
                 return (false, failure
-                    ?? new InvalidOperationException("Process tree exit was not confirmed within the deadline."));
+                    ?? new InvalidOperationException("Process tree exit was not confirmed within the deadline."),
+                    lastReason);
             }
 
             Thread.Sleep(50);

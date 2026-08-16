@@ -21,6 +21,9 @@ public sealed record CommandRunResult
 
     public TimeSpan Duration { get; init; }
 
+    /// <summary>整树清理失败的结构化脱敏原因（仅清理未确认时非空；测试/诊断用，无敏感内容）。</summary>
+    public CommandCleanupFailureReason? CleanupFailureReason { get; init; }
+
     /// <summary>脱敏状态描述（无参数、无完整输出、无凭据）。</summary>
     public string Message { get; init; } = string.Empty;
 

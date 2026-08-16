@@ -38,8 +38,11 @@ public sealed class S19_D1_RealTreeCleanupTests : IDisposable
             CancellationToken.None);
 
         // 子进程确已派生（父进程挂起前打印 child-pid），真实网关识别父子树并确认整树退出才返回 TimedOut。
+        // 诊断：失败时把脱敏清理原因带进断言消息（只含类别，无参数/路径/凭据）。
         Assert.Contains("child-pid:", result.Output);
-        Assert.Equal(CommandRunStatus.TimedOut, result.Status);
+        Assert.True(
+            result.Status == CommandRunStatus.TimedOut,
+            $"Status={result.Status}, CleanupReason={result.CleanupFailureReason}, Output={result.Output}");
         Assert.False(result.Succeeded);
     }
 

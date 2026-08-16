@@ -101,17 +101,10 @@ public sealed class DiagnosticProcessTreeGateway : IProcessTreeGateway
         {
             using (obj)
             {
-                int processId;
-                int parentProcessId;
-                try
-                {
-                    processId = Convert.ToInt32(obj["ProcessId"]);
-                    parentProcessId = Convert.ToInt32(obj["ParentProcessId"]);
-                }
-                catch
-                {
-                    continue; // 单条记录读取失败：跳过，不阻断整体枚举。
-                }
+                // 任意记录无法读取 ProcessId / ParentProcessId → 整次快照失败（fail-closed）。
+                // 绝不 continue 静默跳过而生成不完整快照：不完整快照可能漏掉后代，
+                // 从而把「后代未确认退出」误判为整树已退出。
+                var (processId, parentProcessId) = ParseProcessRecord(obj["ProcessId"], obj["ParentProcessId"]);
 
                 if (!childrenOf.TryGetValue(parentProcessId, out var children))
                 {
@@ -124,6 +117,34 @@ public sealed class DiagnosticProcessTreeGateway : IProcessTreeGateway
         }
 
         return childrenOf;
+    }
+
+    /// <summary>
+    /// 解析单条 Win32_Process 记录的 ProcessId / ParentProcessId（可测缝）。
+    /// 任一值为 null 或不可转换为 int → 抛 <see cref="InvalidOperationException"/>，
+    /// 使整次快照失败（fail-closed），绝不静默跳过。
+    /// </summary>
+    internal static (int ProcessId, int ParentProcessId) ParseProcessRecord(
+        object? processIdValue,
+        object? parentProcessIdValue)
+    {
+        if (processIdValue is null || parentProcessIdValue is null)
+        {
+            throw new InvalidOperationException(
+                "A Win32_Process record has null identifiers; the process tree snapshot failed.");
+        }
+
+        try
+        {
+            return (Convert.ToInt32(processIdValue), Convert.ToInt32(parentProcessIdValue));
+        }
+        catch (Exception exception) when (
+            exception is FormatException or OverflowException or InvalidCastException)
+        {
+            throw new InvalidOperationException(
+                "A Win32_Process record could not be parsed; the process tree snapshot failed.",
+                exception);
+        }
     }
 
     private static ProcessIdentity IdentityOf(int processId)
