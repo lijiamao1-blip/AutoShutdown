@@ -5,7 +5,19 @@ public enum TaskKind
     Unknown = 0,
     Countdown = 1,
     TodayAt = 2,
-    DailyAt = 3
+    DailyAt = 3,
+
+    /// <summary>每周工作日（周期）：在指定星期（周一~周五，可叠加节假日例外）的固定时刻触发。</summary>
+    Weekdays = 4,
+
+    /// <summary>下个工作日 N 点（一次性）：下一个工作日（周一~周五，排除节假日）的固定时刻触发。</summary>
+    NextWorkday = 5,
+
+    /// <summary>每月第 N 个工作日（周期）：每月第 N 个工作日（周一~周五，排除节假日）的固定时刻触发。</summary>
+    NthWorkdayOfMonth = 6,
+
+    /// <summary>一次性指定日期时间（schedule.type=oneday）：date+time 精确；过期即终结，不追溯执行。</summary>
+    OneTime = 7
 }
 
 public enum PowerAction

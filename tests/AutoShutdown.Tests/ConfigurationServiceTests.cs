@@ -252,7 +252,7 @@ public sealed class ConfigurationServiceTests
         var storage = new InMemoryStorage();
         storage.Seed(
             "tasks.json",
-            """{"SchemaVersion":1,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0}]}""");
+            """{"SchemaVersion":2,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0}]}""");
         var service = new ConfigurationService(storage);
 
         var result = await service.LoadTasksAsync(CancellationToken.None);

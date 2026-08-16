@@ -12,7 +12,23 @@ public sealed record TaskDefinition
 
     public TimeSpan? CountdownDuration { get; init; }
 
+    /// <summary>
+    /// 目标时刻（本地墙钟时间）。用于 TodayAt/DailyAt（既有）以及
+    /// Weekdays/NextWorkday/NthWorkdayOfMonth（S14 新增）的每日触发时刻。
+    /// </summary>
     public TimeOnly? TargetTimeOfDay { get; init; }
+
+    /// <summary>每周工作日的触发星期集合（S14，Weekdays 专用；例如周一~周五 = 1..5）。</summary>
+    public IReadOnlyList<DayOfWeek>? Weekdays { get; init; }
+
+    /// <summary>每月第 N 个工作日（S14，NthWorkdayOfMonth 专用；合法 1..23）。</summary>
+    public int? NthWorkday { get; init; }
+
+    /// <summary>一次性指定日期时间（S14，OneTime 专用）。以本地墙钟时间存储，不含时区。</summary>
+    public DateTime? OneTimeDateTime { get; init; }
+
+    /// <summary>节假日/例外日集合（S14）。周期规则遇节假日跳过；一次性日期不受影响。</summary>
+    public IReadOnlyList<DateOnly>? HolidayDates { get; init; }
 
     public int? WarningSeconds { get; init; }
 

@@ -50,19 +50,19 @@ public sealed class TasksDocumentStore
             return Failure(TasksLoadStatus.Invalid, "SchemaVersion must be an integer.");
         }
 
-        if (version > TasksDocument.CurrentSchemaVersion)
+        if (version == 1)
         {
-            return Failure(
-                TasksLoadStatus.UnsupportedVersion,
-                $"SchemaVersion {version} is not supported by this version of the application.");
+            // V1→V2 身份迁移（S14）：仅新增可空字段，逐任务数据无损保留。
+            return await MigrateV1Async(root, cancellationToken).ConfigureAwait(false);
         }
 
-        if (version < TasksDocument.CurrentSchemaVersion)
+        if (version != TasksDocument.CurrentSchemaVersion)
         {
-            // tasks.json 为 V2 新增文件，无 V1→V2 迁移链。
             return Failure(
-                TasksLoadStatus.Invalid,
-                $"SchemaVersion {version} has no migration path; expected {TasksDocument.CurrentSchemaVersion}.");
+                version > TasksDocument.CurrentSchemaVersion
+                    ? TasksLoadStatus.UnsupportedVersion
+                    : TasksLoadStatus.Invalid,
+                $"SchemaVersion {version} is not supported; expected {TasksDocument.CurrentSchemaVersion}.");
         }
 
         TasksDocument? document;
@@ -125,6 +125,64 @@ public sealed class TasksDocumentStore
                 Status = TasksSaveStatus.IoFailure,
                 Errors = [write.Error ?? "The tasks file could not be written."]
             };
+    }
+
+    /// <summary>
+    /// V1→V2 身份迁移（S14）：V1 只缺少 S14 新增的可空字段（Weekdays/NthWorkday/
+    /// OneTimeDateTime/HolidayDates），逐任务数据无损保留；仅提升 SchemaVersion 后
+    /// 原子写回（FileStorage 自动保留旧文件 .bak 备份）。迁移失败不覆盖原文件。
+    /// </summary>
+    private async Task<TasksLoadResult> MigrateV1Async(
+        JsonElement v1Root,
+        CancellationToken cancellationToken)
+    {
+        TasksDocument? document;
+        try
+        {
+            document = v1Root.Deserialize<TasksDocument>();
+        }
+        catch (JsonException exception)
+        {
+            return Failure(
+                TasksLoadStatus.Invalid,
+                $"The V1 tasks document could not be deserialized: {exception.Message}");
+        }
+
+        if (document is null)
+        {
+            return Failure(TasksLoadStatus.Invalid, "The V1 tasks document contains no value.");
+        }
+
+        if (document.Tasks is null)
+        {
+            return Failure(TasksLoadStatus.Invalid, "Tasks must not be null.");
+        }
+
+        var taskErrors = ValidateTasks(document.Tasks);
+        if (taskErrors.Count > 0)
+        {
+            return Failure(TasksLoadStatus.Invalid, taskErrors);
+        }
+
+        var migrated = new TasksDocument
+        {
+            SchemaVersion = TasksDocument.CurrentSchemaVersion,
+            Tasks = document.Tasks
+        };
+
+        var write = await _storage.WriteAsync(FileName, migrated, cancellationToken).ConfigureAwait(false);
+        if (!write.Succeeded)
+        {
+            return Failure(
+                TasksLoadStatus.IoFailure,
+                "The V1 tasks document could not be migrated: " + (write.Error ?? "unknown error."));
+        }
+
+        return new TasksLoadResult
+        {
+            Status = TasksLoadStatus.Migrated,
+            Document = migrated
+        };
     }
 
     private static IReadOnlyList<string> ValidateForSave(TasksDocument document)
@@ -225,7 +283,10 @@ public enum TasksLoadStatus
     Corrupt = 3,
     IoFailure = 4,
     Invalid = 5,
-    UnsupportedVersion = 6
+    UnsupportedVersion = 6,
+
+    /// <summary>V1 文档已无损迁移到 V2（S14）。</summary>
+    Migrated = 7
 }
 
 public sealed record TasksLoadResult

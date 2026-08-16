@@ -8,7 +8,11 @@ namespace AutoShutdown.Core.Storage;
 /// </summary>
 public sealed record TasksDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// tasks.json schema 版本。V2（S14）新增 Weekdays/NextWorkday/NthWorkdayOfMonth/OneTime
+    /// 及 HolidayDates 字段；均为可空增量，V1 文档可无损迁移（身份迁移：仅版本号提升）。
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
 
     /// <summary>tasks.json 的 schema 版本，必须为 <see cref="CurrentSchemaVersion"/>。</summary>
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;

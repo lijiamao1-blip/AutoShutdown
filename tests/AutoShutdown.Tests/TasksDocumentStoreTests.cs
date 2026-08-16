@@ -12,9 +12,13 @@ public sealed class TasksDocumentStoreTests : IDisposable
         "AutoShutdown.Tests",
         Guid.NewGuid().ToString("N"));
 
-    // 与 S13-work包/tasks.json.sample 内容一致，用作可核验样例（含版本字段）。
-    private const string ValidTasksJson =
+    // 与 S13-work包/tasks.json.sample 内容一致的 V1 样例（S14 迁移测试用，含版本字段）。
+    private const string V1TasksJson =
         """{"SchemaVersion":1,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0},{"Id":"22222222-2222-2222-2222-222222222222","Kind":3,"Action":2,"CountdownDuration":null,"TargetTimeOfDay":"20:00:00","WarningSeconds":300,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":50}]}""";
+
+    // 当前 V2 样例：与 V1TasksJson 同任务集，仅 SchemaVersion 提升为当前版本。
+    private const string ValidTasksJson =
+        """{"SchemaVersion":2,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0},{"Id":"22222222-2222-2222-2222-222222222222","Kind":3,"Action":2,"CountdownDuration":null,"TargetTimeOfDay":"20:00:00","WarningSeconds":300,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":50}]}""";
 
     private const string CountdownTaskJson =
         """{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0}""";
@@ -50,13 +54,31 @@ public sealed class TasksDocumentStoreTests : IDisposable
 
         Assert.Equal(TasksLoadStatus.Success, result.Status);
         Assert.NotNull(result.Document);
-        Assert.Equal(1, result.Document!.SchemaVersion);
+        Assert.Equal(TasksDocument.CurrentSchemaVersion, result.Document!.SchemaVersion);
         Assert.Equal(2, result.Document.Tasks.Count);
         Assert.Equal(TaskKind.Countdown, result.Document.Tasks[0].Kind);
         Assert.Equal(TimeSpan.FromHours(2), result.Document.Tasks[0].CountdownDuration);
         Assert.Equal(TaskKind.DailyAt, result.Document.Tasks[1].Kind);
         Assert.Equal(new TimeOnly(20, 0), result.Document.Tasks[1].TargetTimeOfDay);
         Assert.Equal(50, result.Document.Tasks[1].Priority);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhenV1_ReturnsMigrated_AndUpgradesToCurrentVersion()
+    {
+        await SeedAsync(V1TasksJson);
+
+        var result = await CreateStore().LoadAsync(CancellationToken.None);
+
+        Assert.Equal(TasksLoadStatus.Migrated, result.Status);
+        Assert.NotNull(result.Document);
+        Assert.Equal(TasksDocument.CurrentSchemaVersion, result.Document!.SchemaVersion);
+        Assert.Equal(2, result.Document.Tasks.Count);
+        Assert.Equal(TaskKind.Countdown, result.Document.Tasks[0].Kind);
+        Assert.Equal(TimeSpan.FromHours(2), result.Document.Tasks[0].CountdownDuration);
+        Assert.Equal(TaskKind.DailyAt, result.Document.Tasks[1].Kind);
+        Assert.Equal(new TimeOnly(20, 0), result.Document.Tasks[1].TargetTimeOfDay);
         Assert.Empty(result.Errors);
     }
 
@@ -74,7 +96,7 @@ public sealed class TasksDocumentStoreTests : IDisposable
     [Fact]
     public async Task LoadAsync_WhenSchemaVersionNewer_ReturnsUnsupportedVersion()
     {
-        await SeedAsync("""{"SchemaVersion":2,"Tasks":[]}""");
+        await SeedAsync("""{"SchemaVersion":3,"Tasks":[]}""");
 
         var result = await CreateStore().LoadAsync(CancellationToken.None);
 
@@ -191,7 +213,7 @@ public sealed class TasksDocumentStoreTests : IDisposable
     public async Task SaveAsync_WhenSchemaVersionWrong_ReturnsInvalid()
     {
         var store = CreateStore();
-        var document = new TasksDocument { SchemaVersion = 2 };
+        var document = new TasksDocument { SchemaVersion = 1 };
 
         var save = await store.SaveAsync(document, CancellationToken.None);
 
