@@ -25,6 +25,12 @@ public sealed record AppConfig
     public bool MinimizeToTrayOnClose { get; init; } = true;
 
     public LoggingConfig Logging { get; init; } = new();
+
+    /// <summary>
+    /// CloseApps 关闭应用配置段（S18）。向后兼容：旧配置无此段时取默认值
+    /// （空目标 = 不关闭任何应用；强杀默认关闭）。损坏/非法目标绝不静默回退。
+    /// </summary>
+    public CloseAppsConfig CloseApps { get; init; } = new();
 }
 
 public sealed record LoggingConfig

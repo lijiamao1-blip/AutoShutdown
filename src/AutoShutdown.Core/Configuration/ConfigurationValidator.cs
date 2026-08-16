@@ -1,3 +1,4 @@
+using AutoShutdown.Core.CloseApps;
 using AutoShutdown.Core.State;
 
 namespace AutoShutdown.Core.Configuration;
@@ -42,8 +43,21 @@ public static class ConfigurationValidator
 
         ValidateAllowedActions(config, errors);
         ValidateLogging(config, errors);
+        ValidateCloseApps(config, errors);
 
         return errors;
+    }
+
+    private static void ValidateCloseApps(AppConfig config, List<string> errors)
+    {
+        // 损坏的 CloseApps 段不得静默回退为可能触发关闭/强杀的默认值；null 视为非法。
+        if (config.CloseApps is null)
+        {
+            errors.Add("CloseApps must not be null.");
+            return;
+        }
+
+        errors.AddRange(CloseAppsTargetList.Validate(config.CloseApps));
     }
 
     private static void ValidateAllowedActions(AppConfig config, List<string> errors)
