@@ -18,7 +18,10 @@ public enum ForceKillStatus
     AccessDenied = 4,
 
     /// <summary>其他失败。</summary>
-    Failed = 5
+    Failed = 5,
+
+    /// <summary>已发起 Kill 但退出未确认（D1-4）：绝不把未确认的强杀当成成功。</summary>
+    ExitNotConfirmed = 6
 }
 
 /// <summary>强杀操作的结构化结果（S18）。</summary>

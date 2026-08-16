@@ -365,6 +365,38 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="关闭应用（关机前）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="360" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
+                                        <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
+                                    </StackPanel>
+                                    <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <CheckBox Content="{Binding Identifier}" IsChecked="{Binding ForceKillAllowed}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                            <TextBlock Text="已授权强杀：将立即终止该进程，未保存工作可能丢失。" FontSize="11" Foreground="#C62828" Margin="22,2,0,0"
+                                                                       Visibility="{Binding RiskVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1" Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
+                                                                Command="{Binding DataContext.RemoveCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding CloseAppsStatusText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                 </Grid>

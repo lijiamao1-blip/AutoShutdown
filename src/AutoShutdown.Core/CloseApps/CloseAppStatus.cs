@@ -31,5 +31,11 @@ public enum CloseAppStatus
     SkippedProtected = 8,
 
     /// <summary>PID 已重用（启动时间不符），拒绝操作。</summary>
-    PidReuseDetected = 9
+    PidReuseDetected = 9,
+
+    /// <summary>已发起强杀但退出未确认（D1-4）：绝不把未确认的强杀当成成功。</summary>
+    ExitNotConfirmed = 10,
+
+    /// <summary>退出状态无法确认（D1-3）：绝不当作已退出，也绝不强杀。</summary>
+    ExitStatusUnknown = 11
 }

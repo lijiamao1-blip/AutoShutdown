@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using AutoShutdown.App.Infrastructure;
@@ -70,6 +71,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _autoStartConfirmation;
     private readonly Func<bool>? _cancelConfirmation;
     private readonly Func<bool>? _realPowerConfirmation;
+    private readonly Func<bool>? _closeAppsForceKillConfirmation;
     private readonly RecoveryNoticeService? _recoveryNoticeService;
 
     private TaskInstance? _currentInstance;
@@ -84,6 +86,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _headerModeHint = "当前不会执行真实系统电源操作";
     private bool _isSubmitting;
     private bool _isConfigInitializing;
+    private AppConfig? _loadedConfig;
 
     public MainWindowViewModel(
         ISchedulerEngine engine,
@@ -94,6 +97,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Func<bool>? autoStartConfirmation = null,
         Func<bool>? cancelConfirmation = null,
         Func<bool>? realPowerConfirmation = null,
+        Func<bool>? closeAppsForceKillConfirmation = null,
         RecoveryNoticeService? recoveryNotice = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -110,6 +114,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _autoStartConfirmation = autoStartConfirmation;
         _cancelConfirmation = cancelConfirmation;
         _realPowerConfirmation = realPowerConfirmation;
+        _closeAppsForceKillConfirmation = closeAppsForceKillConfirmation;
         _recoveryNoticeService = recoveryNotice;
 
         NavItems =
@@ -151,6 +156,15 @@ public sealed class MainWindowViewModel : ObservableObject
         EnableAutoStartCommand = new AsyncRelayCommand(ExecuteEnableAutoStartAsync, () => !IsAutoStartBusy);
         DisableAutoStartCommand = new AsyncRelayCommand(ExecuteDisableAutoStartAsync, () => !IsAutoStartBusy);
         RepairAutoStartCommand = new AsyncRelayCommand(ExecuteRepairAutoStartAsync, () => !IsAutoStartBusy);
+        AddCloseAppsTargetCommand = new RelayCommand(AddCloseAppsTarget);
+        RemoveCloseAppsTargetCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is CloseAppsTargetRow row)
+            {
+                CloseAppsTargets.Remove(row);
+            }
+        });
+        SaveCloseAppsCommand = new AsyncRelayCommand(ExecuteSaveCloseAppsAsync);
         RowSnoozeCommand = new RelayCommand(RowSnooze);
         RowStopCommand = new RelayCommand(RowStop);
         RowClearCommand = new RelayCommand(RowClear);
@@ -1041,6 +1055,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncRelayCommand RepairAutoStartCommand { get; }
 
+    public ICommand AddCloseAppsTargetCommand { get; }
+
+    public ICommand RemoveCloseAppsTargetCommand { get; }
+
+    public AsyncRelayCommand SaveCloseAppsCommand { get; }
+
     public void RefreshAutoStart()
     {
         AutoStartStatus status;
@@ -1171,6 +1191,181 @@ public sealed class MainWindowViewModel : ObservableObject
         _ => "未知状态"
     };
 
+    // ---- 关闭应用设置（S18-D1） ----
+
+    public ObservableCollection<CloseAppsTargetRow> CloseAppsTargets { get; } = [];
+
+    private string _closeAppsTargetInputText = string.Empty;
+
+    public string CloseAppsTargetInputText
+    {
+        get => _closeAppsTargetInputText;
+        set => SetProperty(ref _closeAppsTargetInputText, value);
+    }
+
+    private string _closeAppsStatusText = string.Empty;
+
+    public string CloseAppsStatusText
+    {
+        get => _closeAppsStatusText;
+        private set => SetProperty(ref _closeAppsStatusText, value);
+    }
+
+    private string _closeAppsErrorText = string.Empty;
+
+    public string CloseAppsErrorText
+    {
+        get => _closeAppsErrorText;
+        private set
+        {
+            if (SetProperty(ref _closeAppsErrorText, value))
+            {
+                OnPropertyChanged(nameof(HasCloseAppsError));
+            }
+        }
+    }
+
+    public bool HasCloseAppsError => !string.IsNullOrEmpty(_closeAppsErrorText);
+
+    /// <summary>从已加载配置刷新 CloseApps 目标列表（每次配置加载后调用；配置不可用时清空）。</summary>
+    private void RefreshCloseAppsTargets()
+    {
+        CloseAppsTargets.Clear();
+        if (_loadedConfig?.CloseApps?.Targets is { } targets)
+        {
+            foreach (var target in targets)
+            {
+                if (target is null)
+                {
+                    continue;
+                }
+
+                var hasPath = !string.IsNullOrWhiteSpace(target.ExecutablePath);
+                CloseAppsTargets.Add(new CloseAppsTargetRow(
+                    hasPath ? Path.GetFileName(target.ExecutablePath!.Trim()) : $"pid:{target.ProcessId}",
+                    hasPath ? target.ExecutablePath!.Trim() : null,
+                    target.ProcessId,
+                    target.GracefulTimeoutSeconds,
+                    target.ForceKillAllowed,
+                    ConfirmCloseAppsForceKill));
+            }
+        }
+
+        CloseAppsStatusText = string.Empty;
+        CloseAppsErrorText = string.Empty;
+    }
+
+    private void AddCloseAppsTarget()
+    {
+        var text = (CloseAppsTargetInputText ?? string.Empty).Trim();
+        if (text.Length == 0)
+        {
+            CloseAppsErrorText = "请输入可执行文件完整路径或进程 ID";
+            return;
+        }
+
+        // 稳定标识：纯正整数按进程 ID，否则按可执行文件完整路径（二者取其一）。
+        if (int.TryParse(text, out var pid) && pid > 0)
+        {
+            if (CloseAppsTargets.Any(row => row.ProcessId == pid))
+            {
+                CloseAppsErrorText = "该目标已存在";
+                return;
+            }
+
+            CloseAppsTargets.Add(new CloseAppsTargetRow(
+                $"pid:{pid}", null, pid, null, false, ConfirmCloseAppsForceKill));
+        }
+        else
+        {
+            if (CloseAppsTargets.Any(row => string.Equals(row.ExecutablePath, text, StringComparison.OrdinalIgnoreCase)))
+            {
+                CloseAppsErrorText = "该目标已存在";
+                return;
+            }
+
+            CloseAppsTargets.Add(new CloseAppsTargetRow(
+                Path.GetFileName(text), text, null, null, false, ConfirmCloseAppsForceKill));
+        }
+
+        CloseAppsTargetInputText = string.Empty;
+        CloseAppsErrorText = string.Empty;
+        CloseAppsStatusText = string.Empty;
+    }
+
+    private async Task ExecuteSaveCloseAppsAsync()
+    {
+        if (_loadedConfig is null)
+        {
+            CloseAppsErrorText = "配置尚未加载，无法保存";
+            return;
+        }
+
+        var targets = new List<CloseAppsTargetConfig>(CloseAppsTargets.Count);
+        foreach (var row in CloseAppsTargets)
+        {
+            // 稳定标识恰取其一：路径或 PID（都缺失则跳过，交由校验器 fail-closed）。
+            if (!string.IsNullOrWhiteSpace(row.ExecutablePath) || row.ProcessId is > 0)
+            {
+                targets.Add(new CloseAppsTargetConfig
+                {
+                    ExecutablePath = row.ExecutablePath,
+                    ProcessId = row.ProcessId,
+                    ForceKillAllowed = row.ForceKillAllowed,
+                    GracefulTimeoutSeconds = row.GracefulTimeoutSeconds
+                });
+            }
+        }
+
+        var closeApps = new CloseAppsConfig
+        {
+            GracefulTimeoutSeconds = _loadedConfig.CloseApps?.GracefulTimeoutSeconds ?? 30,
+            Targets = targets.ToArray()
+        };
+
+        var updated = _loadedConfig with { CloseApps = closeApps };
+
+        try
+        {
+            var save = await _configurationService.SaveAsync(updated, CancellationToken.None);
+            if (save.Succeeded)
+            {
+                CloseAppsErrorText = string.Empty;
+                AppendActivity("已保存关闭应用设置");
+                TryLog(logger => logger.Info("CloseAppsConfigSaved", "关闭应用配置已保存。"));
+                await RefreshConfigurationAsync();
+                // 刷新会清空状态文本，刷新后再写入成功提示。
+                CloseAppsStatusText = "关闭应用设置已保存";
+            }
+            else
+            {
+                CloseAppsErrorText = "保存失败：" + string.Join("；", save.Errors);
+                CloseAppsStatusText = string.Empty;
+                TryLog(logger => logger.Warning("CloseAppsConfigSaveFailed", "关闭应用配置保存失败。"));
+            }
+        }
+        catch (Exception exception)
+        {
+            CloseAppsErrorText = "保存异常：" + exception.Message;
+            CloseAppsStatusText = string.Empty;
+            TryLog(logger => logger.Warning("CloseAppsConfigSaveFailed", "关闭应用配置保存异常。"));
+        }
+    }
+
+    private bool ConfirmCloseAppsForceKill()
+    {
+        if (_closeAppsForceKillConfirmation is not null)
+        {
+            return _closeAppsForceKillConfirmation();
+        }
+
+        return System.Windows.MessageBox.Show(
+            "强杀将立即终止该进程，未保存的工作可能丢失。\n请确认你明确知道该进程可被强制结束。",
+            "启用强杀（关闭应用）",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning) == MessageBoxResult.OK;
+    }
+
     // ---- 最近活动 ----
 
     public ObservableCollection<RecentActivityItem> RecentActivities { get; } = [];
@@ -1221,6 +1416,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (load.Status == ConfigurationLoadStatus.Success && load.Config is not null && load.Config.SchemaVersion == 1)
             {
                 var config = load.Config;
+                _loadedConfig = config;
                 // 配置可用条件：安全测试模式（TestMode=true），或显式开启真实电源模式
                 // （TestMode=false 且 RealPowerEnabled=true）。其余（TestMode=false 且
                 // RealPowerEnabled=false，或互斥校验失败）一律视为不可用。
@@ -1241,6 +1437,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
             else
             {
+                _loadedConfig = null;
                 _configUsable = false;
                 ConfigStatusText = "配置不可用：" + UiTextMapper.MapConfig(load.Status);
                 HeaderModeText = "配置不可用";
@@ -1252,6 +1449,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception exception)
         {
+            _loadedConfig = null;
             _configUsable = false;
             ConfigStatusText = "配置不可用：" + exception.Message;
             HeaderModeText = "配置不可用";
@@ -1259,6 +1457,7 @@ public sealed class MainWindowViewModel : ObservableObject
             TryLog(logger => logger.Warning("ConfigurationUnavailable", "配置加载异常。"));
         }
 
+        RefreshCloseAppsTargets();
         RefreshCreateState();
     }
 

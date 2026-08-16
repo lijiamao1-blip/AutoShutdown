@@ -8,11 +8,16 @@ namespace AutoShutdown.App.Infrastructure.CloseApps;
 /// <summary>
 /// 基于 System.Diagnostics.Process 的真实窗口/进程关闭（S18）。优雅关闭走托管
 /// <see cref="Process.CloseMainWindow"/>（等价 WM_CLOSE 到主窗口）；强杀走
-/// <see cref="Process.Kill"/>，且强杀前用启动时间复核 PID 重用。不引入任何 P/Invoke、
-/// 进程启动、命令解释器或 shell。访问拒绝、进程已退出、窗口消失等竞态安全收敛。
+/// <see cref="Process.Kill"/>，且强杀前用启动时间复核 PID 重用、强杀后用有界窗口
+/// 确认退出（未确认绝不返回成功，D1-4）。退出状态为三态（Unknown/Exited/Running），
+/// 查询异常返回 Unknown（D1-3，fail-closed）。不引入任何 P/Invoke、进程启动、
+/// 命令解释器或 shell。
 /// </summary>
 public sealed class DiagnosticAppWindowManager : IAppWindowManager
 {
+    private const int WaitPollIntervalMs = 100;
+    private const int KillConfirmationTimeoutMs = 3000;
+
     public bool HasMainWindow(int processId)
     {
         using var process = Open(processId);
@@ -50,39 +55,63 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
         }
     }
 
-    public bool HasExited(int processId)
+    public ProcessExitStatus GetExitStatus(int processId)
     {
         using var process = Open(processId);
         if (process is null)
         {
-            return true; // 进程不存在视为已退出。
+            // 进程不存在（已退出/从未存在）：确定已退出，不是「无法确认」。
+            return ProcessExitStatus.Exited;
         }
 
         try
         {
-            return process.HasExited;
+            return process.HasExited
+                ? ProcessExitStatus.Exited
+                : ProcessExitStatus.Running;
         }
         catch
         {
-            return true;
+            // 查询失败：无法确认。绝不把「无法确认」伪装成「已退出」（D1-3）。
+            return ProcessExitStatus.Unknown;
         }
     }
 
-    public bool WaitForExit(int processId, TimeSpan timeout)
+    public bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         using var process = Open(processId);
         if (process is null)
         {
-            return true;
+            return true; // 进程不存在：已退出。
         }
 
-        try
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (true)
         {
-            return process.WaitForExit((int)timeout.TotalMilliseconds);
-        }
-        catch
-        {
-            return HasExited(processId);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool exited;
+            try
+            {
+                exited = process.WaitForExit(WaitPollIntervalMs);
+            }
+            catch
+            {
+                // 查询失败：回退三态语义，绝不把异常吞成「超时」。
+                return GetExitStatus(processId) == ProcessExitStatus.Exited;
+            }
+
+            if (exited)
+            {
+                return true;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return false; // 有界超时。
+            }
         }
     }
 
@@ -119,8 +148,7 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
                 }
 
                 process.Kill();
-                process.WaitForExit(1000);
-                return new ForceKillResult { Status = ForceKillStatus.Killed };
+                return ConfirmExit(process);
             }
             catch (Win32Exception exception)
             {
@@ -138,6 +166,32 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
             {
                 return new ForceKillResult { Status = ForceKillStatus.Failed };
             }
+        }
+    }
+
+    /// <summary>
+    /// Kill 发出后的退出确认（D1-4）。有界等待；未退出或确认查询失败一律返回
+    /// <see cref="ForceKillStatus.ExitNotConfirmed"/>，绝不把「未确认」当成成功。
+    /// </summary>
+    private static ForceKillResult ConfirmExit(Process process)
+    {
+        try
+        {
+            return process.WaitForExit(KillConfirmationTimeoutMs)
+                ? new ForceKillResult { Status = ForceKillStatus.Killed }
+                : new ForceKillResult
+                {
+                    Status = ForceKillStatus.ExitNotConfirmed,
+                    Details = "Kill was issued but the process did not confirm exit within the bounded window."
+                };
+        }
+        catch
+        {
+            return new ForceKillResult
+            {
+                Status = ForceKillStatus.ExitNotConfirmed,
+                Details = "Exit confirmation failed after Kill; the process may still be running."
+            };
         }
     }
 

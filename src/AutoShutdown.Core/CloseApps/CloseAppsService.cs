@@ -84,7 +84,7 @@ public sealed class CloseAppsService
         foreach (var target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(CloseTarget(target));
+            results.Add(CloseTarget(target, cancellationToken));
         }
 
         var succeeded = results.All(result => result.Succeeded);
@@ -97,7 +97,7 @@ public sealed class CloseAppsService
         };
     }
 
-    private CloseAppTargetResult CloseTarget(CloseAppTarget target)
+    private CloseAppTargetResult CloseTarget(CloseAppTarget target, CancellationToken cancellationToken)
     {
         var candidates = Resolve(target);
 
@@ -116,7 +116,7 @@ public sealed class CloseAppsService
         var statuses = new List<CloseAppStatus>(candidates.Count);
         foreach (var candidate in candidates)
         {
-            statuses.Add(CloseCandidate(target, candidate));
+            statuses.Add(CloseCandidate(target, candidate, cancellationToken));
         }
 
         var succeeded = statuses.All(IsSuccess);
@@ -145,7 +145,7 @@ public sealed class CloseAppsService
             .ToList();
     }
 
-    private CloseAppStatus CloseCandidate(CloseAppTarget target, ProcessSnapshot resolved)
+    private CloseAppStatus CloseCandidate(CloseAppTarget target, ProcessSnapshot resolved, CancellationToken cancellationToken)
     {
         // 重新读取当前身份，防御枚举与执行之间的 PID 退出/重用竞态。
         var current = _processManager.GetProcessById(resolved.ProcessId);
@@ -166,50 +166,68 @@ public sealed class CloseAppsService
             return CloseAppStatus.SkippedProtected;
         }
 
-        if (_windowManager.HasExited(current.ProcessId))
+        var exitStatus = _windowManager.GetExitStatus(current.ProcessId);
+        if (exitStatus == ProcessExitStatus.Exited)
         {
             return CloseAppStatus.AlreadyExited;
+        }
+
+        if (exitStatus == ProcessExitStatus.Unknown)
+        {
+            // 退出状态无法确认：fail-closed，绝不当作已退出，也绝不强杀（D1-3）。
+            return CloseAppStatus.ExitStatusUnknown;
         }
 
         // 优雅关闭优先。
         if (!_windowManager.HasMainWindow(current.ProcessId))
         {
             return target.ForceKillAllowed
-                ? ForceKill(target, current)
+                ? ForceKill(target, current, cancellationToken)
                 : CloseAppStatus.NoWindow;
         }
 
         if (!_windowManager.RequestClose(current.ProcessId))
         {
             // 关闭请求未投递：可能窗口消失或进程已退出；复核后再决定。
-            if (_windowManager.HasExited(current.ProcessId))
+            var recheck = _windowManager.GetExitStatus(current.ProcessId);
+            if (recheck == ProcessExitStatus.Exited)
             {
                 return CloseAppStatus.AlreadyExited;
             }
 
+            if (recheck == ProcessExitStatus.Unknown)
+            {
+                return CloseAppStatus.ExitStatusUnknown;
+            }
+
             return target.ForceKillAllowed
-                ? ForceKill(target, current)
+                ? ForceKill(target, current, cancellationToken)
                 : CloseAppStatus.AccessDenied;
         }
 
-        if (_windowManager.WaitForExit(current.ProcessId, target.GracefulTimeout))
+        if (_windowManager.WaitForExit(current.ProcessId, target.GracefulTimeout, cancellationToken))
         {
             return CloseAppStatus.ClosedGracefully;
         }
 
+        // 等待超时；强杀前由 ForceKill 再次复核取消（D1-1），绝不取消后强杀。
         return target.ForceKillAllowed
-            ? ForceKill(target, current)
+            ? ForceKill(target, current, cancellationToken)
             : CloseAppStatus.TimedOut;
     }
 
-    private CloseAppStatus ForceKill(CloseAppTarget target, ProcessSnapshot current)
+    private CloseAppStatus ForceKill(CloseAppTarget target, ProcessSnapshot current, CancellationToken cancellationToken)
     {
+        // 强杀前再次复核取消：取消后绝不强杀（D1-1）。
+        cancellationToken.ThrowIfCancellationRequested();
+
         var result = _windowManager.ForceKill(current.ProcessId, current.StartTimeUtc);
         return result.Status switch
         {
             ForceKillStatus.Killed => CloseAppStatus.ForceKilled,
             ForceKillStatus.AlreadyExited => CloseAppStatus.AlreadyExited,
             ForceKillStatus.PidReuseDetected => CloseAppStatus.PidReuseDetected,
+            ForceKillStatus.ExitNotConfirmed => CloseAppStatus.ExitNotConfirmed,
             ForceKillStatus.AccessDenied => CloseAppStatus.AccessDenied,
             _ => CloseAppStatus.AccessDenied
         };
@@ -223,8 +241,9 @@ public sealed class CloseAppsService
             return true;
         }
 
-        // 非当前用户会话：绝不关闭（系统服务多在会话 0）。
-        if (process.SessionId != -1 && process.SessionId != _processManager.CurrentSessionId)
+        // 会话不明确（-1）或非当前用户会话：绝不关闭（fail-closed，D1-2）。
+        // 仅当会话明确且等于当前会话才允许继续。
+        if (process.SessionId != _processManager.CurrentSessionId)
         {
             return true;
         }
@@ -246,9 +265,11 @@ public sealed class CloseAppsService
     {
         if (statuses.Contains(CloseAppStatus.SkippedProtected)) return CloseAppStatus.SkippedProtected;
         if (statuses.Contains(CloseAppStatus.PidReuseDetected)) return CloseAppStatus.PidReuseDetected;
+        if (statuses.Contains(CloseAppStatus.ExitStatusUnknown)) return CloseAppStatus.ExitStatusUnknown;
         if (statuses.Contains(CloseAppStatus.AccessDenied)) return CloseAppStatus.AccessDenied;
         if (statuses.Contains(CloseAppStatus.NoWindow)) return CloseAppStatus.NoWindow;
         if (statuses.Contains(CloseAppStatus.TimedOut)) return CloseAppStatus.TimedOut;
+        if (statuses.Contains(CloseAppStatus.ExitNotConfirmed)) return CloseAppStatus.ExitNotConfirmed;
         if (statuses.Contains(CloseAppStatus.ForceKilled)) return CloseAppStatus.ForceKilled;
         if (statuses.Contains(CloseAppStatus.ClosedGracefully)) return CloseAppStatus.ClosedGracefully;
         if (statuses.Contains(CloseAppStatus.AlreadyExited)) return CloseAppStatus.AlreadyExited;
@@ -276,6 +297,8 @@ public sealed class CloseAppsService
         CloseAppStatus.AccessDenied => "access denied",
         CloseAppStatus.SkippedProtected => "skipped (protected)",
         CloseAppStatus.PidReuseDetected => "pid reuse detected",
+        CloseAppStatus.ExitNotConfirmed => "exit not confirmed",
+        CloseAppStatus.ExitStatusUnknown => "exit status unknown",
         _ => "unknown"
     };
 

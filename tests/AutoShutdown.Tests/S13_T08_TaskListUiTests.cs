@@ -373,7 +373,7 @@ public sealed class S13_T08_TaskListUiTests
             autoStartConfirmation: () => true,
             cancelConfirmation: () => true,
             realPowerConfirmation: () => true,
-            recoveryNotice);
+            recoveryNotice: recoveryNotice);
     }
 
     private static FakeSchedulerEngine RunningEngine(

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using AutoShutdown.App.Infrastructure.CloseApps;
+using AutoShutdown.Core.CloseApps;
 using Xunit;
 
 namespace AutoShutdown.Tests;
@@ -44,18 +45,18 @@ public sealed class S18_RealMachineAcceptanceTests
             var closed = false;
             for (var attempt = 0; attempt < 10 && !closed; attempt++)
             {
-                if (windowManager.HasExited(notepad.Id))
+                if (windowManager.GetExitStatus(notepad.Id) == ProcessExitStatus.Exited)
                 {
                     closed = true;
                     break;
                 }
 
                 windowManager.RequestClose(notepad.Id);
-                closed = windowManager.WaitForExit(notepad.Id, TimeSpan.FromSeconds(2));
+                closed = windowManager.WaitForExit(notepad.Id, TimeSpan.FromSeconds(2), CancellationToken.None);
             }
 
             Assert.True(closed, "The dedicated Notepad instance did not close gracefully.");
-            Assert.True(windowManager.HasExited(notepad.Id));
+            Assert.Equal(ProcessExitStatus.Exited, windowManager.GetExitStatus(notepad.Id));
         }
         finally
         {

@@ -213,7 +213,7 @@ public sealed class S18_CloseAppsServiceTests
     public async Task GracefulTimeout_WithoutForceKill_FailsAndNeverKills()
     {
         var processes = new FakeProcessManager { Processes = [Process(100)] };
-        var window = new FakeAppWindowManager { WaitForExitFunc = _ => false };
+        var window = new FakeAppWindowManager { WaitForExitFunc = (_, _, _) => false };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
 
@@ -228,7 +228,7 @@ public sealed class S18_CloseAppsServiceTests
     public async Task GracefulTimeout_WithForceKill_Kills()
     {
         var processes = new FakeProcessManager { Processes = [Process(100)] };
-        var window = new FakeAppWindowManager { WaitForExitFunc = _ => false };
+        var window = new FakeAppWindowManager { WaitForExitFunc = (_, _, _) => false };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
             processes, window);
@@ -248,7 +248,7 @@ public sealed class S18_CloseAppsServiceTests
         var window = new FakeAppWindowManager
         {
             RequestCloseFunc = _ => false,
-            HasExitedFunc = _ => ++exitedCalls > 1 // 预检未退出，请求关闭后复核已退出
+            GetExitStatusFunc = _ => ++exitedCalls > 1 ? ProcessExitStatus.Exited : ProcessExitStatus.Running
         };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
@@ -267,7 +267,7 @@ public sealed class S18_CloseAppsServiceTests
         var window = new FakeAppWindowManager
         {
             RequestCloseFunc = _ => false,
-            HasExitedFunc = _ => false
+            GetExitStatusFunc = _ => ProcessExitStatus.Running
         };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
@@ -435,7 +435,7 @@ public sealed class S18_CloseAppsServiceTests
         };
         var window = new FakeAppWindowManager
         {
-            WaitForExitFunc = pid => pid == 100 // 100 关闭成功，200 超时
+            WaitForExitFunc = (pid, _, _) => pid == 100 // 100 关闭成功，200 超时
         };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
@@ -454,7 +454,7 @@ public sealed class S18_CloseAppsServiceTests
     public async Task Failure_SummaryContainsTargetIdAndStatusLabel()
     {
         var processes = new FakeProcessManager { Processes = [Process(100)] };
-        var window = new FakeAppWindowManager { WaitForExitFunc = _ => false };
+        var window = new FakeAppWindowManager { WaitForExitFunc = (_, _, _) => false };
         var service = new CloseAppsService(
             new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
 
@@ -477,6 +477,118 @@ public sealed class S18_CloseAppsServiceTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => service.CloseAllAsync(cts.Token));
+    }
+
+    // ---- S18-D1 返修回归：取消/未知会话/未知退出状态/未确认强杀均 fail-closed ----
+
+    [Fact]
+    public async Task UnknownSessionId_IsSkippedProtected_WithoutAnyClose()
+    {
+        // D1-2：SessionId == -1（未知）不得放行；即使已授权强杀也不得触碰。
+        var processes = new FakeProcessManager
+        {
+            CurrentSessionId = 1,
+            Processes = [Process(100, sessionId: -1)]
+        };
+        var window = new FakeAppWindowManager();
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
+            processes, window);
+
+        var report = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        var result = Assert.Single(report.Results);
+        Assert.Equal(CloseAppStatus.SkippedProtected, result.Status);
+        Assert.Empty(window.RequestCloseCalls);
+        Assert.Empty(window.WaitForExitCalls);
+        Assert.Empty(window.ForceKillCalls);
+    }
+
+    [Fact]
+    public async Task ExitStatusUnknown_IsFailure_NotAlreadyExited_NoForceKill()
+    {
+        // D1-3：退出状态无法确认时，绝不当作已退出，也绝不强杀（fail-closed）。
+        var processes = new FakeProcessManager { Processes = [Process(100)] };
+        var window = new FakeAppWindowManager { GetExitStatusFunc = _ => ProcessExitStatus.Unknown };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
+            processes, window);
+
+        var report = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        var result = Assert.Single(report.Results);
+        Assert.Equal(CloseAppStatus.ExitStatusUnknown, result.Status);
+        Assert.NotEqual(CloseAppStatus.AlreadyExited, result.Status);
+        Assert.Empty(window.RequestCloseCalls);
+        Assert.Empty(window.ForceKillCalls);
+    }
+
+    [Fact]
+    public async Task ForceKill_ExitNotConfirmed_IsFailure_NotForceKilled()
+    {
+        // D1-4：强杀后退出未确认时，绝不当作强杀成功。
+        var processes = new FakeProcessManager { Processes = [Process(100)] };
+        var window = new FakeAppWindowManager
+        {
+            HasMainWindowFunc = _ => false,
+            ForceKillFunc = _ => new ForceKillResult { Status = ForceKillStatus.ExitNotConfirmed }
+        };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
+            processes, window);
+
+        var report = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        var result = Assert.Single(report.Results);
+        Assert.Equal(CloseAppStatus.ExitNotConfirmed, result.Status);
+        Assert.NotEqual(CloseAppStatus.ForceKilled, result.Status);
+        Assert.Single(window.ForceKillCalls, 100);
+    }
+
+    [Fact]
+    public async Task CancellationDuringGracefulWait_PropagatesOce_AndNeverForceKills()
+    {
+        // D1-1：等待期间取消（网关 WaitForExit 抛 OCE）→ 传播 OCE，绝不强杀。
+        var processes = new FakeProcessManager { Processes = [Process(100)] };
+        var window = new FakeAppWindowManager
+        {
+            WaitForExitFunc = (_, _, token) => throw new OperationCanceledException(token)
+        };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
+            processes, window);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.CloseAllAsync(CancellationToken.None));
+
+        Assert.Empty(window.ForceKillCalls);
+    }
+
+    [Fact]
+    public async Task CancellationArrivesDuringWait_BeforeForceKill_PropagatesOce_AndNeverForceKills()
+    {
+        // D1-1：等待返回超时(false)后、强杀前取消到达 → 强杀前复核取消，传播 OCE，绝不强杀。
+        var processes = new FakeProcessManager { Processes = [Process(100)] };
+        var cts = new CancellationTokenSource();
+        var window = new FakeAppWindowManager
+        {
+            WaitForExitFunc = (_, _, _) =>
+            {
+                cts.Cancel(); // 取消在等待期间到达；等待仍返回超时。
+                return false;
+            }
+        };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath, forceKill: true))),
+            processes, window);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.CloseAllAsync(cts.Token));
+
+        Assert.Empty(window.ForceKillCalls);
     }
 
     private static AppConfig PathConfig(string path, bool forceKill = false) =>
@@ -568,8 +680,8 @@ public sealed class S18_CloseAppsServiceTests
     {
         public Func<int, bool> HasMainWindowFunc { get; init; } = _ => true;
         public Func<int, bool> RequestCloseFunc { get; init; } = _ => true;
-        public Func<int, bool> HasExitedFunc { get; init; } = _ => false;
-        public Func<int, bool> WaitForExitFunc { get; init; } = _ => true;
+        public Func<int, ProcessExitStatus> GetExitStatusFunc { get; init; } = _ => ProcessExitStatus.Running;
+        public Func<int, TimeSpan, CancellationToken, bool> WaitForExitFunc { get; init; } = (_, _, _) => true;
         public Func<int, ForceKillResult> ForceKillFunc { get; init; } =
             _ => new ForceKillResult { Status = ForceKillStatus.Killed };
 
@@ -577,6 +689,7 @@ public sealed class S18_CloseAppsServiceTests
         public List<int> ForceKillCalls { get; } = [];
         public List<DateTimeOffset> ForceKillExpectedStartTimes { get; } = [];
         public List<int> WaitForExitCalls { get; } = [];
+        public List<CancellationToken> WaitForExitTokens { get; } = [];
 
         public bool HasMainWindow(int processId) => HasMainWindowFunc(processId);
 
@@ -586,12 +699,13 @@ public sealed class S18_CloseAppsServiceTests
             return RequestCloseFunc(processId);
         }
 
-        public bool HasExited(int processId) => HasExitedFunc(processId);
+        public ProcessExitStatus GetExitStatus(int processId) => GetExitStatusFunc(processId);
 
-        public bool WaitForExit(int processId, TimeSpan timeout)
+        public bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken)
         {
             WaitForExitCalls.Add(processId);
-            return WaitForExitFunc(processId);
+            WaitForExitTokens.Add(cancellationToken);
+            return WaitForExitFunc(processId, timeout, cancellationToken);
         }
 
         public ForceKillResult ForceKill(int processId, DateTimeOffset expectedStartTimeUtc)
