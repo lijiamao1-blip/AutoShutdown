@@ -85,8 +85,9 @@ public static class ServiceRegistration
         // OfficeSave→RunCommands→CloseApps（后续阶段追加）；Runner 串行、
         // 异常隔离、block/continue 语义由 Runner 层保证。Office 自动化走
         // 抽象 IOfficeAutomation（真机 COM 实现为 ComOfficeAutomation，惰性，
-        // 解析时不触碰 COM），自动化测试注入替身。
-        services.AddSingleton<IOfficeComGateway, RotOfficeComGateway>();
+        // 解析时不触碰 COM）；其逐应用硬超时经独立辅助进程实现，辅助进程由
+        // IOfficeSaveHelperLauncher（唯一进程启动网关）启动。
+        services.AddSingleton<IOfficeSaveHelperLauncher, OfficeSaveHelperLauncher>();
         services.AddSingleton<IOfficeAutomation, ComOfficeAutomation>();
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(

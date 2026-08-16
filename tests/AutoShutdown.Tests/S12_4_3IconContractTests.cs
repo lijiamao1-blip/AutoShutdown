@@ -230,7 +230,14 @@ public sealed class S12_4_3IconContractTests
             }
 
             Assert.DoesNotContain("shutdown.exe", content);
-            Assert.DoesNotContain("Process.Start", content);
+            if (name == "OfficeSaveHelperLauncher.cs")
+            {
+                Assert.Contains("Process.Start", content);
+            }
+            else
+            {
+                Assert.DoesNotContain("Process.Start", content);
+            }
         }
     }
 

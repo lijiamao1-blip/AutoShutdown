@@ -9,6 +9,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AutoShutdown.Core\AutoShutdown.Core.csproj" />
+    <!-- 引用辅助进程项目：构建时将其 EXE 复制到 App 输出目录，供唯一启动网关按安装目录固定解析 -->
+    <ProjectReference Include="..\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>

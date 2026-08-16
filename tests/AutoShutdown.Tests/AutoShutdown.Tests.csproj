@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AutoShutdown.Core\AutoShutdown.Core.csproj" />
     <ProjectReference Include="..\..\src\AutoShutdown.App\AutoShutdown.App.csproj" />
+    <ProjectReference Include="..\..\src\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />

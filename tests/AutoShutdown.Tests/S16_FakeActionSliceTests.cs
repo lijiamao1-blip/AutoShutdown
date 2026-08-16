@@ -140,7 +140,7 @@ public sealed class S16_FakeActionSliceTests
         Assert.IsType<PrePipelineRunner>(runner);
         Assert.NotSame(PrePipelineRunner.Empty, runner);
         Assert.IsType<ComOfficeAutomation>(provider.GetRequiredService<IOfficeAutomation>());
-        Assert.IsType<RotOfficeComGateway>(provider.GetRequiredService<IOfficeComGateway>());
+        Assert.IsType<OfficeSaveHelperLauncher>(provider.GetRequiredService<IOfficeSaveHelperLauncher>());
         Assert.IsType<GuardedPowerService>(provider.GetRequiredService<IPowerService>());
         Assert.IsType<ShutdownWorkflow>(provider.GetRequiredService<ShutdownWorkflow>());
     }

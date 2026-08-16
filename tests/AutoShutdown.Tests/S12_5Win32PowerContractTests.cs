@@ -54,9 +54,17 @@ public sealed class S12_5Win32PowerContractTests
     {
         foreach (var file in EnumerateWholeSourceFiles())
         {
+            var name = Path.GetFileName(file);
             var content = File.ReadAllText(file);
             Assert.DoesNotContain("shutdown.exe", content);
-            Assert.DoesNotContain("Process.Start", content);
+            if (name == "OfficeSaveHelperLauncher.cs")
+            {
+                Assert.Contains("Process.Start", content);
+            }
+            else
+            {
+                Assert.DoesNotContain("Process.Start", content);
+            }
         }
     }
 

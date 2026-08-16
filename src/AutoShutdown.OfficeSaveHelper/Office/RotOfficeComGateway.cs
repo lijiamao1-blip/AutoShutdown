@@ -2,15 +2,15 @@ using System.Runtime.InteropServices;
 using AutoShutdown.Core.Office;
 using Microsoft.VisualBasic;
 
-namespace AutoShutdown.App.Infrastructure.Office;
+namespace AutoShutdown.OfficeSaveHelper.Office;
 
 /// <summary>
-/// 通过 Running Object Table（ROT）附加已运行 Office 实例的网关（S17 独立验收修复）。
-/// 绝不调用 Activator.CreateInstance / new Application / 任何会启动 Office 的路径；
+/// 通过 Running Object Table（ROT）附加已运行 Office 实例的网关（S17 独立验收 D2，
+/// 位于辅助进程内）。绝不 new Application / 创建新实例 / 任何会启动 Office 的路径；
 /// 无活动对象时返回 null。附加经 <see cref="Interaction.GetObject(string, string)"/>
-/// 完成（空路径 + ProgID = 纯 ROT 附加，不创建、不启动），避免在 App 层引入任何原生导入
+/// 完成（空路径 + ProgID = 纯 ROT 附加，不创建、不启动），避免引入任何原生导入
 /// （遵守「原生导入仅存在于电源网关」的冻结不变量）。所有 Office 原生 COM
-/// 调用（dynamic + ReleaseComObject）收敛于此，不散落到其他文件。真机路径，S17 自动化测试不调用它。
+/// 调用（dynamic + ReleaseComObject）收敛于此，不散落到其他文件。真机路径，自动化测试不调用它。
 /// </summary>
 public sealed class RotOfficeComGateway : IOfficeComGateway
 {

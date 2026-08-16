@@ -860,7 +860,14 @@ public sealed class SchedulerEngineTests
             }
 
             Assert.DoesNotContain("shutdown.exe", content);
-            Assert.DoesNotContain("Process.Start", content);
+            if (name == "OfficeSaveHelperLauncher.cs")
+            {
+                Assert.Contains("Process.Start", content);
+            }
+            else
+            {
+                Assert.DoesNotContain("Process.Start", content);
+            }
         }
 
         // Runtime wiring: guarded power, logging-decorated workflow, real handler.

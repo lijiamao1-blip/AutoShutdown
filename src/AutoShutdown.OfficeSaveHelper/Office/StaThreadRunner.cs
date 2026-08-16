@@ -1,11 +1,11 @@
 using System.Runtime.ExceptionServices;
 
-namespace AutoShutdown.App.Infrastructure.Office;
+namespace AutoShutdown.OfficeSaveHelper.Office;
 
 /// <summary>
 /// 在专用 STA 线程上同步执行并等待返回，供 Office COM 自动化边界使用（S17）。
-/// 取消为协作式：工作负载在循环内检查令牌；无法强杀卡死的 COM 调用（真机限制，
-/// 已记录为未执行项）。
+/// 辅助进程由父进程按单应用期限硬终止（绝不遗留），故此处不承担超时职责；
+/// 仅保证 COM 调用在 STA 单元内执行。
 /// </summary>
 internal static class StaThreadRunner
 {

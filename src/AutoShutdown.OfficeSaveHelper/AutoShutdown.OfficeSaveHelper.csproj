@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>AutoShutdown.OfficeSaveHelper</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AutoShutdown.Core\AutoShutdown.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 允许测试项目访问内部参数解析器，验证「非法枚举/额外参数/自由文本拒绝」契约。 -->
+    <InternalsVisibleTo Include="AutoShutdown.Tests" />
+  </ItemGroup>
+</Project>

@@ -5,10 +5,11 @@ using AutoShutdown.Core.Office;
 namespace AutoShutdown.App.Infrastructure.Office;
 
 /// <summary>
-/// 真实 Office 自动保存编排（S17 独立验收修复）。只对「已安装且正在运行」的 Office 应用，
-/// 通过 <see cref="IOfficeComGateway"/> 附加 Running Object Table 中已运行实例并保存；
-/// 绝不新建实例、绝不 Quit（关闭归 S18）。逐文档/逐应用异常隔离，全部取得的 COM 包装
-/// 在成功、异常与取消路径均释放。此实现为真机路径，S17 自动化测试不调用它。
+/// 真实 Office 自动保存编排（S17 独立验收 D2）。探测可用应用后，为每个应用启动
+/// 独立辅助进程执行 ROT 附加与保存；父进程按单应用期限硬终止辅助进程整棵进程树，
+/// 实现真正的逐应用硬超时（辅助进程绝不新建实例、绝不 Quit，关闭归 S18）。
+/// 进程启动收敛于 <see cref="IOfficeSaveHelperLauncher"/>（唯一进程启动网关）。
+/// 真机路径，S17 自动化测试注入替身启动器，不启动真实进程。
 /// </summary>
 public sealed class ComOfficeAutomation : IOfficeAutomation
 {
@@ -19,12 +20,15 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         (OfficeApplicationKind.PowerPoint, "PowerPoint.Application", "POWERPNT"),
     ];
 
-    private readonly IOfficeComGateway _gateway;
+    private static readonly TimeSpan KillConfirmTimeout = TimeSpan.FromSeconds(5);
+    private const int PollIntervalMilliseconds = 200;
 
-    public ComOfficeAutomation(IOfficeComGateway gateway)
+    private readonly IOfficeSaveHelperLauncher _launcher;
+
+    public ComOfficeAutomation(IOfficeSaveHelperLauncher launcher)
     {
-        ArgumentNullException.ThrowIfNull(gateway);
-        _gateway = gateway;
+        ArgumentNullException.ThrowIfNull(launcher);
+        _launcher = launcher;
     }
 
     public IReadOnlyList<OfficeApplicationKind> DetectAvailableApplications()
@@ -45,86 +49,61 @@ public sealed class ComOfficeAutomation : IOfficeAutomation
         OfficeApplicationKind application,
         CancellationToken cancellationToken)
     {
-        return StaThreadRunner.Run(() => SaveOnStaThread(application, cancellationToken));
-    }
+        var correlationId = Guid.NewGuid().ToString();
 
-    private OfficeApplicationSaveResult SaveOnStaThread(
-        OfficeApplicationKind application,
-        CancellationToken cancellationToken)
-    {
-        IOfficeComApplication? officeApplication = null;
+        IOfficeSaveHelperProcess? process = null;
         try
         {
-            // 仅附加 ROT 中已运行实例；网关无创建路径，进程探测与附加间竞态安全失败为 null。
-            officeApplication = _gateway.TryAttach(application);
-            if (officeApplication is null)
-            {
-                return NotDetected(application);
-            }
-
-            IReadOnlyList<IOfficeComDocument> documents;
             try
             {
-                documents = officeApplication.GetOpenDocuments();
+                process = _launcher.Launch(application, correlationId);
             }
             catch (Exception)
             {
+                // 启动失败（路径校验失败/进程不存在/启动异常）→ 可诊断失败，不阻断整体流程。
                 return NotDetected(application);
             }
 
-            var saved = 0;
-            var noPath = 0;
-            var failed = 0;
-            try
+            while (true)
             {
-                foreach (var document in documents)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.WaitForExit(PollIntervalMilliseconds))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        if (!document.HasPath)
-                        {
-                            noPath++;
-                        }
-                        else
-                        {
-                            document.Save();
-                            saved++;
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception)
-                    {
-                        failed++;
-                    }
+                    return ParseResult(process.ReadStandardOutput(), application);
                 }
             }
-            finally
+        }
+        catch (OperationCanceledException)
+        {
+            // 硬超时或上层取消：先终止辅助进程整棵进程树并确认退出，再传播取消，
+            // 绝不遗留仍在运行的辅助进程（不丢弃任务）、绝不终止用户 Office。
+            if (process is not null)
             {
-                // 成功 / 异常 / 取消路径均释放全部取得的文档包装。
-                foreach (var document in documents)
-                {
-                    document.Dispose();
-                }
+                process.KillTree();
+                process.WaitForExitAfterKill(KillConfirmTimeout);
             }
 
-            return new OfficeApplicationSaveResult
-            {
-                Application = application,
-                Status = noPath == 0 && failed == 0 ? OfficeAppStatus.Success : OfficeAppStatus.PartialFailure,
-                SavedCount = saved,
-                NoPathCount = noPath,
-                FailedCount = failed
-            };
+            throw;
         }
         finally
         {
-            // 仅释放本程序取得的 COM 引用；绝不 Quit。
-            officeApplication?.Dispose();
+            process?.Dispose();
         }
+    }
+
+    private static OfficeApplicationSaveResult ParseResult(string? stdout, OfficeApplicationKind application)
+    {
+        if (OfficeSaveHelperProtocol.TryParse(stdout, out var result))
+        {
+            return result with { Application = application };
+        }
+
+        // 输出缺失/非法（如辅助进程看门狗自终止）→ 回退为超时，绝不信任未知内容。
+        return new OfficeApplicationSaveResult
+        {
+            Application = application,
+            Status = OfficeAppStatus.TimedOut
+        };
     }
 
     private static OfficeApplicationSaveResult NotDetected(OfficeApplicationKind application)

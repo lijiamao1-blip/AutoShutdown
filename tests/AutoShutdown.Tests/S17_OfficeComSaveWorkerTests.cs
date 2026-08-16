@@ -1,16 +1,16 @@
-using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.Core.Office;
+using AutoShutdown.OfficeSaveHelper.Office;
 using Xunit;
 
 namespace AutoShutdown.Tests;
 
 /// <summary>
-/// S17 独立验收缺陷一修复的结构契约与编排测试。验证 ComOfficeAutomation 仅通过
-/// IOfficeComGateway「附加」Running Object Table 中已运行实例，绝不创建/启动 Office、
-/// 绝不 Quit，并在成功 / 异常 / 取消路径全部释放取得的包装。全程注入替身网关，
-/// 绝不触碰真实 Office。
+/// S17 独立验收 D2：辅助进程内 <see cref="OfficeComSaveWorker"/> 的结构契约与编排测试。
+/// 验证仅通过 <see cref="IOfficeComGateway"/>「附加」Running Object Table 中已运行实例，
+/// 绝不创建/启动 Office、绝不 Quit，并在成功 / 异常 / 取消路径全部释放取得的包装。
+/// 全程注入替身网关，绝不触碰真实 Office。
 /// </summary>
-public sealed class S17_OfficeComGatewayTests
+public sealed class S17_OfficeComSaveWorkerTests
 {
     [Fact]
     public void GatewayContract_ExposesOnlyTryAttach_NoCreatePath()
@@ -38,9 +38,9 @@ public sealed class S17_OfficeComGatewayTests
         var document = new FakeDocument(hasPath: true);
         var application = new FakeApplication(new[] { document });
         var gateway = new FakeGateway(application);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
 
-        var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
+        var result = worker.Save(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.Success, result.Status);
         Assert.Equal(1, result.SavedCount);
@@ -54,9 +54,9 @@ public sealed class S17_OfficeComGatewayTests
     public void NoActiveObject_DoesNotCreate_ReportsNotDetected()
     {
         var gateway = new FakeGateway(null);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
 
-        var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
+        var result = worker.Save(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.NotDetected, result.Status);
         Assert.Equal(1, gateway.AttachCalls);
@@ -68,9 +68,9 @@ public sealed class S17_OfficeComGatewayTests
     {
         var application = new FakeApplication(null!) { ThrowOnGetDocuments = true };
         var gateway = new FakeGateway(application);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
 
-        var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
+        var result = worker.Save(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.NotDetected, result.Status);
         Assert.True(application.Disposed);
@@ -82,9 +82,9 @@ public sealed class S17_OfficeComGatewayTests
         var document = new FakeDocument(hasPath: false);
         var application = new FakeApplication(new[] { document });
         var gateway = new FakeGateway(application);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
 
-        var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
+        var result = worker.Save(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.PartialFailure, result.Status);
         Assert.Equal(0, result.SavedCount);
@@ -102,9 +102,9 @@ public sealed class S17_OfficeComGatewayTests
         var doc3 = new FakeDocument(hasPath: true);
         var application = new FakeApplication(new[] { doc1, doc2, doc3 });
         var gateway = new FakeGateway(application);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
 
-        var result = automation.SaveOpenDocuments(OfficeApplicationKind.Word, CancellationToken.None);
+        var result = worker.Save(OfficeApplicationKind.Word, CancellationToken.None);
 
         Assert.Equal(OfficeAppStatus.PartialFailure, result.Status);
         Assert.Equal(2, result.SavedCount);
@@ -121,12 +121,12 @@ public sealed class S17_OfficeComGatewayTests
         var document = new FakeDocument(hasPath: true);
         var application = new FakeApplication(new[] { document });
         var gateway = new FakeGateway(application);
-        var automation = new ComOfficeAutomation(gateway);
+        var worker = new OfficeComSaveWorker(gateway);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         Assert.Throws<OperationCanceledException>(
-            () => automation.SaveOpenDocuments(OfficeApplicationKind.Word, cts.Token));
+            () => worker.Save(OfficeApplicationKind.Word, cts.Token));
 
         Assert.False(document.SaveCalled);
         Assert.True(document.Disposed);

@@ -1,11 +1,11 @@
 using AutoShutdown.Core.Office;
 
-namespace AutoShutdown.App.Infrastructure.Office;
+namespace AutoShutdown.OfficeSaveHelper.Office;
 
 /// <summary>
-/// Office 原生 COM 互操作网关（S17 独立验收修复）。所有 COM 原生调用收敛于此网关；
-/// 只允许「附加」Running Object Table 中已运行的实例，绝不创建/启动 Office。
-/// 供 <see cref="ComOfficeAutomation"/> 编排使用；自动化测试注入替身，不触碰真实 Office。
+/// Office 原生 COM 互操作网关（S17 独立验收 D2，位于辅助进程内）。所有 COM 原生调用
+/// 收敛于此网关；只允许「附加」Running Object Table 中已运行的实例，绝不创建/启动 Office。
+/// 供 <see cref="OfficeComSaveWorker"/> 编排使用；自动化测试注入替身，不触碰真实 Office。
 /// </summary>
 public interface IOfficeComGateway
 {

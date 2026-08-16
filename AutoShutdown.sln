@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.App", "src\Aut
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.Tests", "tests\AutoShutdown.Tests\AutoShutdown.Tests.csproj", "{328B7593-9654-498C-9C07-917BA77D0DAE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.OfficeSaveHelper", "src\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj", "{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +28,9 @@ Global
 		{328B7593-9654-498C-9C07-917BA77D0DAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{328B7593-9654-498C-9C07-917BA77D0DAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{328B7593-9654-498C-9C07-917BA77D0DAE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
