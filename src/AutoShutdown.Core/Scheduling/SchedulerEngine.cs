@@ -448,20 +448,10 @@ public sealed class SchedulerEngine : ISchedulerEngine
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var running = _stateMachine.TryTransition(
-            instance.State,
-            TaskInstanceState.Running,
-            TaskInstanceStateTransitionCause.ScheduleTriggered,
-            SourceName);
-        if (!running.Allowed)
-        {
-            return false;
-        }
-
         var confirming = _stateMachine.TryTransition(
-            TaskInstanceState.Running,
+            instance.State,
             TaskInstanceState.Confirming,
-            TaskInstanceStateTransitionCause.PipelineCompleted,
+            TaskInstanceStateTransitionCause.ScheduleTriggered,
             SourceName);
         if (!confirming.Allowed)
         {
@@ -767,21 +757,11 @@ public sealed class SchedulerEngine : ISchedulerEngine
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // waiting → running（瞬时，不落盘）→ confirming。
-        var running = _stateMachine.TryTransition(
-            instance.State,
-            TaskInstanceState.Running,
-            TaskInstanceStateTransitionCause.ScheduleTriggered,
-            SourceName);
-        if (!running.Allowed)
-        {
-            return;
-        }
-
+        // waiting → confirming（瞬时，不落盘中间态）。
         var confirming = _stateMachine.TryTransition(
-            TaskInstanceState.Running,
+            instance.State,
             TaskInstanceState.Confirming,
-            TaskInstanceStateTransitionCause.PipelineCompleted,
+            TaskInstanceStateTransitionCause.ScheduleTriggered,
             SourceName);
         if (!confirming.Allowed)
         {
@@ -804,21 +784,11 @@ public sealed class SchedulerEngine : ISchedulerEngine
 
         if (instance.State == TaskInstanceState.Waiting)
         {
-            // 无告警窗口：waiting → running（瞬时）→ confirming（瞬时）→ executing。
-            var running = _stateMachine.TryTransition(
-                instance.State,
-                TaskInstanceState.Running,
-                TaskInstanceStateTransitionCause.ScheduleTriggered,
-                SourceName);
-            if (!running.Allowed)
-            {
-                return;
-            }
-
+            // 无告警窗口：waiting → confirming（瞬时，不落盘中间态）。
             var confirming = _stateMachine.TryTransition(
-                TaskInstanceState.Running,
+                instance.State,
                 TaskInstanceState.Confirming,
-                TaskInstanceStateTransitionCause.PipelineCompleted,
+                TaskInstanceStateTransitionCause.ScheduleTriggered,
                 SourceName);
             if (!confirming.Allowed)
             {
@@ -826,10 +796,21 @@ public sealed class SchedulerEngine : ISchedulerEngine
             }
         }
 
-        var executingTransition = _stateMachine.TryTransition(
+        // 确认 → Pre-Pipeline（瞬时）→ 电源。
+        var pipelineStarted = _stateMachine.TryTransition(
             TaskInstanceState.Confirming,
-            TaskInstanceState.Executing,
+            TaskInstanceState.Running,
             TaskInstanceStateTransitionCause.PowerConfirmed,
+            SourceName);
+        if (!pipelineStarted.Allowed)
+        {
+            return;
+        }
+
+        var executingTransition = _stateMachine.TryTransition(
+            TaskInstanceState.Running,
+            TaskInstanceState.Executing,
+            TaskInstanceStateTransitionCause.PipelineCompleted,
             SourceName);
         if (!executingTransition.Allowed)
         {

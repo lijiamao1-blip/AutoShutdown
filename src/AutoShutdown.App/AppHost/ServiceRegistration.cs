@@ -11,6 +11,7 @@ using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.Power;
+using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.Recovery;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
@@ -78,7 +79,14 @@ public static class ServiceRegistration
 
         // The workflow is decorated with logging only; business behavior,
         // parameters and return values are passed through untouched.
-        services.AddSingleton<ShutdownWorkflow>();
+        // S16：Pre-Pipeline 以 Empty 空集合注册（生产暂不挂载真实动作），
+        // Runner 串行、异常隔离、block/continue 语义由 Runner 层保证。
+        services.AddSingleton<IPrePipelineRunner>(_ => PrePipelineRunner.Empty);
+        services.AddSingleton<ShutdownWorkflow>(provider =>
+            new ShutdownWorkflow(
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<IPowerService>(),
+                provider.GetRequiredService<IPrePipelineRunner>()));
         services.AddSingleton<IShutdownWorkflow>(provider =>
             new LoggingShutdownWorkflowDecorator(
                 provider.GetRequiredService<ShutdownWorkflow>(),

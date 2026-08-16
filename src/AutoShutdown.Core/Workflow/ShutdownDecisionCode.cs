@@ -16,5 +16,8 @@ public enum ShutdownDecisionCode
     PowerServiceFailed = 11,
     PowerServiceException = 12,
     RealPowerNotEnabled = 13,
-    RealPowerConfirmationMissing = 14
+    RealPowerConfirmationMissing = 14,
+
+    /// <summary>Pre-Pipeline 中 block 动作失败，取消电源意图（S16）。</summary>
+    PrePipelineBlocked = 15
 }

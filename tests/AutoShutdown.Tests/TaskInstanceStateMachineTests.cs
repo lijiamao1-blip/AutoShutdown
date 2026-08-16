@@ -15,17 +15,17 @@ public sealed class TaskInstanceStateMachineTests
     // ===== 15 条唯一状态边（均允许） =====
 
     [Theory]
-    [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Running, TaskInstanceStateTransitionCause.ScheduleTriggered)]
+    [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.ScheduleTriggered)]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.CancelByUser)]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.ConfigCorrupt)]
-    [InlineData(TaskInstanceState.Running, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.PipelineCompleted)]
-    [InlineData(TaskInstanceState.Running, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.PipelineFailedBlocked)]
-    [InlineData(TaskInstanceState.Running, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
-    [InlineData(TaskInstanceState.Running, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.RuntimeConfigCorrupt)]
-    [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Executing, TaskInstanceStateTransitionCause.PowerConfirmed)]
+    [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Running, TaskInstanceStateTransitionCause.PowerConfirmed)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.CancelledDuringConfirmation)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.ConfigCorrupt)]
+    [InlineData(TaskInstanceState.Running, TaskInstanceState.Executing, TaskInstanceStateTransitionCause.PipelineCompleted)]
+    [InlineData(TaskInstanceState.Running, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.PipelineFailedBlocked)]
+    [InlineData(TaskInstanceState.Running, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
+    [InlineData(TaskInstanceState.Running, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.RuntimeConfigCorrupt)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Executed, TaskInstanceStateTransitionCause.PowerCompleted)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.PowerFailed)]
@@ -178,7 +178,7 @@ public sealed class TaskInstanceStateMachineTests
     // ===== cause 不匹配 =====
 
     [Theory]
-    [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Running, TaskInstanceStateTransitionCause.OneTimeExpired)]
+    [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.OneTimeExpired)]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.ScheduleTriggered)]
     [InlineData(TaskInstanceState.Running, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.PowerConfirmed)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Executed, TaskInstanceStateTransitionCause.PowerFailed)]
@@ -240,7 +240,7 @@ public sealed class TaskInstanceStateMachineTests
         var before = DateTimeOffset.UtcNow.AddMilliseconds(-50);
         var result = _machine.TryTransition(
             TaskInstanceState.Waiting,
-            TaskInstanceState.Running,
+            TaskInstanceState.Confirming,
             TaskInstanceStateTransitionCause.ScheduleTriggered,
             source: "SchedulerEngine");
         var after = DateTimeOffset.UtcNow.AddMilliseconds(50);
@@ -254,8 +254,8 @@ public sealed class TaskInstanceStateMachineTests
     [Fact]
     public void TryTransition_RepeatedValidCalls_AreStable()
     {
-        var first = _machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Running, TaskInstanceStateTransitionCause.ScheduleTriggered);
-        var second = _machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Running, TaskInstanceStateTransitionCause.ScheduleTriggered);
+        var first = _machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.ScheduleTriggered);
+        var second = _machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.ScheduleTriggered);
 
         Assert.True(first.Allowed);
         Assert.True(second.Allowed);
@@ -273,7 +273,7 @@ public sealed class TaskInstanceStateMachineTests
         // 参数less 构造即证明无注入的 logger/storage/service 依赖。
         var machine = new TaskInstanceStateMachine();
 
-        var result = machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Running, TaskInstanceStateTransitionCause.ScheduleTriggered);
+        var result = machine.TryTransition(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.ScheduleTriggered);
 
         Assert.True(result.Allowed);
     }

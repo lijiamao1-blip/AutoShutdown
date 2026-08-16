@@ -10,7 +10,7 @@ public enum TaskInstanceStateTransitionCause
 {
     Unknown = 0,
 
-    /// <summary>waiting → running：排程触发，进入 Pre-Pipeline。</summary>
+    /// <summary>waiting → confirming：排程触发，进入 Countdown（确认窗口）。</summary>
     ScheduleTriggered = 1,
 
     /// <summary>waiting → cancelled：用户取消未触发任务。</summary>
@@ -22,7 +22,7 @@ public enum TaskInstanceStateTransitionCause
     /// <summary>waiting → faulted / confirming → faulted：配置损坏检测。</summary>
     ConfigCorrupt = 4,
 
-    /// <summary>running → confirming：Pre-Pipeline 完成，进入 Countdown。</summary>
+    /// <summary>running → executing：Pre-Pipeline 完成且策略允许，进入电源。</summary>
     PipelineCompleted = 5,
 
     /// <summary>running → cancelled：Pre-Pipeline 失败且 failurePolicy=block。</summary>
@@ -34,7 +34,7 @@ public enum TaskInstanceStateTransitionCause
     /// <summary>running → faulted：运行时配置损坏。</summary>
     RuntimeConfigCorrupt = 8,
 
-    /// <summary>confirming → executing：用户确认 / 无人值守触发。</summary>
+    /// <summary>confirming → running：用户确认 / 无人值守触发，进入 Pre-Pipeline。</summary>
     PowerConfirmed = 9,
 
     /// <summary>confirming → cancelled：用户取消 / 倒计时超时且无人值守关。</summary>

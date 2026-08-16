@@ -1,6 +1,7 @@
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Power;
+using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.State;
 
 namespace AutoShutdown.Core.Workflow;
@@ -14,15 +15,18 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
 
     private readonly IConfigurationService _configurationService;
     private readonly IPowerService _powerService;
+    private readonly IPrePipelineRunner _prePipelineRunner;
 
     public ShutdownWorkflow(
         IConfigurationService configurationService,
-        IPowerService powerService)
+        IPowerService powerService,
+        IPrePipelineRunner? prePipelineRunner = null)
     {
         ArgumentNullException.ThrowIfNull(configurationService);
         ArgumentNullException.ThrowIfNull(powerService);
         _configurationService = configurationService;
         _powerService = powerService;
+        _prePipelineRunner = prePipelineRunner ?? PrePipelineRunner.Empty;
     }
 
     public async Task<ShutdownWorkflowResult> ExecuteAsync(
@@ -126,6 +130,30 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 "The instance timing fields are invalid.");
         }
 
+        // 确认已成功（双闸门 + 状态/身份/动作/时序校验全部通过）后才运行 Pre-Pipeline。
+        // 用户取消（CancellationToken）在此前已由调度/上层拦截，此处不再产生副作用。
+        var pipeline = await _prePipelineRunner
+            .RunAsync(
+                new PrePipelineContext
+                {
+                    InstanceId = instance.InstanceId,
+                    SourceTaskId = instance.SourceTaskId,
+                    Action = instance.ActionSnapshot,
+                    ScheduledFireTime = instance.ScheduledFireTime
+                },
+                cancellationToken).ConfigureAwait(false);
+
+        if (!pipeline.PowerAllowed)
+        {
+            return new ShutdownWorkflowResult
+            {
+                Status = ShutdownWorkflowStatus.Rejected,
+                DecisionCode = ShutdownDecisionCode.PrePipelineBlocked,
+                PrePipeline = pipeline,
+                Message = "The pre-pipeline blocked the power action."
+            };
+        }
+
         var request = new PowerRequest
         {
             Action = instance.ActionSnapshot,
@@ -149,6 +177,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
             {
                 Status = ShutdownWorkflowStatus.PowerFailed,
                 DecisionCode = ShutdownDecisionCode.PowerServiceException,
+                PrePipeline = pipeline,
                 Message = "The power service threw an exception: " + exception.Message
             };
         }
@@ -160,6 +189,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Status = ShutdownWorkflowStatus.Simulated,
                 DecisionCode = ShutdownDecisionCode.Allowed,
                 PowerResult = powerResult,
+                PrePipeline = pipeline,
                 Message = "The power action was simulated successfully."
             };
         }
@@ -171,6 +201,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Status = ShutdownWorkflowStatus.Accepted,
                 DecisionCode = ShutdownDecisionCode.Allowed,
                 PowerResult = powerResult,
+                PrePipeline = pipeline,
                 Message = "The real power action was accepted."
             };
         }
@@ -182,6 +213,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Status = ShutdownWorkflowStatus.Rejected,
                 DecisionCode = ShutdownDecisionCode.PowerServiceRejected,
                 PowerResult = powerResult,
+                PrePipeline = pipeline,
                 Message = "The power service rejected the request."
             };
         }
@@ -193,6 +225,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Status = ShutdownWorkflowStatus.PowerFailed,
                 DecisionCode = ShutdownDecisionCode.PowerServiceFailed,
                 PowerResult = powerResult,
+                PrePipeline = pipeline,
                 Message = "The power service reported a failure."
             };
         }
@@ -202,6 +235,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
             Status = ShutdownWorkflowStatus.PowerFailed,
             DecisionCode = ShutdownDecisionCode.PowerServiceFailed,
             PowerResult = powerResult,
+            PrePipeline = pipeline,
             Message = "The power service returned an unexpected result."
         };
     }

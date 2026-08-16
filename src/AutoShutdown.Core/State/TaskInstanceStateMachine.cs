@@ -9,6 +9,8 @@ namespace AutoShutdown.Core.State;
 /// （waiting→cancelled 接受 CancelByUser 与 OneTimeExpired 两个触发场景，修正 6d）。
 /// 终态（cancelled/faulted/interrupted）一律不可逆，拒绝一切出边转换。
 /// 纯逻辑：无日志依赖、无日志写入；调用方负责 Error 审计日志。
+/// S16 一致性修复：V2-DRAFT-004 全局流程次序为 Countdown→Confirm→Pre-Pipeline→Power，
+/// 故将状态序修正为 waiting→confirming（Countdown）→running（Pre-Pipeline）→executing（Power）。
 /// </summary>
 public sealed class TaskInstanceStateMachine : ITaskInstanceStateMachine
 {
@@ -16,25 +18,25 @@ public sealed class TaskInstanceStateMachine : ITaskInstanceStateMachine
         new Dictionary<(TaskInstanceState, TaskInstanceState), FrozenSet<TaskInstanceStateTransitionCause>>
         {
             // waiting：3 出
-            [(TaskInstanceState.Waiting, TaskInstanceState.Running)] = C(TaskInstanceStateTransitionCause.ScheduleTriggered),
+            [(TaskInstanceState.Waiting, TaskInstanceState.Confirming)] = C(TaskInstanceStateTransitionCause.ScheduleTriggered),
             [(TaskInstanceState.Waiting, TaskInstanceState.Cancelled)] = C(
                 TaskInstanceStateTransitionCause.CancelByUser,
                 TaskInstanceStateTransitionCause.OneTimeExpired),
             [(TaskInstanceState.Waiting, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.ConfigCorrupt),
 
-            // running：4 出
-            [(TaskInstanceState.Running, TaskInstanceState.Confirming)] = C(TaskInstanceStateTransitionCause.PipelineCompleted),
-            [(TaskInstanceState.Running, TaskInstanceState.Cancelled)] = C(TaskInstanceStateTransitionCause.PipelineFailedBlocked),
-            [(TaskInstanceState.Running, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
-            [(TaskInstanceState.Running, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.RuntimeConfigCorrupt),
-
-            // confirming：4 出
-            [(TaskInstanceState.Confirming, TaskInstanceState.Executing)] = C(TaskInstanceStateTransitionCause.PowerConfirmed),
+            // confirming：4 出（Countdown/确认窗口）
+            [(TaskInstanceState.Confirming, TaskInstanceState.Running)] = C(TaskInstanceStateTransitionCause.PowerConfirmed),
             [(TaskInstanceState.Confirming, TaskInstanceState.Cancelled)] = C(TaskInstanceStateTransitionCause.CancelledDuringConfirmation),
             [(TaskInstanceState.Confirming, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
             [(TaskInstanceState.Confirming, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.ConfigCorrupt),
 
-            // executing：3 出
+            // running：4 出（Pre-Pipeline）
+            [(TaskInstanceState.Running, TaskInstanceState.Executing)] = C(TaskInstanceStateTransitionCause.PipelineCompleted),
+            [(TaskInstanceState.Running, TaskInstanceState.Cancelled)] = C(TaskInstanceStateTransitionCause.PipelineFailedBlocked),
+            [(TaskInstanceState.Running, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
+            [(TaskInstanceState.Running, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.RuntimeConfigCorrupt),
+
+            // executing：3 出（电源操作）
             [(TaskInstanceState.Executing, TaskInstanceState.Executed)] = C(TaskInstanceStateTransitionCause.PowerCompleted),
             [(TaskInstanceState.Executing, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
             [(TaskInstanceState.Executing, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.PowerFailed),

@@ -828,7 +828,9 @@ public sealed class SchedulerEngineTests
         Assert.Contains("AddSingleton<FakePowerService>", source);
         Assert.Contains("new GuardedPowerService(", source);
         Assert.DoesNotContain("AddSingleton<IPowerService, FakePowerService>", source);
-        Assert.Contains("AddSingleton<ShutdownWorkflow>()", source);
+        Assert.Contains("AddSingleton<ShutdownWorkflow>(provider =>", source);
+        Assert.Contains("AddSingleton<IPrePipelineRunner>", source);
+        Assert.Contains("GetRequiredService<IPrePipelineRunner>()", source);
         Assert.Contains("AddSingleton<IShutdownWorkflow>", source);
         Assert.Contains("LoggingShutdownWorkflowDecorator", source);
         Assert.Contains("GetRequiredService<ShutdownWorkflow>()", source);
