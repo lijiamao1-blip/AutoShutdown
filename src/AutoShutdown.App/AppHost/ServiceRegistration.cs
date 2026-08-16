@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
 using AutoShutdown.App.Infrastructure.CloseApps;
+using AutoShutdown.App.Infrastructure.Commands;
 using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
@@ -17,6 +18,7 @@ using AutoShutdown.Core.Office;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.Recovery;
+using AutoShutdown.Core.RunCommands;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
@@ -102,10 +104,22 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IConfigurationService>(),
                 provider.GetRequiredService<IProcessManager>(),
                 provider.GetRequiredService<IAppWindowManager>()));
+
+        // S19：RunCommands 关机前命令。真实进程启动边界为 CommandRunner（托管
+        // ProcessStartInfo.ArgumentList + Process.Kill(entireProcessTree)），无 P/Invoke、
+        // 无 cmd/powershell/shell 字符串拼接；本地白名单默认空（默认拒绝）。
+        // RunCommandsAction 默认 Block（fail-closed），逐命令 block/continue。
+        services.AddSingleton<ICommandRunner, CommandRunner>();
+        services.AddSingleton<RunCommandsService>(provider =>
+            new RunCommandsService(
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<ICommandRunner>()));
+
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
             [
                 new OfficeSaveAction(provider.GetRequiredService<IOfficeAutomation>()),
+                new RunCommandsAction(provider.GetRequiredService<RunCommandsService>()),
                 new CloseAppsAction(provider.GetRequiredService<CloseAppsService>())
             ]));
         services.AddSingleton<ShutdownWorkflow>(provider =>
