@@ -31,6 +31,12 @@ public sealed record AppConfig
     /// （空目标 = 不关闭任何应用；强杀默认关闭）。损坏/非法目标绝不静默回退。
     /// </summary>
     public CloseAppsConfig CloseApps { get; init; } = new();
+
+    /// <summary>
+    /// RunCommands 关机前命令执行配置段（S19）。向后兼容：旧配置无此段时取默认值
+    /// （本地白名单空 + 命令空 = 不执行任何命令）。损坏/非法命令绝不静默回退。
+    /// </summary>
+    public RunCommandsConfig RunCommands { get; init; } = new();
 }
 
 public sealed record LoggingConfig
