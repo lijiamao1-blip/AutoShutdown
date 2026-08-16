@@ -4,12 +4,14 @@ using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
 using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Idle;
+using AutoShutdown.Core.Office;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.Recovery;
@@ -79,9 +81,17 @@ public static class ServiceRegistration
 
         // The workflow is decorated with logging only; business behavior,
         // parameters and return values are passed through untouched.
-        // S16：Pre-Pipeline 以 Empty 空集合注册（生产暂不挂载真实动作），
-        // Runner 串行、异常隔离、block/continue 语义由 Runner 层保证。
-        services.AddSingleton<IPrePipelineRunner>(_ => PrePipelineRunner.Empty);
+        // S17：Pre-Pipeline 挂载第一个真实 Action（OfficeSave）。固定顺序
+        // OfficeSave→RunCommands→CloseApps（后续阶段追加）；Runner 串行、
+        // 异常隔离、block/continue 语义由 Runner 层保证。Office 自动化走
+        // 抽象 IOfficeAutomation（真机 COM 实现为 ComOfficeAutomation，惰性，
+        // 解析时不触碰 COM），自动化测试注入替身。
+        services.AddSingleton<IOfficeAutomation, ComOfficeAutomation>();
+        services.AddSingleton<IPrePipelineRunner>(provider =>
+            new PrePipelineRunner(
+            [
+                new OfficeSaveAction(provider.GetRequiredService<IOfficeAutomation>())
+            ]));
         services.AddSingleton<ShutdownWorkflow>(provider =>
             new ShutdownWorkflow(
                 provider.GetRequiredService<IConfigurationService>(),

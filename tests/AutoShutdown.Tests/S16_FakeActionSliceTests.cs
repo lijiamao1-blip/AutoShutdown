@@ -1,4 +1,5 @@
 using AutoShutdown.App.AppHost;
+using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
@@ -126,15 +127,19 @@ public sealed class S16_FakeActionSliceTests
     }
 
     [Fact]
-    public void CompositionRoot_ResolvesFrameworkOnlyPipeline_WithGuardedPower()
+    public void CompositionRoot_ResolvesOfficeSavePipeline_WithGuardedPower()
     {
-        // 安全冒烟：生产默认组合根解析出的是 Empty 流水线 + GuardedPowerService，
-        // 无任何真实 Action 挂载，也无真实电源 API 暴露。
+        // 安全冒烟（S17）：生产组合根解析出的是挂载 OfficeSaveAction 的流水线 +
+        // GuardedPowerService + 惰性 ComOfficeAutomation，无真实电源 API 暴露；
+        // 解析过程不启动任何 Office 进程（COM 仅在 ExecuteAsync 时才触碰）。
         var services = new ServiceCollection();
         services.AddAutoShutdownServices();
         using var provider = services.BuildServiceProvider();
 
-        Assert.Same(PrePipelineRunner.Empty, provider.GetRequiredService<IPrePipelineRunner>());
+        var runner = provider.GetRequiredService<IPrePipelineRunner>();
+        Assert.IsType<PrePipelineRunner>(runner);
+        Assert.NotSame(PrePipelineRunner.Empty, runner);
+        Assert.IsType<ComOfficeAutomation>(provider.GetRequiredService<IOfficeAutomation>());
         Assert.IsType<GuardedPowerService>(provider.GetRequiredService<IPowerService>());
         Assert.IsType<ShutdownWorkflow>(provider.GetRequiredService<ShutdownWorkflow>());
     }
