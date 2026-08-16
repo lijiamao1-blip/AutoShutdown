@@ -404,7 +404,7 @@ public sealed class S19_RunCommandsServiceTests
         public FakeCommandRunner(Func<CommandSpec, CommandRunResult>? run = null)
             => _run = run ?? (_ => Success());
 
-        public Task<CommandRunResult> RunAsync(CommandSpec command, CancellationToken cancellationToken)
+        public Task<CommandRunResult> RunCommandAsync(CommandSpec command, CancellationToken cancellationToken)
         {
             Calls.Add(command);
             if (ThrowOnRun is not null)

@@ -10,7 +10,7 @@ namespace AutoShutdown.App.Infrastructure.Commands;
 /// 用 ProcessStartInfo.ArgumentList（逐字面量，无 shell 拼接），工作目录与环境变量显式最小化。
 /// 捕获退出码、每命令独立超时、取消与限量输出；超时/取消时终止整棵进程树
 /// （Process.Kill(entireProcessTree: true)）并有界确认退出，清理未确认绝不报成功。
-/// 不引入任何 P/Invoke、cmd/PowerShell/shell 字符串拼接。
+/// 不引入任何 P/Invoke 或 shell 字符串拼接。
 /// </summary>
 public sealed class CommandRunner : ICommandRunner
 {
@@ -23,7 +23,7 @@ public sealed class CommandRunner : ICommandRunner
         "PATH", "PATHEXT", "COMSPEC", "OS", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"
     ];
 
-    public async Task<CommandRunResult> RunAsync(
+    public async Task<CommandRunResult> RunCommandAsync(
         CommandSpec command,
         CancellationToken cancellationToken)
     {

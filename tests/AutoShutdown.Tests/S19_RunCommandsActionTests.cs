@@ -140,7 +140,7 @@ public sealed class S19_RunCommandsActionTests
 
         public FakeCommandRunner(bool nonZero) => _nonZero = nonZero;
 
-        public Task<CommandRunResult> RunAsync(CommandSpec command, CancellationToken cancellationToken)
+        public Task<CommandRunResult> RunCommandAsync(CommandSpec command, CancellationToken cancellationToken)
             => Task.FromResult(_nonZero
                 ? new CommandRunResult { Status = CommandRunStatus.NonZeroExit, ExitCode = 1 }
                 : new CommandRunResult { Status = CommandRunStatus.Success, ExitCode = 0 });

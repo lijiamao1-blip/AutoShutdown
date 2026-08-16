@@ -38,7 +38,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
     [Fact(Timeout = 15000)]
     public async Task ExitCodeZero_IsSuccess()
     {
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec
             {
                 ExecutablePath = RegExe,
@@ -55,7 +55,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
     [Fact(Timeout = 15000)]
     public async Task NonZeroExit_IsReportedWithCode()
     {
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec
             {
                 ExecutablePath = RegExe,
@@ -74,7 +74,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
     {
         var missing = Path.Combine(_tempDir, "does-not-exist.exe");
 
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec { ExecutablePath = missing, Timeout = TimeSpan.FromSeconds(5) },
             CancellationToken.None);
 
@@ -86,7 +86,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
     public async Task Timeout_TerminatesProcessTree_AndConfirmsExit()
     {
         // 无害挂起命令（loopback ping 约 59 秒），1 秒期限触发超时，进程树被终止且确认退出。
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec
             {
                 ExecutablePath = PingExe,
@@ -105,7 +105,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new CommandRunner().RunAsync(
+            new CommandRunner().RunCommandAsync(
                 new CommandSpec
                 {
                     ExecutablePath = PingExe,
@@ -121,7 +121,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
         var bigFile = Path.Combine(_tempDir, "big.txt");
         File.WriteAllLines(bigFile, Enumerable.Range(0, 2000).Select(i => $"aaaaa{i}"));
 
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec
             {
                 ExecutablePath = FindStrExe,
@@ -140,7 +140,7 @@ public sealed class S19_CommandRunnerTests : IDisposable
     {
         var file = Path.Combine(_tempDir, "env.reg");
 
-        var result = await new CommandRunner().RunAsync(
+        var result = await new CommandRunner().RunCommandAsync(
             new CommandSpec
             {
                 ExecutablePath = RegExe,

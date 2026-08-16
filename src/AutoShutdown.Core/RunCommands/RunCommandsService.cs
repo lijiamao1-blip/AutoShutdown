@@ -115,7 +115,7 @@ public sealed class RunCommandsService
                 Timeout = TimeSpan.FromSeconds(timeoutSeconds)
             };
 
-            var run = await _commandRunner.RunAsync(spec, cancellationToken).ConfigureAwait(false);
+            var run = await _commandRunner.RunCommandAsync(spec, cancellationToken).ConfigureAwait(false);
             executedCount++;
 
             var succeeded = run.Status == CommandRunStatus.Success;
