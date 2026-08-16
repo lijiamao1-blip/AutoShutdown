@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.Tests", "tests
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.OfficeSaveHelper", "src\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj", "{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoShutdown.TestTreeHelper", "tests\AutoShutdown.TestTreeHelper\AutoShutdown.TestTreeHelper.csproj", "{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,5 +34,9 @@ Global
 		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7E4A2B10-8C1D-4E5F-9A3B-2C6D8E0F1A4B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

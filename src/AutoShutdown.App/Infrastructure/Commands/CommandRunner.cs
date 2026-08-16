@@ -23,6 +23,19 @@ public sealed class CommandRunner : ICommandRunner
         "PATH", "PATHEXT", "COMSPEC", "OS", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"
     ];
 
+    private readonly IProcessTreeGateway _processTreeGateway;
+
+    public CommandRunner()
+        : this(new DiagnosticProcessTreeGateway())
+    {
+    }
+
+    public CommandRunner(IProcessTreeGateway processTreeGateway)
+    {
+        ArgumentNullException.ThrowIfNull(processTreeGateway);
+        _processTreeGateway = processTreeGateway;
+    }
+
     public async Task<CommandRunResult> RunCommandAsync(
         CommandSpec command,
         CancellationToken cancellationToken)
@@ -102,8 +115,9 @@ public sealed class CommandRunner : ICommandRunner
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // 超时（非外部取消）：终止整棵进程树并有界确认退出。
-            var confirmed = KillTreeAndConfirmExit(process);
+            // 超时（非外部取消）：终止整棵进程树并有界确认根进程与全部已识别后代退出。
+            // 仅当根 + 全部已识别后代均确认退出才返回 TimedOut；任何未确认 → CleanupNotConfirmed。
+            var (confirmed, _) = KillTreeAndConfirmExit(process);
             return new CommandRunResult
             {
                 Status = confirmed ? CommandRunStatus.TimedOut : CommandRunStatus.CleanupNotConfirmed,
@@ -118,9 +132,19 @@ public sealed class CommandRunner : ICommandRunner
         }
         catch (OperationCanceledException)
         {
-            // 外部取消：终止进程树（尽力而为），取消以 OCE 传播，绝不伪装成功。
-            KillTreeAndConfirmExit(process);
-            throw;
+            // 外部取消：清理失败不得被静默丢弃，也不得把取消替换为普通异常。
+            // 清理已确认 → 原始 OCE 原样传播；清理未确认/清理抛异常 → 可识别 OCE 子类传播
+            // （仍满足 OperationCanceledException，携带「进程树清理未确认」语义，绝不携带参数/secret/token/输出）。
+            var (confirmed, failure) = KillTreeAndConfirmExit(process);
+            if (confirmed)
+            {
+                throw;
+            }
+
+            throw new CommandCleanupFailedException(
+                "Cancellation occurred; the command process tree exit could not be confirmed.",
+                failure ?? new InvalidOperationException("Process tree cleanup did not confirm exit."),
+                cancellationToken);
         }
     }
 
@@ -138,44 +162,89 @@ public sealed class CommandRunner : ICommandRunner
         Message = "The process failed to start."
     };
 
-    private static bool KillTreeAndConfirmExit(Process process)
+    /// <summary>
+    /// 受控进程树快照 → 整树终止 → 有界确认全部已识别身份退出（S19-D1 方案A）。
+    /// 返回 (Confirmed, Failure)：Confirmed 仅当「根 + 全部已识别后代」都确认退出时为 true；
+    /// 枚举失败、终止失败、任一身份存活/未知均 fail-closed（Confirmed=false，附带失败信息）。
+    /// 绝不通过根进程的 WaitForExit/HasExited 单独判定整树成功。
+    /// </summary>
+    private (bool Confirmed, Exception? Failure) KillTreeAndConfirmExit(Process process)
     {
+        IReadOnlyList<ProcessIdentity> identities;
+        try
+        {
+            identities = _processTreeGateway.SnapshotTree(process.Id);
+        }
+        catch (Exception exception)
+        {
+            // 根/后代枚举失败：无法确认整树，fail-closed。
+            return (false, exception);
+        }
+
         try
         {
             process.Kill(entireProcessTree: true);
         }
         catch (InvalidOperationException)
         {
-            // 无关联进程：已退出。
+            // 根进程已无关联（已退出）：继续确认后代（可能仍存活）。
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (Exception exception)
         {
-            // 访问拒绝等：落到退出确认。
+            // 终止失败（Win32Exception/AggregateException/NotSupportedException 等）：fail-closed。
+            return (false, exception);
         }
 
-        try
+        return ConfirmAllExited(identities);
+    }
+
+    private (bool Confirmed, Exception? Failure) ConfirmAllExited(IReadOnlyList<ProcessIdentity> identities)
+    {
+        if (identities.Count == 0)
         {
-            if (process.WaitForExit(KillConfirmTimeoutMs))
+            // 未识别到任何进程（含根）：异常状态，fail-closed。
+            return (false, new InvalidOperationException("No process tree members were identified."));
+        }
+
+        var deadline = Environment.TickCount64 + KillConfirmTimeoutMs;
+        Exception? failure = null;
+
+        while (true)
+        {
+            var allExited = true;
+            foreach (var identity in identities)
             {
-                return true;
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            return true; // 无关联进程 = 已退出。
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            // 落到 HasExited 复核。
-        }
+                ProcessLiveness liveness;
+                try
+                {
+                    liveness = _processTreeGateway.CheckLiveness(identity);
+                }
+                catch (Exception exception)
+                {
+                    // 存活查询异常（访问拒绝等）：记作 Unknown，fail-closed。
+                    liveness = ProcessLiveness.Unknown;
+                    failure ??= exception;
+                }
 
-        try
-        {
-            return process.HasExited;
-        }
-        catch
-        {
-            return false;
+                if (liveness != ProcessLiveness.Exited)
+                {
+                    allExited = false;
+                    break;
+                }
+            }
+
+            if (allExited)
+            {
+                return (true, null);
+            }
+
+            if (Environment.TickCount64 >= deadline)
+            {
+                return (false, failure
+                    ?? new InvalidOperationException("Process tree exit was not confirmed within the deadline."));
+            }
+
+            Thread.Sleep(50);
         }
     }
 

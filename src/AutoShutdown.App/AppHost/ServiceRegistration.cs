@@ -109,6 +109,9 @@ public static class ServiceRegistration
         // ProcessStartInfo.ArgumentList + Process.Kill(entireProcessTree)），无 P/Invoke、
         // 无 cmd/powershell/shell 字符串拼接；本地白名单默认空（默认拒绝）。
         // RunCommandsAction 默认 Block（fail-closed），逐命令 block/continue。
+        // S19-D1：进程树受控快照网关（WMI 父子关系 + PID/启动时间身份）先于 Runner 注册，
+        // CommandRunner 经 IProcessTreeGateway 完成整树枚举/存活确认（可测试、可审计）。
+        services.AddSingleton<IProcessTreeGateway, DiagnosticProcessTreeGateway>();
         services.AddSingleton<ICommandRunner, CommandRunner>();
         services.AddSingleton<RunCommandsService>(provider =>
             new RunCommandsService(

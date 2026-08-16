@@ -18,6 +18,8 @@
     <ProjectReference Include="..\..\src\AutoShutdown.Core\AutoShutdown.Core.csproj" />
     <ProjectReference Include="..\..\src\AutoShutdown.App\AutoShutdown.App.csproj" />
     <ProjectReference Include="..\..\src\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj" />
+    <!-- S19-D1 真实父子进程树测试目标 EXE：仅测试项目引用，构建时复制到测试输出目录。 -->
+    <ProjectReference Include="..\AutoShutdown.TestTreeHelper\AutoShutdown.TestTreeHelper.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />

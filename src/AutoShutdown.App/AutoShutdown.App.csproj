@@ -12,6 +12,8 @@
     <!-- 引用辅助进程项目：构建时将其 EXE 复制到 App 输出目录，供唯一启动网关按安装目录固定解析 -->
     <ProjectReference Include="..\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <!-- 进程树枚举：托管 WMI（Win32_Process ParentProcessId）读取父子关系，无 P/Invoke。 -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
     <!-- 允许测试项目访问内部清理逻辑（CleanupAfterCancellation / HelperCleanupFailedException）做聚焦回归测试。 -->
