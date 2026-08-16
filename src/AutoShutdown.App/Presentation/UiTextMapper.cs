@@ -29,6 +29,13 @@ public static class UiTextMapper
         _ => "状态未知"
     };
 
+    /// <summary>S15：实例状态文本，输入恢复取消的实例单列显示「已取消（输入恢复）」。 </summary>
+    public static string Map(TaskInstance instance) => instance.State switch
+    {
+        TaskInstanceState.Cancelled when instance.IsIdleRecovered => "已取消（输入恢复）",
+        _ => Map(instance.State)
+    };
+
     public static string MapEngine(SchedulerEngineStatus status) => status switch
     {
         SchedulerEngineStatus.Created => "启动中",

@@ -45,6 +45,12 @@ public sealed record TaskInstance
     /// </summary>
     public bool IsIdleTriggered { get; init; }
 
+    /// <summary>
+    /// 该实例是否因输入恢复（空闲时长回落到阈值以下）而被取消（S15）。仅由空闲触发
+    /// 且被恢复取消的实例置真；用户手动取消或其它原因取消保持 false。向后兼容默认 false。
+    /// </summary>
+    public bool IsIdleRecovered { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>真实电源执行是否已获用户明确确认（双闸门之二）。默认 false，向后兼容。</summary>

@@ -113,6 +113,7 @@
                                             <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                             <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                             <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                            <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                         </UniformGrid>
                                         <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
                                             <Grid>
@@ -123,7 +124,7 @@
                                                         <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}"/></StackPanel>
                                                     </UniformGrid>
                                                 </StackPanel>
-                                                <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource InverseBoolToVisibility}}">
+                                                <StackPanel Visibility="{Binding IsTimeInputVisible, Converter={StaticResource BoolToVisibility}}">
                                                     <DatePicker SelectedDate="{Binding OneTimeDate}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}"/>
                                                     <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
                                                     <UniformGrid Columns="3">
@@ -145,6 +146,11 @@
                                                         <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
                                                         <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
                                                     </StackPanel>
+                                                </StackPanel>
+                                                <StackPanel Visibility="{Binding IsIdleSelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="空闲阈值" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding IdleThresholdOptions}" SelectedIndex="{Binding IdleThresholdIndex}" HorizontalAlignment="Stretch"/>
+                                                    <TextBlock Text="鼠标/键盘持续无操作达到阈值即触发倒计时；倒计时期间输入恢复会自动取消。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                                 </StackPanel>
                                             </Grid>
                                         </Border>
@@ -182,10 +188,11 @@
                                         </StackPanel>
                                         <Grid Grid.Row="2" Margin="0,0,0,10">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
                                             <TextBlock Text="下次执行时间：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
                                             <TextBlock Grid.Row="1" Text="任务类型：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
                                             <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                            <TextBlock Grid.Row="3" Text="触发方式：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CountdownSourceText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
                                         </Grid>
                                         <StackPanel Grid.Row="3">
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -284,6 +291,7 @@
                                                                 <Run Text="执行时间 "/><Run Text="{Binding FireTimeText, Mode=OneWay}"/>
                                                                 <Run Text="    提醒 "/><Run Text="{Binding WarningText, Mode=OneWay}"/>
                                                                 <Run Text="    倒计时 "/><Run Text="{Binding CountdownText, Mode=OneWay}"/>
+                                                                <Run Text="    触发 "/><Run Text="{Binding TriggerText, Mode=OneWay}"/>
                                                             </TextBlock>
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

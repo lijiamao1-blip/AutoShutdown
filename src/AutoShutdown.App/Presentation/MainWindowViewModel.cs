@@ -29,7 +29,10 @@ public enum TimeMode
     NthWorkdayOfMonth = 5,
 
     /// <summary>一次性指定日期时间（过期即终结，不追溯）。</summary>
-    OneTime = 6
+    OneTime = 6,
+
+    /// <summary>空闲触发：输入持续空闲达阈值即触发倒计时（S15）。</summary>
+    Idle = 7
 }
 
 public sealed record NavItem(string Title, string Icon, string PageKey, bool IsPlaceholder);
@@ -46,6 +49,7 @@ public sealed record TaskListItem(
     string FireTimeText,
     string CountdownText,
     string WarningText,
+    string TriggerText,
     TaskInstanceState State,
     bool CanStop,
     bool CanSnooze,
@@ -249,9 +253,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ModeIsNextWorkday));
                 OnPropertyChanged(nameof(ModeIsNthWorkdayOfMonth));
                 OnPropertyChanged(nameof(ModeIsOneTime));
+                OnPropertyChanged(nameof(ModeIsIdle));
                 OnPropertyChanged(nameof(IsWeekdaySelectorVisible));
                 OnPropertyChanged(nameof(IsNthWorkdaySelectorVisible));
                 OnPropertyChanged(nameof(IsOneTimeDateVisible));
+                OnPropertyChanged(nameof(IsIdleSelectorVisible));
+                OnPropertyChanged(nameof(IsTimeInputVisible));
                 OnPropertyChanged(nameof(IsHolidayInputVisible));
                 RefreshCreateState();
             }
@@ -342,11 +349,29 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool ModeIsIdle
+    {
+        get => SelectedMode == TimeMode.Idle;
+        set
+        {
+            if (value)
+            {
+                SelectedMode = TimeMode.Idle;
+            }
+        }
+    }
+
     public bool IsWeekdaySelectorVisible => SelectedMode == TimeMode.Weekdays;
 
     public bool IsNthWorkdaySelectorVisible => SelectedMode == TimeMode.NthWorkdayOfMonth;
 
     public bool IsOneTimeDateVisible => SelectedMode == TimeMode.OneTime;
+
+    /// <summary>空闲阈值输入仅对空闲触发规则显示（S15）。</summary>
+    public bool IsIdleSelectorVisible => SelectedMode == TimeMode.Idle;
+
+    /// <summary>目标时间输入对除倒计时与空闲触发外的规则显示（空闲不设目标时刻）。</summary>
+    public bool IsTimeInputVisible => SelectedMode is not TimeMode.Countdown and not TimeMode.Idle;
 
     /// <summary>节假日例外输入仅对支持节假日的规则显示（DailyAt/Weekdays/NextWorkday/NthWorkdayOfMonth）。</summary>
     public bool IsHolidayInputVisible
@@ -363,6 +388,58 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public IReadOnlyList<string> SecondOptions { get; } =
         Enumerable.Range(0, 60).Select(value => $"{value:00} 秒").ToArray();
+
+    // ---- S15 空闲阈值输入 ----
+
+    /// <summary>空闲触发阈值选项：索引 0 = 继承全局默认；后续为显式阈值（秒）。</summary>
+    public IReadOnlyList<string> IdleThresholdOptions { get; } =
+    [
+        "继承全局默认（30 分钟）",
+        "空闲 1 分钟",
+        "空闲 5 分钟",
+        "空闲 10 分钟",
+        "空闲 15 分钟",
+        "空闲 30 分钟",
+        "空闲 1 小时",
+        "空闲 2 小时",
+        "空闲 3 小时",
+        "空闲 6 小时",
+        "空闲 12 小时",
+        "空闲 24 小时",
+        "空闲 7 天"
+    ];
+
+    private int _idleThresholdIndex;
+
+    public int IdleThresholdIndex
+    {
+        get => _idleThresholdIndex;
+        set
+        {
+            if (SetProperty(ref _idleThresholdIndex, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    /// <summary>空闲阈值选项索引 → 秒；索引 0（继承全局默认）返回 null。</summary>
+    private static int? IdleThresholdSecondsForIndex(int index) => index switch
+    {
+        1 => 60,
+        2 => 300,
+        3 => 600,
+        4 => 900,
+        5 => 1800,
+        6 => 3600,
+        7 => 7200,
+        8 => 10800,
+        9 => 21600,
+        10 => 43200,
+        11 => 86400,
+        12 => 604800,
+        _ => null
+    };
 
     private string _countdownHoursText = "00 小时";
 
@@ -658,6 +735,15 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _countdownText;
         private set => SetProperty(ref _countdownText, value);
+    }
+
+    private string _countdownSourceText = "—";
+
+    /// <summary>倒计时来源：空闲触发 vs 定时排程（S15）。</summary>
+    public string CountdownSourceText
+    {
+        get => _countdownSourceText;
+        private set => SetProperty(ref _countdownSourceText, value);
     }
 
     private string _nextFireTimeText = "--";
@@ -1245,6 +1331,7 @@ public sealed class MainWindowViewModel : ObservableObject
             HasCurrentTask = false;
             CurrentStateText = "当前没有活动任务";
             CountdownText = "—";
+            CountdownSourceText = "—";
             NextFireTimeText = "--";
             TaskActionText = "--";
             WarningTimeText = "--";
@@ -1261,7 +1348,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _currentInstance = instance;
         HasCurrentTask = true;
-        CurrentStateText = UiTextMapper.Map(instance.State);
+        CurrentStateText = UiTextMapper.Map(instance);
+        CountdownSourceText = instance.IsIdleTriggered ? "空闲触发" : "定时排程";
         TaskActionText = UiTextMapper.Map(instance.ActionSnapshot);
         var localFire = TimeZoneInfo.ConvertTime(instance.ScheduledFireTime, _clock.LocalTimeZone);
         var localWarning = instance.WarningStartTime is null
@@ -1345,6 +1433,13 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         duration = null;
         target = null;
+
+        if (SelectedMode == TimeMode.Idle)
+        {
+            // 空闲触发无目标时刻/时长，阈值由 IdleThresholdIndex 独立承载。
+            error = string.Empty;
+            return true;
+        }
 
         if (SelectedMode == TimeMode.Countdown)
         {
@@ -1447,6 +1542,7 @@ public sealed class MainWindowViewModel : ObservableObject
             TimeMode.Weekdays => TaskKind.Weekdays,
             TimeMode.NextWorkday => TaskKind.NextWorkday,
             TimeMode.NthWorkdayOfMonth => TaskKind.NthWorkdayOfMonth,
+            TimeMode.Idle => TaskKind.Idle,
             _ => TaskKind.OneTime
         };
 
@@ -1483,6 +1579,7 @@ public sealed class MainWindowViewModel : ObservableObject
             NthWorkday = kind == TaskKind.NthWorkdayOfMonth ? NthWorkdayIndex + 1 : null,
             OneTimeDateTime = kind == TaskKind.OneTime ? BuildOneTimeDateTime(target!.Value) : null,
             HolidayDates = kind == TaskKind.Countdown ? null : holidays,
+            IdleThresholdSeconds = kind == TaskKind.Idle ? IdleThresholdSecondsForIndex(IdleThresholdIndex) : null,
             WarningSeconds = GetWarningSeconds(),
             CreatedAt = _clock.UtcNow,
             RealPowerConfirmed = realPowerConfirmed
@@ -1772,10 +1869,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 instance.InstanceId,
                 instance.StageToken,
                 UiTextMapper.Map(instance.ActionSnapshot),
-                UiTextMapper.Map(instance.State),
+                UiTextMapper.Map(instance),
                 localFire.ToString("yyyy-MM-dd HH:mm:ss"),
                 remaining > TimeSpan.Zero ? remaining.ToString(@"hh\:mm\:ss") : "已到期",
                 localWarning?.ToString("HH:mm:ss") ?? "无",
+                instance.IsIdleTriggered ? "空闲" : "定时",
                 instance.State,
                 instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming,
                 instance.State == TaskInstanceState.Waiting,

@@ -196,6 +196,39 @@ public sealed class S15_SchedulerIdleIntegrationTests
     }
 
     [Fact(Timeout = 2000)]
+    public async Task TwoIdleTasks_DifferentThresholds_OnlyReachedArms()
+    {
+        var storage = new InMemoryStorage();
+        var clock = new FakeClock(ClockBase);
+        var deadline = new ControllableDeadline();
+        var idle = new StubIdleMonitor { IdleDuration = TimeSpan.FromMinutes(5) };
+        var handler = new FakeHandler();
+        var engine = CreateIdleEngine(storage, clock, deadline, idle, handler);
+
+        using var scope = new EngineScope(engine);
+        await engine.SubmitAsync(
+            new CreateTaskCommand(IdleDefinition(IdleId1, idleThresholdSeconds: 300, warningSeconds: 60)),
+            CancellationToken.None);
+        await engine.SubmitAsync(
+            new CreateTaskCommand(IdleDefinition(IdleId2, idleThresholdSeconds: 600, warningSeconds: 60)),
+            CancellationToken.None);
+
+        // 空闲 5 分钟：仅 300s 阈值任务达成；600s 阈值任务保持 Waiting（两阈值任务）。
+        await WaitUntilAsync(() => engine.GetSnapshot().Instances.Values
+            .Any(instance => instance.SourceTaskId == IdleId1 && instance.State == TaskInstanceState.Confirming));
+
+        var snapshot = engine.GetSnapshot();
+        var reached = snapshot.Instances.Values.Single(instance => instance.SourceTaskId == IdleId1);
+        var notReached = snapshot.Instances.Values.Single(instance => instance.SourceTaskId == IdleId2);
+
+        Assert.Equal(TaskInstanceState.Confirming, reached.State);
+        Assert.True(reached.IsIdleTriggered);
+        Assert.Equal(TaskInstanceState.Waiting, notReached.State);
+        Assert.False(notReached.IsIdleTriggered);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact(Timeout = 2000)]
     public async Task NonIdleTask_UnaffectedByIdleMonitor()
     {
         var storage = new InMemoryStorage();

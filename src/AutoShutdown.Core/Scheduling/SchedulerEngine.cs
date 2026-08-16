@@ -491,7 +491,9 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return false;
         }
 
-        return await PersistAndCommitInstanceAsync(cancelled.Instance, now, cancellationToken)
+        // 标记为「输入恢复取消」，与用户手动取消区分，供 UI 呈现恢复取消结果。
+        var recovered = cancelled.Instance with { IsIdleRecovered = true };
+        return await PersistAndCommitInstanceAsync(recovered, now, cancellationToken)
             .ConfigureAwait(false);
     }
 
