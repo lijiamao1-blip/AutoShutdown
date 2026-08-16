@@ -23,10 +23,12 @@ public interface IAppWindowManager
     ProcessExitStatus GetExitStatus(int processId);
 
     /// <summary>
-    /// 可取消的有界等待进程退出；true = 已退出，false = 超时仍在运行。
+    /// 可取消的有界等待进程退出，返回三态结果：<see cref="ProcessWaitResult.Exited"/> = 已退出；
+    /// <see cref="ProcessWaitResult.TimedOut"/> = 确定仍在运行且达到等待期限；
+    /// <see cref="ProcessWaitResult.Unknown"/> = 等待异常且退出状态无法确认（fail-closed，绝不当作超时）。
     /// 取消时抛出 <see cref="OperationCanceledException"/>，绝不吞掉取消后继续强杀。
     /// </summary>
-    bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken);
+    ProcessWaitResult WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken);
 
     /// <summary>
     /// 强杀目标进程。实现必须先用 <paramref name="expectedStartTimeUtc"/> 复核当前

@@ -62,8 +62,39 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
         Assert.Empty(requests);
     }
 
+    [Fact]
+    public async Task WaitExitUnknown_BlocksPipeline_AndPowerZero()
+    {
+        // D2-2：等待异常且复核退出状态为 Unknown → ExitStatusUnknown → Block → power=0。
+        var (result, requests) = await RunCloseAppsAsync(
+            Process(100, sessionId: 1),
+            new FakeWindowManager
+            {
+                WaitForExitOverride = (_, _, _) => ProcessWaitResult.Unknown
+            });
+
+        Assert.Equal(ShutdownDecisionCode.PrePipelineBlocked, result.DecisionCode);
+        Assert.Empty(requests);
+    }
+
+    [Fact]
+    public async Task CancellationDuringWait_PropagatesOce_AndPowerZero()
+    {
+        // D2-4：等待期间取消 → OCE 原样传播（不折叠为 Unknown/TimedOut），电源调用 0。
+        var power = new RecordingPowerService();
+        var window = new FakeWindowManager
+        {
+            WaitForExitOverride = (_, _, _) => throw new OperationCanceledException()
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => RunCloseAppsAsync(Process(100, sessionId: 1), window, power));
+
+        Assert.Empty(power.Requests);
+    }
+
     private static async Task<(ShutdownWorkflowResult Result, IReadOnlyList<PowerRequest> Requests)>
-        RunCloseAppsAsync(ProcessSnapshot process, FakeWindowManager window)
+        RunCloseAppsAsync(ProcessSnapshot process, FakeWindowManager window, RecordingPowerService? power = null)
     {
         var closeAppsService = new CloseAppsService(
             new FakeConfigurationService(ConfigWithCloseApps()),
@@ -71,7 +102,7 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
             window);
         var action = new CloseAppsAction(closeAppsService);
         var runner = new PrePipelineRunner([action]);
-        var power = new RecordingPowerService();
+        power ??= new RecordingPowerService();
         var workflow = new ShutdownWorkflow(
             new FixedConfigurationService(ValidConfig()),
             power,
@@ -144,6 +175,7 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
         public bool MainWindowPresent { get; init; } = true;
         public ProcessExitStatus ExitStatus { get; init; } = ProcessExitStatus.Running;
         public ForceKillStatus ForceKillStatus { get; init; } = ForceKillStatus.Killed;
+        public Func<int, TimeSpan, CancellationToken, ProcessWaitResult>? WaitForExitOverride { get; init; }
 
         public bool HasMainWindow(int processId) => MainWindowPresent;
 
@@ -151,7 +183,10 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
 
         public ProcessExitStatus GetExitStatus(int processId) => ExitStatus;
 
-        public bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken) => false;
+        public ProcessWaitResult WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken)
+            => WaitForExitOverride is null
+                ? ProcessWaitResult.TimedOut
+                : WaitForExitOverride(processId, timeout, cancellationToken);
 
         public ForceKillResult ForceKill(int processId, DateTimeOffset expectedStartTimeUtc)
             => new() { Status = ForceKillStatus };

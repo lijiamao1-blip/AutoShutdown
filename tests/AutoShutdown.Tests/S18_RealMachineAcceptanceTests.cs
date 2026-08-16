@@ -52,7 +52,7 @@ public sealed class S18_RealMachineAcceptanceTests
                 }
 
                 windowManager.RequestClose(notepad.Id);
-                closed = windowManager.WaitForExit(notepad.Id, TimeSpan.FromSeconds(2), CancellationToken.None);
+                closed = windowManager.WaitForExit(notepad.Id, TimeSpan.FromSeconds(2), CancellationToken.None) == ProcessWaitResult.Exited;
             }
 
             Assert.True(closed, "The dedicated Notepad instance did not close gracefully.");

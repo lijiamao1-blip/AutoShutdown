@@ -77,14 +77,14 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
         }
     }
 
-    public bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken)
+    public ProcessWaitResult WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         using var process = Open(processId);
         if (process is null)
         {
-            return true; // 进程不存在：已退出。
+            return ProcessWaitResult.Exited; // 进程不存在：已退出。
         }
 
         var deadline = DateTimeOffset.UtcNow + timeout;
@@ -97,20 +97,25 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
             {
                 exited = process.WaitForExit(WaitPollIntervalMs);
             }
-            catch
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // 查询失败：回退三态语义，绝不把异常吞成「超时」。
-                return GetExitStatus(processId) == ProcessExitStatus.Exited;
+                // 等待异常：复核退出状态，完整传播三态，绝不把「无法确认」折叠成普通超时（D2）。
+                return GetExitStatus(processId) switch
+                {
+                    ProcessExitStatus.Exited => ProcessWaitResult.Exited,
+                    ProcessExitStatus.Unknown => ProcessWaitResult.Unknown,
+                    _ => ProcessWaitResult.TimedOut
+                };
             }
 
             if (exited)
             {
-                return true;
+                return ProcessWaitResult.Exited;
             }
 
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                return false; // 有界超时。
+                return ProcessWaitResult.TimedOut; // 确定仍在运行且达到期限。
             }
         }
     }

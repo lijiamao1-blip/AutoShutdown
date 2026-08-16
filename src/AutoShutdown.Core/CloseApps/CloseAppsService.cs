@@ -205,15 +205,22 @@ public sealed class CloseAppsService
                 : CloseAppStatus.AccessDenied;
         }
 
-        if (_windowManager.WaitForExit(current.ProcessId, target.GracefulTimeout, cancellationToken))
+        var wait = _windowManager.WaitForExit(current.ProcessId, target.GracefulTimeout, cancellationToken);
+        switch (wait)
         {
-            return CloseAppStatus.ClosedGracefully;
-        }
+            case ProcessWaitResult.Exited:
+                return CloseAppStatus.ClosedGracefully;
 
-        // 等待超时；强杀前由 ForceKill 再次复核取消（D1-1），绝不取消后强杀。
-        return target.ForceKillAllowed
-            ? ForceKill(target, current, cancellationToken)
-            : CloseAppStatus.TimedOut;
+            case ProcessWaitResult.Unknown:
+                // 等待异常且退出状态无法确认：fail-closed，绝不当作超时、绝不强杀（D2）。
+                return CloseAppStatus.ExitStatusUnknown;
+
+            default:
+                // TimedOut：确定仍在运行且达到等待期限；强杀前由 ForceKill 再次复核取消（D1-1）。
+                return target.ForceKillAllowed
+                    ? ForceKill(target, current, cancellationToken)
+                    : CloseAppStatus.TimedOut;
+        }
     }
 
     private CloseAppStatus ForceKill(CloseAppTarget target, ProcessSnapshot current, CancellationToken cancellationToken)

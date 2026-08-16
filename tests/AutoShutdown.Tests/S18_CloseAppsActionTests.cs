@@ -169,7 +169,7 @@ public sealed class S18_CloseAppsActionTests
         public bool RequestClose(int processId) => true;
         public ProcessExitStatus GetExitStatus(int processId) => ProcessExitStatus.Running;
 
-        public bool WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken) => false; // 总是超时（未授权强杀）。
+        public ProcessWaitResult WaitForExit(int processId, TimeSpan timeout, CancellationToken cancellationToken) => ProcessWaitResult.TimedOut; // 总是超时（未授权强杀）。
 
         public ForceKillResult ForceKill(int processId, DateTimeOffset expectedStartTimeUtc)
             => throw new InvalidOperationException("ForceKill must not be reached without authorization.");
