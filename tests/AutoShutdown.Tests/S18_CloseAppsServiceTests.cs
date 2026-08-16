@@ -679,6 +679,33 @@ public sealed class S18_CloseAppsServiceTests
         Assert.Empty(window.ForceKillCalls);
     }
 
+    // ---- S18-D3 返修回归：等待异常 ≠ 期限届满，服务把完整期限交给网关 ----
+
+    [Fact]
+    public async Task Recovery_ServicePassesFullConfiguredTimeout_ToGateway()
+    {
+        // D3-1 服务侧：服务必须把完整配置的优雅等待期限传给网关，网关才有机会等到期限
+        // （而非约 100ms 单次轮询后提前判定超时、提前强杀）。配置 5s → 传给 WaitForExit 的必须是 5s。
+        TimeSpan? passed = null;
+        var processes = new FakeProcessManager { Processes = [Process(100)] };
+        var window = new FakeAppWindowManager
+        {
+            WaitForExitFunc = (_, timeout, _) =>
+            {
+                passed = timeout;
+                return ProcessWaitResult.Exited;
+            }
+        };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath))),
+            processes, window);
+
+        await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.Equal(TimeSpan.FromSeconds(5), passed);
+        Assert.Empty(window.ForceKillCalls);
+    }
+
     private static AppConfig PathConfig(string path, bool forceKill = false) =>
         BaseConfig(new CloseAppsConfig
         {

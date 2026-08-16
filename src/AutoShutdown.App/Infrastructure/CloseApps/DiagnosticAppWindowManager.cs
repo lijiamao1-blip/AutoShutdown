@@ -99,13 +99,17 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // 等待异常：复核退出状态，完整传播三态，绝不把「无法确认」折叠成普通超时（D2）。
-                return GetExitStatus(processId) switch
-                {
-                    ProcessExitStatus.Exited => ProcessWaitResult.Exited,
-                    ProcessExitStatus.Unknown => ProcessWaitResult.Unknown,
-                    _ => ProcessWaitResult.TimedOut
-                };
+                // 等待查询异常 ≠ 等待期限届满（D3）：一旦主等待机制异常，不再重试同一异常
+                // 机制（避免无界高速重试），转入可取消、有界的状态轮询恢复。复核 Exited→Exited、
+                // Unknown→Unknown（fail-closed）、Running 且已达期限→TimedOut、Running 且期限
+                // 未到→继续有界轮询；绝不把「Running 且期限未到」提前映射为 TimedOut（避免提前强杀）。
+                return RecoverAfterWaitException(
+                    pid => GetExitStatus(pid),
+                    processId,
+                    deadline,
+                    () => DateTimeOffset.UtcNow,
+                    duration => Thread.Sleep(duration),
+                    cancellationToken);
             }
 
             if (exited)
@@ -116,6 +120,63 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
             if (DateTimeOffset.UtcNow >= deadline)
             {
                 return ProcessWaitResult.TimedOut; // 确定仍在运行且达到期限。
+            }
+        }
+    }
+
+    /// <summary>
+    /// 等待查询异常后的恢复判断（D3）。根据复核的退出状态与「是否已达等待期限」决定下一步：
+    /// <list type="bullet">
+    /// <item>Exited → <see cref="WaitRecoveryDecision.Exited"/>（不再等待、绝不强杀）；</item>
+    /// <item>Unknown → <see cref="WaitRecoveryDecision.Unknown"/>（无法确认，fail-closed）；</item>
+    /// <item>Running 且已达期限 → <see cref="WaitRecoveryDecision.TimedOut"/>（唯一允许判定超时的情形）；</item>
+    /// <item>Running 且期限未到 → <see cref="WaitRecoveryDecision.ContinuePolling"/>（继续有界轮询，绝不提前超时）。</item>
+    /// </list>
+    /// 等待机制异常只是「等待能力受损」，不是「优雅等待期限届满」。
+    /// </summary>
+    internal static WaitRecoveryDecision DecideRecoveryAfterWaitException(ProcessExitStatus recheck, bool deadlineReached)
+        => recheck switch
+        {
+            ProcessExitStatus.Exited => WaitRecoveryDecision.Exited,
+            ProcessExitStatus.Unknown => WaitRecoveryDecision.Unknown,
+            _ => deadlineReached ? WaitRecoveryDecision.TimedOut : WaitRecoveryDecision.ContinuePolling
+        };
+
+    /// <summary>
+    /// 等待查询异常后的恢复轮询（D3）。不再调用已异常的 <see cref="Process.WaitForExit(int)"/>，
+    /// 改为可取消、有界的状态轮询：每轮复核退出状态与期限，期间以有界延迟节流（不忙循环），
+    /// 直到退出、无法确认、收到取消或到达期限。整体等待不超过期限加合理的单次轮询误差，
+    /// 不创建/丢弃后台任务，不无限阻塞。注入复核源/时钟/延迟使测试快速且确定。
+    /// </summary>
+    internal static ProcessWaitResult RecoverAfterWaitException(
+        Func<int, ProcessExitStatus> exitStatusReader,
+        int processId,
+        DateTimeOffset deadline,
+        Func<DateTimeOffset> clock,
+        Action<TimeSpan> delay,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            switch (DecideRecoveryAfterWaitException(
+                exitStatusReader(processId),
+                clock() >= deadline))
+            {
+                case WaitRecoveryDecision.Exited:
+                    return ProcessWaitResult.Exited;
+
+                case WaitRecoveryDecision.Unknown:
+                    return ProcessWaitResult.Unknown;
+
+                case WaitRecoveryDecision.TimedOut:
+                    return ProcessWaitResult.TimedOut;
+
+                default:
+                    // Running 且期限未到：有界延迟后继续轮询（不忙循环、不无限阻塞）。
+                    delay(TimeSpan.FromMilliseconds(WaitPollIntervalMs));
+                    break;
             }
         }
     }
@@ -223,4 +284,16 @@ public sealed class DiagnosticAppWindowManager : IAppWindowManager
             return default;
         }
     }
+}
+
+/// <summary>
+/// 等待查询异常后的恢复决策（D3）。区分「已退出 / 无法确认 / 已达期限 / 期限未到继续等待」，
+/// 保证只有明确到达等待期限且目标仍运行，才允许判定超时（TimedOut）。
+/// </summary>
+internal enum WaitRecoveryDecision
+{
+    Exited = 0,
+    Unknown = 1,
+    TimedOut = 2,
+    ContinuePolling = 3
 }
