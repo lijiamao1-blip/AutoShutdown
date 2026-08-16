@@ -1,7 +1,9 @@
 using AutoShutdown.App.AppHost;
+using AutoShutdown.App.Infrastructure.CloseApps;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.CloseApps;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
@@ -127,11 +129,12 @@ public sealed class S16_FakeActionSliceTests
     }
 
     [Fact]
-    public void CompositionRoot_ResolvesOfficeSavePipeline_WithGuardedPower()
+    public void CompositionRoot_ResolvesPrePipeline_WithOfficeSaveThenCloseApps_AndGuardedPower()
     {
-        // 安全冒烟（S17）：生产组合根解析出的是挂载 OfficeSaveAction 的流水线 +
-        // GuardedPowerService + 惰性 ComOfficeAutomation，无真实电源 API 暴露；
-        // 解析过程不启动任何 Office 进程（COM 仅在 ExecuteAsync 时才触碰）。
+        // 安全冒烟（S17/S18）：生产组合根解析出的是挂载 OfficeSave→CloseApps 的流水线 +
+        // GuardedPowerService + 惰性 ComOfficeAutomation + 托管 Process 网关
+        // （DiagnosticProcessManager/DiagnosticAppWindowManager），无真实电源 API 暴露；
+        // 解析过程不启动任何 Office 进程、不枚举/关闭任何真实进程（边界仅在 ExecuteAsync 才触碰）。
         var services = new ServiceCollection();
         services.AddAutoShutdownServices();
         using var provider = services.BuildServiceProvider();
@@ -141,6 +144,9 @@ public sealed class S16_FakeActionSliceTests
         Assert.NotSame(PrePipelineRunner.Empty, runner);
         Assert.IsType<ComOfficeAutomation>(provider.GetRequiredService<IOfficeAutomation>());
         Assert.IsType<OfficeSaveHelperLauncher>(provider.GetRequiredService<IOfficeSaveHelperLauncher>());
+        Assert.IsType<DiagnosticProcessManager>(provider.GetRequiredService<IProcessManager>());
+        Assert.IsType<DiagnosticAppWindowManager>(provider.GetRequiredService<IAppWindowManager>());
+        Assert.NotNull(provider.GetRequiredService<CloseAppsService>());
         Assert.IsType<GuardedPowerService>(provider.GetRequiredService<IPowerService>());
         Assert.IsType<ShutdownWorkflow>(provider.GetRequiredService<ShutdownWorkflow>());
     }

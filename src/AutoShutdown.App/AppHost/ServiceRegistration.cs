@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Threading;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
+using AutoShutdown.App.Infrastructure.CloseApps;
 using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
@@ -9,6 +10,7 @@ using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.CloseApps;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.Office;
@@ -89,10 +91,22 @@ public static class ServiceRegistration
         // IOfficeSaveHelperLauncher（唯一进程启动网关）启动。
         services.AddSingleton<IOfficeSaveHelperLauncher, OfficeSaveHelperLauncher>();
         services.AddSingleton<IOfficeAutomation, ComOfficeAutomation>();
+
+        // S18：CloseApps 关闭应用。真实网关走托管 System.Diagnostics.Process
+        // （WM_CLOSE 优雅关闭 + PID/启动时间复核强杀），无 P/Invoke、无进程启动、
+        // 无 shell；强杀仅逐目标 opt-in。CloseAppsAction 默认 Block（fail-closed）。
+        services.AddSingleton<IProcessManager, DiagnosticProcessManager>();
+        services.AddSingleton<IAppWindowManager, DiagnosticAppWindowManager>();
+        services.AddSingleton<CloseAppsService>(provider =>
+            new CloseAppsService(
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<IProcessManager>(),
+                provider.GetRequiredService<IAppWindowManager>()));
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
             [
-                new OfficeSaveAction(provider.GetRequiredService<IOfficeAutomation>())
+                new OfficeSaveAction(provider.GetRequiredService<IOfficeAutomation>()),
+                new CloseAppsAction(provider.GetRequiredService<CloseAppsService>())
             ]));
         services.AddSingleton<ShutdownWorkflow>(provider =>
             new ShutdownWorkflow(
