@@ -196,6 +196,37 @@ public sealed class S15_SchedulerIdleIntegrationTests
     }
 
     [Fact(Timeout = 2000)]
+    public async Task IdleTask_DetectionFailureDuringCountdown_StaysConfirmingFailClosed()
+    {
+        var storage = new InMemoryStorage();
+        var clock = new FakeClock(ClockBase);
+        var deadline = new ControllableDeadline();
+        var idle = new StubIdleMonitor { IdleDuration = TimeSpan.FromMinutes(5) };
+        var handler = new FakeHandler();
+        var engine = CreateIdleEngine(storage, clock, deadline, idle, handler);
+
+        using var scope = new EngineScope(engine);
+        await engine.SubmitAsync(
+            new CreateTaskCommand(IdleDefinition(IdleId1, idleThresholdSeconds: 300, warningSeconds: 60)),
+            CancellationToken.None);
+
+        await WaitUntilAsync(() => Current(engine.GetSnapshot())?.State == TaskInstanceState.Confirming);
+
+        // 检测失败（idleDuration=null）：必须 fail-closed——不取消、不标记恢复、不执行电源，
+        // 保持现有实例；下一轮轮询再检测。这是独立验收发现的缺陷回归（原实现误取消）。
+        idle.IdleDuration = null;
+        await WaitUntilAsync(() => deadline.PendingCount >= 1);
+        deadline.CompleteNext();
+        await Task.Delay(50);
+
+        var instance = Current(engine.GetSnapshot())!;
+        Assert.Equal(TaskInstanceState.Confirming, instance.State);
+        Assert.True(instance.IsIdleTriggered);
+        Assert.False(instance.IsIdleRecovered);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact(Timeout = 2000)]
     public async Task TwoIdleTasks_DifferentThresholds_OnlyReachedArms()
     {
         var storage = new InMemoryStorage();

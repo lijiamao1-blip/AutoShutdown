@@ -420,7 +420,11 @@ public sealed class SchedulerEngine : ISchedulerEngine
                     break;
 
                 case TaskInstanceState.Confirming when instance.IsIdleTriggered:
-                    if (!IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
+                    // 输入恢复取消仅在「检测成功且空闲时长明确低于有效阈值」时成立。
+                    // 检测失败（idleDuration=null）必须 fail-closed：不取消、不标记恢复，
+                    // 保持实例并留待下一轮轮询重新检测（独立验收缺陷修复）。
+                    if (idleDuration is not null
+                        && !IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
                     {
                         changed |= await CancelIdleTriggeredAsync(instance, now, cancellationToken)
                             .ConfigureAwait(false);
