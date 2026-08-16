@@ -56,7 +56,7 @@ public sealed class PrePipelineRunner : IPrePipelineRunner
                 result = new PrePipelineActionResult
                 {
                     Succeeded = false,
-                    ErrorMessage = SanitizeError(exception.Message)
+                    ErrorMessage = exception.Message
                 };
             }
 
@@ -66,11 +66,19 @@ public sealed class PrePipelineRunner : IPrePipelineRunner
                 ActionName = action.Name,
                 FailurePolicy = action.FailurePolicy,
                 StartedAtUtc = startedAt,
-                Duration = stopwatch.Elapsed
+                Duration = stopwatch.Elapsed,
+                // 安全收敛点（S16 独立验收修复）：无论失败来自异常、null 返回还是
+                // Action 主动返回，最终记录的失败 ErrorMessage 都经同一 SanitizeError
+                // （折叠控制字符、限长 200）；成功结果一律清空 ErrorMessage，
+                // 不记录命令参数、文档内容或凭据。
+                ErrorMessage = result.Succeeded ? string.Empty : SanitizeError(result.ErrorMessage)
             };
             results.Add(recorded);
 
-            if (!recorded.Succeeded && action.FailurePolicy == FailurePolicy.Block)
+            // 安全契约（S16 独立验收修复）：仅明确 FailurePolicy.Continue 允许失败后继续；
+            // Block 阻断；Unknown 或任何未定义枚举值一律 fail-closed（按 Block 处理），
+            // 绝不把 Unknown 静默转换为 Continue。
+            if (!recorded.Succeeded && recorded.FailurePolicy != FailurePolicy.Continue)
             {
                 return new PrePipelineRunResult
                 {
