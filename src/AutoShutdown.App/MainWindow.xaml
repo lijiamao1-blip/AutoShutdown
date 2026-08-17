@@ -41,7 +41,10 @@
                     <Border Grid.Column="2" Style="{StaticResource CapsuleTagStyle}" VerticalAlignment="Center" Margin="0,0,16,0">
                         <TextBlock Text="{Binding HeaderModeText}" FontSize="12" Foreground="#174B42"/>
                     </Border>
-                    <TextBlock Grid.Column="3" Text="{Binding HeaderModeHint}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding HeaderModeHint}" FontSize="12" Foreground="#536985"/>
+                        <TextBlock Text="{Binding VersionText}" FontSize="12" Foreground="#536985" Opacity="0.8" Margin="18,0,0,0"/>
+                    </StackPanel>
                     <TextBlock Grid.Column="4" Text="服务运行中" Foreground="#29496F" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
                     <Button Grid.Column="5" Content="⚙  设置" Style="{StaticResource HeaderButtonStyle}" Command="{Binding SettingsCommand}" Margin="0,0,10,0"/>
                     <Button Grid.Column="6" Content="▣  托盘菜单" Style="{StaticResource HeaderButtonStyle}" Command="{Binding TrayMenuCommand}"/>

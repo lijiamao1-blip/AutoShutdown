@@ -1031,6 +1031,30 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _headerModeHint, value);
     }
 
+    /// <summary>
+    /// 顶部版本/构建信息（S-PKG 发布追溯最小入口）。读取程序集 InformationalVersion
+    /// （发布时由构建脚本注入 v2.0.0-S{STEP}.{BUILD}，SDK 附加的 +{commit} 后缀被裁掉），
+    /// 与 manifest / Git 提交 / SHA-256 对应；未注入时显示默认串。
+    /// </summary>
+    public string VersionText
+    {
+        get
+        {
+            var informational = System.Reflection.CustomAttributeExtensions
+                .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(
+                    typeof(MainWindowViewModel).Assembly)
+                ?.InformationalVersion;
+            if (string.IsNullOrWhiteSpace(informational))
+            {
+                return "v1.0.0-dev";
+            }
+
+            var plusIndex = informational.IndexOf('+');
+            var version = plusIndex >= 0 ? informational[..plusIndex] : informational;
+            return version.StartsWith('v') ? version : "v" + version;
+        }
+    }
+
     private string _configInitErrorText = string.Empty;
 
     public string ConfigInitErrorText

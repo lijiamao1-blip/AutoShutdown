@@ -22,12 +22,13 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
-        var logger = new FileApplicationLogger(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AutoShutdown",
-            "logs"));
+        // S-PKG：数据根目录解析（默认 %LocalAppData%\AutoShutdown；AUTOSHUTDOWN_DATA_ROOT
+        // 环境变量可指向隔离沙箱，供干净机安装/升级/回滚/卸载与 GUI 冒烟使用）。
+        var dataRoot = DataRootResolver.Resolve();
+        var logger = new FileApplicationLogger(Path.Combine(dataRoot, "logs"));
         _bootstrapLogger = logger;
         logger.Info("ApplicationStarting", "应用启动。");
+        logger.Info("DataRoot", "数据根目录：" + dataRoot);
 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             LogUnhandled(args.ExceptionObject as Exception);
@@ -85,7 +86,7 @@ public partial class App : System.Windows.Application
         logger.Info("PrimaryInstanceAcquired", "本实例成为主实例。");
 
         var services = new ServiceCollection();
-        services.AddAutoShutdownServices();
+        services.AddAutoShutdownServices(dataRoot);
         services.AddSingleton(singleInstance);
         // Override the default logger registration so the bootstrap instance
         // (which already wrote startup events) remains the single sink.
