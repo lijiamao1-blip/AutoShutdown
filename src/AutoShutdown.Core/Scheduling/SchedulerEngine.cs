@@ -498,6 +498,26 @@ public sealed class SchedulerEngine : ISchedulerEngine
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 空闲触发任务的倒计时边界 fail-closed 取消：输入状态不明（idleMonitor 缺失/任务定义缺失/
+    /// GetIdleDuration()==null）时按冻结白名单 Confirming→Cancelled 安全终结。不标记
+    /// IsIdleRecovered——“输入未知”不是“用户已恢复输入”，审计语义必须准确区分。
+    /// </summary>
+    private async Task<bool> CancelIdleBoundaryAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cancelled = _taskService.Cancel(instance);
+        if (!cancelled.Succeeded || cancelled.Instance is null)
+        {
+            return false;
+        }
+
+        return await PersistAndCommitInstanceAsync(cancelled.Instance, now, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private bool IsIdleInstance(TaskInstance instance)
         => _taskService.Get(instance.SourceTaskId)?.Kind == TaskKind.Idle;
 
@@ -780,10 +800,11 @@ public sealed class SchedulerEngine : ISchedulerEngine
     }
 
     /// <summary>
-    /// S20-D1 倒计时边界确认裁决。在 Confirming→Running 之前，基于最新实例状态重新裁决：
+    /// S20-D1/D2 倒计时边界确认裁决。在 Confirming→Running 之前，基于最新实例状态重新裁决：
     /// <list type="number">
     /// <item>取消/终态胜出：实例非 Waiting/Confirming 一律拒绝。</item>
-    /// <item>输入恢复胜出：空闲触发且已进入倒计时的实例，到期边界重新检测输入，恢复即取消。</item>
+    /// <item>空闲触发任务 fail-closed：到期边界重新检测输入；输入状态不明（idleMonitor 缺失/
+    /// 任务定义缺失/GetIdleDuration()==null）或输入已恢复（空闲时长低于有效阈值）一律拒绝并安全取消。</item>
     /// <item>无人值守等效确认：仅对显式选择 UseUnattended 的任务评估；授权异常/失效一律 fail-closed 取消。</item>
     /// </list>
     /// 返回 true 表示可继续（有效人工确认已内置于 RealPowerConfirmed，或无人值守等效确认有效）；
@@ -803,21 +824,38 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return false;
         }
 
-        // 输入恢复胜出：仅空闲触发且已进入倒计时的实例，在到期边界重新检测输入。
-        if (latest.State == TaskInstanceState.Confirming
-            && latest.IsIdleTriggered
-            && _idleMonitor is not null)
+        // S20-D2：空闲触发任务的倒计时边界必须 fail-closed。输入状态不明
+        // （idleMonitor 缺失、任务定义缺失、GetIdleDuration()==null）或输入已恢复
+        // （空闲时长低于有效阈值）一律拒绝并安全取消；不得把“输入未知”误记为“已恢复”。
+        if (latest.State == TaskInstanceState.Confirming && latest.IsIdleTriggered)
         {
-            var definition = _taskService.Get(latest.SourceTaskId);
-            if (definition is not null)
+            if (_idleMonitor is null)
             {
-                var idleDuration = _idleMonitor.GetIdleDuration();
-                if (idleDuration is not null
-                    && !IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
-                {
-                    await CancelIdleTriggeredAsync(latest, now, cancellationToken).ConfigureAwait(false);
-                    return false;
-                }
+                await CancelIdleBoundaryAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var definition = _taskService.Get(latest.SourceTaskId);
+            if (definition is null)
+            {
+                await CancelIdleBoundaryAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var idleDuration = _idleMonitor.GetIdleDuration();
+            if (idleDuration is null)
+            {
+                // 输入状态未知（如 Win32IdleInputSource 的 GetLastInputInfo 失败返回 null）：
+                // 一律 fail-closed 取消，不进入 Confirming→Running、不调用 Handler/Pipeline/电源。
+                await CancelIdleBoundaryAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            if (!IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
+            {
+                // 输入已恢复：按既有取消路径终结并标记 IsIdleRecovered（审计语义不变）。
+                await CancelIdleTriggeredAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
             }
         }
 
