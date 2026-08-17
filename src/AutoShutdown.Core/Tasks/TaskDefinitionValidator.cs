@@ -23,7 +23,7 @@ internal static class TaskDefinitionValidator
     public const int MaxIdleThresholdSeconds = 604800;
 
     private static readonly HashSet<PowerAction> AllowedActions =
-        [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate];
+        [PowerAction.Shutdown, PowerAction.Restart, PowerAction.Sleep, PowerAction.Hibernate, PowerAction.WakeOnLan];
 
     /// <summary>是否为周期规则（执行后可重排下次触发）；一次性/倒计时规则触发后终结。</summary>
     public static bool IsRecurringKind(TaskKind kind)
@@ -40,6 +40,26 @@ internal static class TaskDefinitionValidator
         if (!AllowedActions.Contains(definition.Action))
         {
             return $"Action {definition.Action} is not allowed.";
+        }
+
+        // S21：WoL 任务必须携带非空 TargetMachineId，且禁止携带 RTC 唤醒时间
+        //（RTC 唤醒只作为受控关机前步骤，从不独立触发，也绝不与 WoL 混用）。
+        // 电源动作则禁止携带 TargetMachineId（WoL 专属字段，fail-closed）。
+        if (definition.Action == PowerAction.WakeOnLan)
+        {
+            if (definition.TargetMachineId is not { } targetId || targetId == Guid.Empty)
+            {
+                return "WakeOnLan tasks require a non-empty TargetMachineId.";
+            }
+
+            if (definition.RtcWakeTimeUtc is not null)
+            {
+                return "WakeOnLan tasks must not set RtcWakeTimeUtc.";
+            }
+        }
+        else if (definition.TargetMachineId is not null)
+        {
+            return "TargetMachineId is only valid for WakeOnLan tasks.";
         }
 
         if (definition.Priority is < MinPriority or > MaxPriority)

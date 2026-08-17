@@ -46,7 +46,8 @@ public sealed class ShutdownScheduledTaskHandlerTests
     [Fact]
     public void ScheduledTaskHandlingException_WhenResultIsNull_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => new ScheduledTaskHandlingException(null!));
+        Assert.Throws<ArgumentNullException>(
+            () => new ScheduledTaskHandlingException((ShutdownWorkflowResult)null!));
     }
 
     private static TaskInstance ValidInstance() => new()

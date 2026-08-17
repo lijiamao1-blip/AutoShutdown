@@ -835,7 +835,10 @@ public sealed class SchedulerEngineTests
         Assert.Contains("LoggingShutdownWorkflowDecorator", source);
         Assert.Contains("GetRequiredService<ShutdownWorkflow>()", source);
         Assert.Contains("GetRequiredService<IApplicationLogger>()", source);
-        Assert.Contains("AddSingleton<IScheduledTaskHandler, ShutdownScheduledTaskHandler>", source);
+        // S21：handler 经工厂注册并注入 WoL 执行器（WoL 任务经调度派发，不经真实电源）。
+        Assert.Contains("AddSingleton<IScheduledTaskHandler>(provider =>", source);
+        Assert.Contains("new ShutdownScheduledTaskHandler(", source);
+        Assert.Contains("GetRequiredService<IWakeOnLanTaskExecutor>()", source);
 
         var srcDirectory = Path.GetFullPath(
             Path.Combine(Path.GetDirectoryName(registration)!, "..", ".."));

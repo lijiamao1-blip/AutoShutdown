@@ -29,7 +29,10 @@ public enum PowerAction
     Shutdown = 1,
     Restart = 2,
     Sleep = 3,
-    Hibernate = 4
+    Hibernate = 4,
+
+    /// <summary>网络唤醒（S21）：经调度器作为显式任务类型触发，不经双闸门/真实电源。</summary>
+    WakeOnLan = 5
 }
 
 public enum TaskState

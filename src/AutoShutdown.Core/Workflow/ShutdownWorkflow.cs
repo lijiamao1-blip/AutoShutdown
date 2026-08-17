@@ -156,7 +156,9 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                     InstanceId = instance.InstanceId,
                     SourceTaskId = instance.SourceTaskId,
                     Action = instance.ActionSnapshot,
-                    ScheduledFireTime = instance.ScheduledFireTime
+                    ScheduledFireTime = instance.ScheduledFireTime,
+                    // S21：一次性 RTC 唤醒时间（由任务定义经实例快照复制）。null = 不武装。
+                    RtcWakeTimeUtc = instance.RtcWakeTimeUtc
                 },
                 cancellationToken).ConfigureAwait(false);
 

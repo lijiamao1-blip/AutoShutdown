@@ -61,4 +61,18 @@ public sealed record TaskDefinition
     /// 注意：此字段是运行时仲裁优先级，与需求表中的 P0/P1 开发优先级无关。
     /// </summary>
     public int Priority { get; init; }
+
+    /// <summary>
+    /// WoL 目标机器 id（S21，Action==WakeOnLan 时必填）。指向 target-machines.json 中的
+    /// 目标机器；仅向用户显式配置的局域网目标发送。电源动作禁止携带该字段。
+    /// </summary>
+    public Guid? TargetMachineId { get; init; }
+
+    /// <summary>
+    /// 一次性 RTC 唤醒时间（UTC，S21）。仅电源动作可用（Shutdown/Restart 需平台支持
+    /// S4/S5 唤醒，Sleep/Hibernate 至少支持 S3/S4 唤醒）；WoL 任务禁止携带该字段。
+    /// 执行时经 TaskInstance 快照传入 ShutdownWorkflow，由 Pre-Pipeline 的 RtcWakeAction
+    /// 作为受控关机前步骤处理。
+    /// </summary>
+    public DateTimeOffset? RtcWakeTimeUtc { get; init; }
 }

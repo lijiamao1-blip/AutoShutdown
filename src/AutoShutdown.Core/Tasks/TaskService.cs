@@ -101,7 +101,9 @@ public sealed class TaskService : ITaskService
                 HasExecuted = false,
                 CreatedAt = now.ToUniversalTime(),
                 RealPowerConfirmed = definition.RealPowerConfirmed,
-                UseUnattended = definition.UseUnattended
+                UseUnattended = definition.UseUnattended,
+                TargetMachineId = definition.TargetMachineId,
+                RtcWakeTimeUtc = definition.RtcWakeTimeUtc
             };
 
             return new TaskCommandResult
@@ -147,7 +149,9 @@ public sealed class TaskService : ITaskService
             HasExecuted = false,
             CreatedAt = now.ToUniversalTime(),
             RealPowerConfirmed = definition.RealPowerConfirmed,
-            UseUnattended = definition.UseUnattended
+            UseUnattended = definition.UseUnattended,
+            TargetMachineId = definition.TargetMachineId,
+            RtcWakeTimeUtc = definition.RtcWakeTimeUtc
         };
 
         return new TaskCommandResult

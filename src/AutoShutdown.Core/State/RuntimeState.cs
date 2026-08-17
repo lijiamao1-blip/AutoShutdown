@@ -64,4 +64,18 @@ public sealed record TaskInstance
     /// 倒计时边界评估无人值守等效确认；否则维持人工确认路径（RealPowerConfirmed）。
     /// </summary>
     public bool UseUnattended { get; init; }
+
+    /// <summary>
+    /// WoL 目标机器 id 快照（S21，ActionSnapshot==WakeOnLan 时必填）。由任务定义
+    /// <see cref="TaskDefinition.TargetMachineId"/> 在实例创建时复制；调度器经 handler
+    /// 派发到 WoL 执行器，只向用户显式配置的局域网目标发送。
+    /// </summary>
+    public Guid? TargetMachineId { get; init; }
+
+    /// <summary>
+    /// 一次性 RTC 唤醒时间快照（UTC，S21）。由任务定义
+    /// <see cref="TaskDefinition.RtcWakeTimeUtc"/> 在实例创建时复制；ShutdownWorkflow
+    /// 填入 Pre-Pipeline 上下文，由 RtcWakeAction 作为受控关机前步骤处理。
+    /// </summary>
+    public DateTimeOffset? RtcWakeTimeUtc { get; init; }
 }

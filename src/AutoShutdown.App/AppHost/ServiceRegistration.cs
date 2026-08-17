@@ -9,6 +9,7 @@ using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.App.Infrastructure.Rtc;
+using AutoShutdown.App.Infrastructure.WakeOnLan;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
@@ -26,6 +27,7 @@ using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
 using AutoShutdown.Core.Unattended;
+using AutoShutdown.Core.WakeOnLan;
 using AutoShutdown.Core.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -126,6 +128,15 @@ public static class ServiceRegistration
         services.AddSingleton<IRtcWakeNativeApi, Win32RtcWakeNativeApi>();
         services.AddSingleton<IRtcWakeService, Win32RtcWakeService>();
 
+        // S21：WoL 目标机器 + 发送 + 任务执行。只向用户显式配置的局域网目标发送
+        // Magic Packet；不扫描、不自动发现、不访问公网。执行器经调度 handler 派发，
+        // 失败抛 ScheduledTaskHandlingException → 实例 Faulted（绝不伪造成功）。
+        services.AddSingleton<TargetMachineStore>();
+        services.AddSingleton<TargetMachineManager>();
+        services.AddSingleton<IUdpDatagramSender, UdpDatagramSender>();
+        services.AddSingleton<IWakeOnLanService, WakeOnLanService>();
+        services.AddSingleton<IWakeOnLanTaskExecutor, WakeOnLanTaskExecutor>();
+
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
             [
@@ -159,7 +170,10 @@ public static class ServiceRegistration
             new LoggingShutdownWorkflowDecorator(
                 provider.GetRequiredService<ShutdownWorkflow>(),
                 provider.GetRequiredService<IApplicationLogger>()));
-        services.AddSingleton<IScheduledTaskHandler, ShutdownScheduledTaskHandler>();
+        services.AddSingleton<IScheduledTaskHandler>(provider =>
+            new ShutdownScheduledTaskHandler(
+                provider.GetRequiredService<IShutdownWorkflow>(),
+                provider.GetRequiredService<IWakeOnLanTaskExecutor>()));
         services.AddSingleton<ISchedulerEngine>(provider => new SchedulerEngine(
             provider.GetRequiredService<IStorage>(),
             provider.GetRequiredService<IClock>(),
