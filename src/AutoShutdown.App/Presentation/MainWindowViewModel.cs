@@ -77,6 +77,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _unattendedEnableConfirmation;
     private readonly Func<bool>? _unattendedEnableSecondConfirmation;
     private readonly RecoveryNoticeService? _recoveryNoticeService;
+    private readonly WolTargetsSectionViewModel? _wolTargetsSection;
+    private readonly RtcStatusSectionViewModel? _rtcStatusSection;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -105,7 +107,9 @@ public sealed class MainWindowViewModel : ObservableObject
         IUnattendedPolicyService? unattendedPolicy = null,
         Func<bool>? unattendedEnableConfirmation = null,
         Func<bool>? unattendedEnableSecondConfirmation = null,
-        RecoveryNoticeService? recoveryNotice = null)
+        RecoveryNoticeService? recoveryNotice = null,
+        WolTargetsSectionViewModel? wolTargetsSection = null,
+        RtcStatusSectionViewModel? rtcStatusSection = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -126,6 +130,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _unattendedEnableConfirmation = unattendedEnableConfirmation;
         _unattendedEnableSecondConfirmation = unattendedEnableSecondConfirmation;
         _recoveryNoticeService = recoveryNotice;
+        _wolTargetsSection = wolTargetsSection;
+        _rtcStatusSection = rtcStatusSection;
 
         NavItems =
         [
@@ -681,8 +687,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ActionIsRestart));
                 OnPropertyChanged(nameof(ActionIsSleep));
                 OnPropertyChanged(nameof(ActionIsHibernate));
+                OnPropertyChanged(nameof(ActionIsWakeOnLan));
+                OnPropertyChanged(nameof(IsWolTargetSelectorVisible));
                 // S20-D1：动作变化会改变「使用无人值守」是否可选（授权需与动作匹配）。
+                // S21：WoL 不是电源动作，不显示无人值守选项。
                 _ = RefreshUnattendedTaskAvailabilityAsync();
+                RefreshCreateState();
             }
         }
     }
@@ -734,6 +744,48 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>唤醒他机（S21）：经调度器作为显式 WoL 任务触发，不经双闸门/真实电源。</summary>
+    public bool ActionIsWakeOnLan
+    {
+        get => SelectedAction == PowerAction.WakeOnLan;
+        set
+        {
+            if (value)
+            {
+                SelectedAction = PowerAction.WakeOnLan;
+            }
+        }
+    }
+
+    /// <summary>WoL 目标机器选择器是否可见（仅「唤醒他机」动作时显示）。</summary>
+    public bool IsWolTargetSelectorVisible => SelectedAction == PowerAction.WakeOnLan;
+
+    private Guid? _selectedWolTargetId;
+
+    /// <summary>
+    /// WoL 任务选中的目标机器 id（S21）。仅向用户显式配置的局域网目标发送；
+    /// 未选择则无法创建 WoL 任务（fail-closed）。
+    /// </summary>
+    public Guid? SelectedWolTargetId
+    {
+        get => _selectedWolTargetId;
+        set
+        {
+            if (SetProperty(ref _selectedWolTargetId, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    // ---- S21 设置页分区视图模型（由组合根注入；测试可缺省为 null → 分区默认安全空态） ----
+
+    /// <summary>Wake-on-LAN 目标机器管理分区（设置页）。</summary>
+    public WolTargetsSectionViewModel? WolTargetsSection => _wolTargetsSection;
+
+    /// <summary>一次性 RTC 唤醒能力状态分区（设置页）。</summary>
+    public RtcStatusSectionViewModel? RtcStatusSection => _rtcStatusSection;
 
     public IReadOnlyList<string> ReminderOptions { get; } = ["不提醒", "提前 1 分钟", "提前 5 分钟", "提前 10 分钟", "提前 30 分钟"];
 
@@ -1287,13 +1339,16 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>任务级「使用无人值守」选项是否可见：仅真实电源模式显示。</summary>
-    public bool IsUnattendedTaskOptionVisible => _configRealPowerEnabled;
+    // S21：WoL 不是电源动作（不经双闸门），不显示/不允许无人值守选项。
+    public bool IsUnattendedTaskOptionVisible
+        => _configRealPowerEnabled && SelectedAction != PowerAction.WakeOnLan;
 
     /// <summary>
     /// 任务级「使用无人值守」选项是否可选：真实电源模式 + 本地无人值守授权有效且与所选动作匹配。
     /// 授权失效/动作不匹配/策略异常一律不可选（fail-closed）。
     /// </summary>
-    public bool IsUnattendedTaskOptionAvailable => _configRealPowerEnabled && _unattendedAuthorizedForAction;
+    public bool IsUnattendedTaskOptionAvailable
+        => _configRealPowerEnabled && SelectedAction != PowerAction.WakeOnLan && _unattendedAuthorizedForAction;
 
     /// <summary>任务级「使用无人值守」选项的禁用/可用提示。</summary>
     public string UnattendedTaskOptionHint
@@ -1791,6 +1846,21 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshAutoStart();
         await RefreshUnattendedAsync();
         RefreshRecoveryNotice();
+        RefreshWolAndRtcSections();
+    }
+
+    /// <summary>启动时刷新 WoL 目标机器与 RTC 能力状态分区（分区内部捕获错误，绝不抛出）。</summary>
+    private void RefreshWolAndRtcSections()
+    {
+        if (_wolTargetsSection is not null)
+        {
+            _ = _wolTargetsSection.RefreshAsync(CancellationToken.None);
+        }
+
+        if (_rtcStatusSection is not null)
+        {
+            _ = _rtcStatusSection.RefreshAsync(CancellationToken.None);
+        }
     }
 
     public async Task RefreshConfigurationAsync()
@@ -2009,6 +2079,21 @@ public sealed class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        // S21：WoL 任务必须是时钟驱动模式（空闲触发不适用于唤醒他机）。
+        if (SelectedAction == PowerAction.WakeOnLan && SelectedMode == TimeMode.Idle)
+        {
+            reason = "唤醒他机不支持空闲触发模式";
+            return false;
+        }
+
+        // S21：WoL 任务必须显式选择目标机器（仅向用户配置的局域网目标发送）。
+        if (SelectedAction == PowerAction.WakeOnLan
+            && (SelectedWolTargetId is not { } wolTargetId || wolTargetId == Guid.Empty))
+        {
+            reason = "请选择要唤醒的目标机器";
+            return false;
+        }
+
         reason = string.Empty;
         return true;
     }
@@ -2102,10 +2187,26 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         definition = null!;
 
-        if (SelectedAction is not (PowerAction.Shutdown or PowerAction.Restart or PowerAction.Sleep or PowerAction.Hibernate))
+        if (SelectedAction is not (PowerAction.Shutdown or PowerAction.Restart or PowerAction.Sleep or PowerAction.Hibernate or PowerAction.WakeOnLan))
         {
             error = "请选择有效的任务类型";
             return false;
+        }
+
+        // S21：WoL 任务必须显式选择目标机器；空闲触发不适用于唤醒他机。
+        if (SelectedAction == PowerAction.WakeOnLan)
+        {
+            if (SelectedMode == TimeMode.Idle)
+            {
+                error = "唤醒他机不支持空闲触发模式";
+                return false;
+            }
+
+            if (SelectedWolTargetId is not { } wolTargetId || wolTargetId == Guid.Empty)
+            {
+                error = "请选择要唤醒的目标机器";
+                return false;
+            }
         }
 
         if (!TryBuildTimeInput(out var duration, out var target, out error))
@@ -2136,7 +2237,8 @@ public sealed class MainWindowViewModel : ObservableObject
         // 裁决；未选中维持现有人工确认路径（RealPowerConfirmed=true）。
         var realPowerConfirmed = false;
         var useUnattended = false;
-        if (_configRealPowerEnabled)
+        // S21：WoL 不是电源动作（不经双闸门），跳过真实电源人工确认路径。
+        if (_configRealPowerEnabled && SelectedAction != PowerAction.WakeOnLan)
         {
             if (UseUnattended)
             {
@@ -2184,7 +2286,9 @@ public sealed class MainWindowViewModel : ObservableObject
             WarningSeconds = GetWarningSeconds(),
             CreatedAt = _clock.UtcNow,
             RealPowerConfirmed = realPowerConfirmed,
-            UseUnattended = useUnattended
+            UseUnattended = useUnattended,
+            // S21：WoL 任务携带目标机器 id（仅用户显式配置的局域网目标）；电源动作不携带。
+            TargetMachineId = SelectedAction == PowerAction.WakeOnLan ? SelectedWolTargetId : null
         };
 
         error = string.Empty;

@@ -188,6 +188,16 @@ public static class ServiceRegistration
             provider.GetRequiredService<IUnattendedPolicyService>(),
             provider.GetRequiredService<UnattendedConfirmationEvaluator>()));
 
+        // S21：设置页分区视图模型（WoL 目标机器管理 + RTC 唤醒能力状态）。测试发送只由
+        // 用户逐目标点击触发；RTC 分区仅能力探测，不设置任何真实唤醒定时器。
+        services.AddSingleton<WolTargetsSectionViewModel>(provider =>
+            new WolTargetsSectionViewModel(
+                provider.GetRequiredService<TargetMachineManager>(),
+                provider.GetRequiredService<IWakeOnLanService>()));
+        services.AddSingleton<RtcStatusSectionViewModel>(provider =>
+            new RtcStatusSectionViewModel(
+                provider.GetRequiredService<IRtcWakeService>()));
+
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();
         services.AddSingleton<ActivationPipeServer>();
@@ -211,7 +221,9 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IClock>(),
                 provider.GetRequiredService<IApplicationLogger>(),
                 provider.GetRequiredService<IAutoStartService>(),
-                unattendedPolicy: provider.GetRequiredService<IUnattendedPolicyService>()));
+                unattendedPolicy: provider.GetRequiredService<IUnattendedPolicyService>(),
+                wolTargetsSection: provider.GetRequiredService<WolTargetsSectionViewModel>(),
+                rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

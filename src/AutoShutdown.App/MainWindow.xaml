@@ -161,12 +161,22 @@
                                                 <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
                                             </StackPanel>
                                         </Border>
-                                        <UniformGrid Columns="4" Margin="0,0,0,12">
+                                        <UniformGrid Columns="5" Margin="0,0,0,12">
                                             <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                             <RadioButton Content="重启" IsChecked="{Binding ActionIsRestart}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                             <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                             <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                            <RadioButton Content="唤醒他机" IsChecked="{Binding ActionIsWakeOnLan}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         </UniformGrid>
+                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsWolTargetSelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                            <StackPanel>
+                                                <TextBlock Text="目标机器" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding WolTargetsSection.Targets}"
+                                                          SelectedValuePath="Id" SelectedValue="{Binding SelectedWolTargetId}"
+                                                          DisplayMemberPath="Name" HorizontalAlignment="Stretch"/>
+                                                <TextBlock Text="仅向已配置的局域网目标发送 Magic Packet（不扫描、不自动发现、不出公网）。目标机器请在「软件设置」中管理。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                            </StackPanel>
+                                        </Border>
                                         <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
                                             <StackPanel>
                                                 <CheckBox Content="使用无人值守（到期不等待人工确认）" IsChecked="{Binding UseUnattended}" IsEnabled="{Binding IsUnattendedTaskOptionAvailable}" VerticalAlignment="Center"/>
@@ -416,6 +426,67 @@
                                     <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding CloseAppsStatusText, Converter={StaticResource BoolToVisibility}}"/>
                                     <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Wake-on-LAN 目标机器" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="向已配置的局域网目标发送 Magic Packet（仅局域网，不扫描、不自动发现、不出公网）。测试发送只在你逐目标点击时发生；默认清单为空。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.1*"/><ColumnDefinition Width="7"/>
+                                            <ColumnDefinition Width="1.6*"/><ColumnDefinition Width="7"/>
+                                            <ColumnDefinition Width="1.3*"/><ColumnDefinition Width="7"/>
+                                            <ColumnDefinition Width="0.6*"/><ColumnDefinition Width="7"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.NameInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="目标机器名称"/>
+                                        <TextBox Grid.Column="2" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.MacInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="MAC 地址，如 AA:BB:CC:DD:EE:FF"/>
+                                        <TextBox Grid.Column="4" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.BroadcastInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="可选：IPv4 广播地址（如 192.168.1.255）"/>
+                                        <TextBox Grid.Column="6" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.PortInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="可选：UDP 端口（默认 9）"/>
+                                        <Button Grid.Column="8" Content="＋ 添加" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
+                                    </Grid>
+                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHint, Mode=OneTime}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                                    <ItemsControl ItemsSource="{Binding WolTargetsSection.Targets}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,10,0"/>
+                                                                <TextBlock Text="{Binding Mac}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding SummaryText}" FontSize="11" Foreground="#536985" Margin="0,3,0,0"/>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Content="测试发送" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
+                                                                    Command="{Binding DataContext.WolTargetsSection.TestSendTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                            <Button Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6"
+                                                                    Command="{Binding DataContext.WolTargetsSection.RemoveTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="{Binding WolTargetsSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding WolTargetsSection.StatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.StatusText, Converter={StaticResource BoolToVisibility}}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="一次性 RTC 唤醒能力" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="关机/睡眠/休眠等任务到期前可设置一次性本机唤醒（受控关机前步骤）。能力与失败原因如实显示；不支持或权限不足时不会尝试设置。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding RtcStatusSection.StatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding RtcStatusSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding RtcStatusSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding RtcStatusSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="重新查询能力" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RtcStatusSection.RefreshCommand}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
