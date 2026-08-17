@@ -16,4 +16,7 @@ public sealed record PrePipelineContext
     public PowerAction Action { get; init; } = PowerAction.Unknown;
 
     public DateTimeOffset ScheduledFireTime { get; init; }
+
+    /// <summary>一次性 RTC 唤醒时间（UTC，S21）。null = 本次流程不设置 RTC 唤醒。</summary>
+    public DateTimeOffset? RtcWakeTimeUtc { get; init; }
 }

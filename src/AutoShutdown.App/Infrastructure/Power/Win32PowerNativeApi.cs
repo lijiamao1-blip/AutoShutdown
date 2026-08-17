@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AutoShutdown.App.Infrastructure.Rtc;
 
 namespace AutoShutdown.App.Infrastructure.Power;
 
@@ -188,4 +189,54 @@ internal sealed class Win32IdleNativeApi
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+}
+
+/// <summary>
+/// 一次性 RTC 唤醒的 Win32 原生互操作（S21）。使用 waitable timer
+/// （CreateWaitableTimerExW + SetWaitableTimer fResume=TRUE）实现「睡眠/休眠后自动唤醒」。
+/// 为满足「DllImport 只允许存在于 Win32PowerNativeApi.cs」的冻结安全契约，RTC 唤醒的
+/// P/Invoke 与电源调用收敛于同一文件；业务侧通过 <c>Win32RtcWakeService</c> 消费，
+/// 绝不直接接触 P/Invoke。错误码由各方法在调用点就地捕获（Marshal.GetLastWin32Error）。
+/// </summary>
+internal sealed class Win32RtcWakeNativeApi : IRtcWakeNativeApi
+{
+    private const uint TimerAllAccess = 0x001F0003;
+
+    public IntPtr CreateTimer() => CreateWaitableTimerExW(IntPtr.Zero, null, 0, TimerAllAccess);
+
+    public NativeCallResult SetWake(IntPtr timer, long dueTimeFileTimeUtc)
+    {
+        var ok = SetWaitableTimer(timer, ref dueTimeFileTimeUtc, 0, IntPtr.Zero, IntPtr.Zero, fResume: true);
+        return ok ? NativeCallResult.Success() : new NativeCallResult(false, Marshal.GetLastWin32Error());
+    }
+
+    public NativeCallResult Cancel(IntPtr timer)
+    {
+        var ok = CancelWaitableTimer(timer);
+        return ok ? NativeCallResult.Success() : new NativeCallResult(false, Marshal.GetLastWin32Error());
+    }
+
+    public bool Close(IntPtr timer) => CloseHandle(timer);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateWaitableTimerExW(
+        IntPtr lpTimerAttributes,
+        string? lpTimerName,
+        uint dwFlags,
+        uint dwDesiredAccess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetWaitableTimer(
+        IntPtr hTimer,
+        ref long pDueTime,
+        int lPeriod,
+        IntPtr pfnCompletionRoutine,
+        IntPtr lpArgToCompletionRoutine,
+        bool fResume);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CancelWaitableTimer(IntPtr hTimer);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
 }

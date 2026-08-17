@@ -2,6 +2,7 @@ using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
+using AutoShutdown.Core.Rtc;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Unattended;
 
@@ -19,13 +20,15 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
     private readonly IPrePipelineRunner _prePipelineRunner;
     private readonly IUnattendedPolicyService? _unattendedPolicyService;
     private readonly UnattendedConfirmationEvaluator? _unattendedEvaluator;
+    private readonly IRtcWakeService? _rtcWakeService;
 
     public ShutdownWorkflow(
         IConfigurationService configurationService,
         IPowerService powerService,
         IPrePipelineRunner? prePipelineRunner = null,
         IUnattendedPolicyService? unattendedPolicyService = null,
-        UnattendedConfirmationEvaluator? unattendedEvaluator = null)
+        UnattendedConfirmationEvaluator? unattendedEvaluator = null,
+        IRtcWakeService? rtcWakeService = null)
     {
         ArgumentNullException.ThrowIfNull(configurationService);
         ArgumentNullException.ThrowIfNull(powerService);
@@ -34,6 +37,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
         _prePipelineRunner = prePipelineRunner ?? PrePipelineRunner.Empty;
         _unattendedPolicyService = unattendedPolicyService;
         _unattendedEvaluator = unattendedEvaluator;
+        _rtcWakeService = rtcWakeService;
     }
 
     public async Task<ShutdownWorkflowResult> ExecuteAsync(
@@ -156,6 +160,11 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 },
                 cancellationToken).ConfigureAwait(false);
 
+        // S21：Pre-Pipeline 若成功武装了一次性 RTC 唤醒，则在电源未被接受时清除
+        //（受控关机前步骤：清除失败明确上报，绝不残留游离唤醒定时器）。
+        var rtcArmed = pipeline.Actions.Any(action =>
+            action.ActionName == RtcWakeAction.ActionName && action.Succeeded);
+
         if (!pipeline.PowerAllowed)
         {
             return new ShutdownWorkflowResult
@@ -190,23 +199,29 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
         }
         catch (OperationCanceledException)
         {
+            // 电源被取消：尽力清除已武装的 RTC 唤醒（安全网），再传播取消。
+            await ClearRtcWakeBestEffortAsync(rtcArmed, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
         {
-            return new ShutdownWorkflowResult
-            {
-                Status = ShutdownWorkflowStatus.PowerFailed,
-                DecisionCode = ShutdownDecisionCode.PowerServiceException,
-                PrePipeline = pipeline,
-                UnattendedConfirmation = unattendedConfirmation,
-                Message = "The power service threw an exception: " + exception.Message
-            };
+            return await ClearRtcWakeIfArmedAsync(
+                rtcArmed,
+                new ShutdownWorkflowResult
+                {
+                    Status = ShutdownWorkflowStatus.PowerFailed,
+                    DecisionCode = ShutdownDecisionCode.PowerServiceException,
+                    PrePipeline = pipeline,
+                    UnattendedConfirmation = unattendedConfirmation,
+                    Message = "The power service threw an exception: " + exception.Message
+                },
+                CancellationToken.None).ConfigureAwait(false);
         }
 
+        ShutdownWorkflowResult outcome;
         if (powerResult.Outcome == PowerOutcome.Simulated && powerResult.WasSimulated)
         {
-            return new ShutdownWorkflowResult
+            outcome = new ShutdownWorkflowResult
             {
                 Status = ShutdownWorkflowStatus.Simulated,
                 DecisionCode = ShutdownDecisionCode.Allowed,
@@ -216,10 +231,9 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Message = "The power action was simulated successfully."
             };
         }
-
-        if (powerResult.Outcome == PowerOutcome.Accepted)
+        else if (powerResult.Outcome == PowerOutcome.Accepted)
         {
-            return new ShutdownWorkflowResult
+            outcome = new ShutdownWorkflowResult
             {
                 Status = ShutdownWorkflowStatus.Accepted,
                 DecisionCode = ShutdownDecisionCode.Allowed,
@@ -229,10 +243,9 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Message = "The real power action was accepted."
             };
         }
-
-        if (powerResult.Outcome == PowerOutcome.Rejected)
+        else if (powerResult.Outcome == PowerOutcome.Rejected)
         {
-            return new ShutdownWorkflowResult
+            outcome = new ShutdownWorkflowResult
             {
                 Status = ShutdownWorkflowStatus.Rejected,
                 DecisionCode = ShutdownDecisionCode.PowerServiceRejected,
@@ -242,10 +255,9 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Message = "The power service rejected the request."
             };
         }
-
-        if (powerResult.Outcome == PowerOutcome.Failed)
+        else if (powerResult.Outcome == PowerOutcome.Failed)
         {
-            return new ShutdownWorkflowResult
+            outcome = new ShutdownWorkflowResult
             {
                 Status = ShutdownWorkflowStatus.PowerFailed,
                 DecisionCode = ShutdownDecisionCode.PowerServiceFailed,
@@ -255,16 +267,71 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 Message = "The power service reported a failure."
             };
         }
-
-        return new ShutdownWorkflowResult
+        else
         {
-            Status = ShutdownWorkflowStatus.PowerFailed,
-            DecisionCode = ShutdownDecisionCode.PowerServiceFailed,
-            PowerResult = powerResult,
-            PrePipeline = pipeline,
-            UnattendedConfirmation = unattendedConfirmation,
-            Message = "The power service returned an unexpected result."
-        };
+            outcome = new ShutdownWorkflowResult
+            {
+                Status = ShutdownWorkflowStatus.PowerFailed,
+                DecisionCode = ShutdownDecisionCode.PowerServiceFailed,
+                PowerResult = powerResult,
+                PrePipeline = pipeline,
+                UnattendedConfirmation = unattendedConfirmation,
+                Message = "The power service returned an unexpected result."
+            };
+        }
+
+        // 电源未被接受（含模拟/拒绝/失败）：若武装了 RTC 唤醒则清除；清除失败明确上报。
+        return await ClearRtcWakeIfArmedAsync(rtcArmed, outcome, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task<ShutdownWorkflowResult> ClearRtcWakeIfArmedAsync(
+        bool rtcArmed,
+        ShutdownWorkflowResult outcome,
+        CancellationToken cancellationToken)
+    {
+        // 未武装、无清除服务、或电源已被接受（唤醒随本次关机/睡眠保留）→ 无需清除。
+        if (!rtcArmed || _rtcWakeService is null || outcome.Status == ShutdownWorkflowStatus.Accepted)
+        {
+            return outcome;
+        }
+
+        RtcWakeClearResult clear;
+        try
+        {
+            clear = await _rtcWakeService.ClearAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // 清除被取消：直接传播，不伪造任何结果。
+        }
+        catch (Exception exception)
+        {
+            return outcome with
+            {
+                Message = outcome.Message + " RTC wake cleanup failed: " + exception.Message
+            };
+        }
+
+        return clear.Succeeded
+            ? outcome
+            : outcome with { Message = outcome.Message + " RTC wake cleanup failed: " + clear.Message };
+    }
+
+    private async Task ClearRtcWakeBestEffortAsync(bool rtcArmed, CancellationToken cancellationToken)
+    {
+        if (!rtcArmed || _rtcWakeService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _rtcWakeService.ClearAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // 取消路径上尽力清除（安全网）；主流程正在中止，清除失败不改变取消语义。
+        }
     }
 
     private static ShutdownWorkflowResult Reject(

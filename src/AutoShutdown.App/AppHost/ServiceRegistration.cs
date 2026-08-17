@@ -8,6 +8,7 @@ using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
+using AutoShutdown.App.Infrastructure.Rtc;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
@@ -18,6 +19,7 @@ using AutoShutdown.Core.Office;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.Recovery;
+using AutoShutdown.Core.Rtc;
 using AutoShutdown.Core.RunCommands;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
@@ -119,12 +121,20 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IConfigurationService>(),
                 provider.GetRequiredService<ICommandRunner>()));
 
+        // S21：一次性 RTC 唤醒。真实实现基于 waitable timer（P/Invoke 收敛于
+        // Win32PowerNativeApi.cs），能力诚实声明（仅可唤醒睡眠/休眠，无法唤醒完全关机）。
+        services.AddSingleton<IRtcWakeNativeApi, Win32RtcWakeNativeApi>();
+        services.AddSingleton<IRtcWakeService, Win32RtcWakeService>();
+
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
             [
                 new OfficeSaveAction(provider.GetRequiredService<IOfficeAutomation>()),
                 new RunCommandsAction(provider.GetRequiredService<RunCommandsService>()),
-                new CloseAppsAction(provider.GetRequiredService<CloseAppsService>())
+                new CloseAppsAction(provider.GetRequiredService<CloseAppsService>()),
+                new RtcWakeAction(
+                    provider.GetRequiredService<IRtcWakeService>(),
+                    provider.GetRequiredService<IConfigurationService>())
             ]));
 
         // S20：无人值守。版本化授权记录（unattended.json）+ 策略服务（fail-closed）+ 倒计时边界
@@ -143,7 +153,8 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IPowerService>(),
                 provider.GetRequiredService<IPrePipelineRunner>(),
                 provider.GetRequiredService<IUnattendedPolicyService>(),
-                provider.GetRequiredService<UnattendedConfirmationEvaluator>()));
+                provider.GetRequiredService<UnattendedConfirmationEvaluator>(),
+                provider.GetRequiredService<IRtcWakeService>()));
         services.AddSingleton<IShutdownWorkflow>(provider =>
             new LoggingShutdownWorkflowDecorator(
                 provider.GetRequiredService<ShutdownWorkflow>(),
