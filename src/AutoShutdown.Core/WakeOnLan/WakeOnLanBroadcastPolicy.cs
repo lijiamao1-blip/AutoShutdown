@@ -9,6 +9,9 @@ namespace AutoShutdown.Core.WakeOnLan;
 /// 任意非本机接口网段或无法验证为本机局域网广播的地址）一律拒绝，绝不向本机局域网
 /// 之外发送 UDP。本策略为纯函数 + 可注入本机接口来源，可完整测试；
 /// 不扫描、不自动发现、不访问公网。
+/// S21-D2：禁止范围（0.0.0.0/8、回环 127.0.0.0/8、链路本地 169.254.0.0/16、
+/// 组播 224.0.0.0/4）先于本机定向广播匹配拒绝——即使活动接口本身落在禁止范围内
+/// （如 APIPA 接口 169.254.1.10/24），其"定向广播"也绝不放行（fail-closed）。
 /// </summary>
 public sealed class WakeOnLanBroadcastPolicy
 {
@@ -41,6 +44,15 @@ public sealed class WakeOnLanBroadcastPolicy
         if (bytes.All(byteValue => byteValue == 0xFF))
         {
             return true;
+        }
+
+        // S21-D2：禁止范围（零地址/回环/链路本地/组播）先于本机定向广播匹配拒绝——
+        // 即使机器存在 APIPA 接口（169.254.0.0/16）等落在禁止范围内的活动接口，
+        // 其"定向广播"也绝不放行（fail-closed），保证"链路本地一律拒绝"的安全承诺。
+        if (ClassifyForbiddenRange(bytes) is { } forbiddenReason)
+        {
+            reason = forbiddenReason;
+            return false;
         }
 
         // 定向广播：必须等于某个本机活动接口的广播地址。
@@ -76,7 +88,11 @@ public sealed class WakeOnLanBroadcastPolicy
         return broadcast;
     }
 
-    private static string ClassifyRejection(byte[] bytes)
+    /// <summary>
+    /// S21-D2 禁止范围分类：零地址 0.0.0.0/8、回环 127.0.0.0/8、链路本地 169.254.0.0/16、
+    /// 组播 224.0.0.0/4。不在禁止范围返回 null（交由本机定向广播匹配决定）。
+    /// </summary>
+    private static string? ClassifyForbiddenRange(byte[] bytes)
     {
         if (bytes[0] == 0)
         {
@@ -98,6 +114,12 @@ public sealed class WakeOnLanBroadcastPolicy
             return "组播地址不允许发送";
         }
 
+        return null;
+    }
+
+    /// <summary>通过禁止范围且未匹配任何本机接口定向广播后的分类拒绝原因。</summary>
+    private static string ClassifyRejection(byte[] bytes)
+    {
         if (IsPublicUnicast(bytes))
         {
             return "公网单播地址不允许发送（只能向本机局域网定向广播发送）";
