@@ -7,11 +7,24 @@ public static class ActivationPipeClient
 {
     private const string PipeName = @"AutoShutdown.Desktop.Activation.v1";
     private const string ActivateCommand = "ACTIVATE";
+    private const string TriggerCommandPrefix = "TRIGGER ";
     private const string OkResponse = "OK";
     private const int TotalTimeoutMilliseconds = 1500;
     private const int MaxMessageBytes = 64;
 
-    public static async Task<bool> TryActivateAsync(CancellationToken cancellationToken)
+    public static Task<bool> TryActivateAsync(CancellationToken cancellationToken)
+        => RequestAsync(ActivateCommand, cancellationToken);
+
+    /// <summary>
+    /// 把外部触发回调转发给已在运行的主实例（S22 CP4）：副实例只转发「稳定本地 task id」，
+    /// 不执行任何电源；主实例经 ExternalTaskTriggerService 裁决并交回本地唯一 Workflow。
+    /// </summary>
+    public static Task<bool> TryTriggerAsync(Guid taskId, CancellationToken cancellationToken)
+        => taskId == Guid.Empty
+            ? Task.FromResult(false)
+            : RequestAsync(TriggerCommandPrefix + taskId.ToString("D"), cancellationToken);
+
+    private static async Task<bool> RequestAsync(string command, CancellationToken cancellationToken)
     {
         try
         {
@@ -26,7 +39,7 @@ public static class ActivationPipeClient
 
             await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
 
-            var request = Encoding.UTF8.GetBytes(ActivateCommand + "\n");
+            var request = Encoding.UTF8.GetBytes(command + "\n");
             await pipe.WriteAsync(request, 0, request.Length, timeout.Token).ConfigureAwait(false);
             await pipe.FlushAsync(timeout.Token).ConfigureAwait(false);
 

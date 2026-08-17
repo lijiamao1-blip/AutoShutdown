@@ -79,6 +79,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly RecoveryNoticeService? _recoveryNoticeService;
     private readonly WolTargetsSectionViewModel? _wolTargetsSection;
     private readonly RtcStatusSectionViewModel? _rtcStatusSection;
+    private readonly TaskSyncSectionViewModel? _taskSyncSection;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -109,7 +110,8 @@ public sealed class MainWindowViewModel : ObservableObject
         Func<bool>? unattendedEnableSecondConfirmation = null,
         RecoveryNoticeService? recoveryNotice = null,
         WolTargetsSectionViewModel? wolTargetsSection = null,
-        RtcStatusSectionViewModel? rtcStatusSection = null)
+        RtcStatusSectionViewModel? rtcStatusSection = null,
+        TaskSyncSectionViewModel? taskSyncSection = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -132,6 +134,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _recoveryNoticeService = recoveryNotice;
         _wolTargetsSection = wolTargetsSection;
         _rtcStatusSection = rtcStatusSection;
+        _taskSyncSection = taskSyncSection;
 
         NavItems =
         [
@@ -786,6 +789,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>一次性 RTC 唤醒能力状态分区（设置页）。</summary>
     public RtcStatusSectionViewModel? RtcStatusSection => _rtcStatusSection;
+
+    /// <summary>Windows 任务计划程序单向同步分区（设置页；S22）。</summary>
+    public TaskSyncSectionViewModel? TaskSyncSection => _taskSyncSection;
 
     public IReadOnlyList<string> ReminderOptions { get; } = ["不提醒", "提前 1 分钟", "提前 5 分钟", "提前 10 分钟", "提前 30 分钟"];
 
@@ -1860,6 +1866,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_rtcStatusSection is not null)
         {
             _ = _rtcStatusSection.RefreshAsync(CancellationToken.None);
+        }
+
+        if (_taskSyncSection is not null)
+        {
+            _ = _taskSyncSection.RefreshAsync(CancellationToken.None);
         }
     }
 

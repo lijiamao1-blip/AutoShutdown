@@ -9,6 +9,7 @@ using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
 using AutoShutdown.App.Infrastructure.Rtc;
+using AutoShutdown.App.Infrastructure.TaskScheduler;
 using AutoShutdown.App.Infrastructure.WakeOnLan;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
@@ -23,6 +24,7 @@ using AutoShutdown.Core.Recovery;
 using AutoShutdown.Core.Rtc;
 using AutoShutdown.Core.RunCommands;
 using AutoShutdown.Core.Scheduling;
+using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
@@ -141,6 +143,30 @@ public static class ServiceRegistration
         services.AddSingleton<IWakeOnLanService, WakeOnLanService>();
         services.AddSingleton<IWakeOnLanTaskExecutor, WakeOnLanTaskExecutor>();
 
+        // S22：Windows 任务计划程序单向同步（outbound）。本地 TaskCollection 是唯一事实源，
+        // 只外发（创建/更新/删除/查询），绝不 inbound；外部任务只回调本地应用（--trigger-task
+        // <id>），不携带任何电源命令。同步设置（task-sync.json）默认关闭；启用前必须先持久化
+        // 配置（fail-closed）。协调器在 ctor 订阅本地事件，因此必须在调度引擎加载任务前解析
+        // （经 ApplicationLifetimeCoordinator 构造），保证启动即纳入事实源变更。
+        services.AddSingleton<TaskSyncSettingsStore>(provider =>
+            new TaskSyncSettingsStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<ITaskSchedulerAdapter, WinTaskSchedulerAdapter>();
+        services.AddSingleton<TaskSchedulerMapper>();
+        services.AddSingleton<TaskSyncService>();
+        services.AddSingleton<TaskSyncCoordinator>(provider =>
+            new TaskSyncCoordinator(
+                provider.GetRequiredService<ITaskService>(),
+                provider.GetRequiredService<TaskSyncService>(),
+                provider.GetRequiredService<IClock>(),
+                Environment.ProcessPath
+                    ?? throw new InvalidOperationException("No process path is available.")));
+        services.AddSingleton<ExternalTriggerScheduleGate>();
+        // tasks.json 的独立文档存储：SchedulerEngine 内部自建实例（不可注入），此处单独注册，
+        // 供外部触发服务严格读取本地事实源（区分 NotFound/Corrupt/Invalid/UnsupportedVersion）。
+        services.AddSingleton<TasksDocumentStore>(provider =>
+            new TasksDocumentStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<ExternalTaskTriggerService>();
+
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
             [
@@ -202,6 +228,18 @@ public static class ServiceRegistration
             new RtcStatusSectionViewModel(
                 provider.GetRequiredService<IRtcWakeService>()));
 
+        // S22：任务计划程序同步分区。Enable/Disable 副作用（先清理再持久化）都在 VM 内完成；
+        // 配置损坏/非法/版本过高一律保持关闭（fail-closed，绝不静默启用）。
+        services.AddSingleton<TaskSyncSectionViewModel>(provider =>
+            new TaskSyncSectionViewModel(
+                provider.GetRequiredService<TaskSyncSettingsStore>(),
+                provider.GetRequiredService<TaskSyncCoordinator>(),
+                provider.GetRequiredService<ITaskSchedulerAdapter>(),
+                provider.GetRequiredService<IClock>(),
+                log: message => provider
+                    .GetRequiredService<IApplicationLogger>()
+                    .Info("TaskSync", message)));
+
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();
         services.AddSingleton<ActivationPipeServer>();
@@ -227,7 +265,8 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IAutoStartService>(),
                 unattendedPolicy: provider.GetRequiredService<IUnattendedPolicyService>(),
                 wolTargetsSection: provider.GetRequiredService<WolTargetsSectionViewModel>(),
-                rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>()));
+                rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>(),
+                taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

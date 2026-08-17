@@ -6,6 +6,7 @@ using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Recovery;
+using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 
 namespace AutoShutdown.App.AppHost;
 
@@ -20,6 +21,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private readonly DashboardRefreshService _dashboardRefreshService;
     private readonly NotificationCoordinator _notificationCoordinator;
     private readonly RecoveryNoticeService _recoveryNotice;
+    private readonly TaskSyncCoordinator _taskSyncCoordinator;
     private readonly IApplicationLogger _logger;
     private readonly LogRetentionService _logRetention;
     private readonly CancellationTokenSource _appCts = new();
@@ -40,6 +42,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         DashboardRefreshService dashboardRefreshService,
         NotificationCoordinator notificationCoordinator,
         RecoveryNoticeService recoveryNotice,
+        TaskSyncCoordinator taskSyncCoordinator,
         IApplicationLogger logger,
         LogRetentionService logRetention)
     {
@@ -52,6 +55,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(dashboardRefreshService);
         ArgumentNullException.ThrowIfNull(notificationCoordinator);
         ArgumentNullException.ThrowIfNull(recoveryNotice);
+        ArgumentNullException.ThrowIfNull(taskSyncCoordinator);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(logRetention);
 
@@ -64,6 +68,9 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _dashboardRefreshService = dashboardRefreshService;
         _notificationCoordinator = notificationCoordinator;
         _recoveryNotice = recoveryNotice;
+        // 在调度引擎启动（RunAsync 加载任务）前解析，保证 ctor 中订阅本地事实源事件不遗漏
+        // 初始加载；Dispose 时解除订阅并取消在途防抖。
+        _taskSyncCoordinator = taskSyncCoordinator;
         _logger = logger;
         _logRetention = logRetention;
     }
@@ -167,6 +174,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _appCts.Dispose();
         _dashboardRefreshService.Dispose();
         _notificationCoordinator.Dispose();
+        _taskSyncCoordinator.Dispose();
         _singleInstance.Dispose();
     }
 

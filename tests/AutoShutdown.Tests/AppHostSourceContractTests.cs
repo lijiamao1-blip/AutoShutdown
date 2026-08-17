@@ -96,23 +96,31 @@ public sealed class AppHostSourceContractTests
     }
 
     [Fact]
-    public void PipeProtocol_OnlyAllowsActivate_WithLengthAndTimeoutLimits()
+    public void PipeProtocol_OnlyAllowsActivateAndTrigger_WithLengthAndTimeoutLimits()
     {
         var server = ReadAppFile("Infrastructure", "ActivationPipeServer.cs");
         var client = ReadAppFile("Infrastructure", "ActivationPipeClient.cs");
 
+        // 合法协议仅两条命令：ACTIVATE（激活窗口）与 TRIGGER <本地 task id>（S22 外部触发
+        // 转发）。两条都不直接触碰电源/工作流/存储/配置——TRIGGER 只把稳定本地 id 交给
+        // ExternalTaskTriggerService 裁决（fail-closed），绝不反向覆盖本地或执行电源。
         Assert.Contains("\"ACTIVATE\"", server);
+        Assert.Contains("\"TRIGGER \"", server);
+        Assert.Contains("ExternalTaskTriggerService", server);
+        Assert.Contains("HandleExternalTriggerAsync", server);
         Assert.Contains("MaxMessageBytes", server);
         Assert.Contains("NamedPipeServerStream", server);
         Assert.DoesNotContain("SchedulerEngine", server);
         Assert.DoesNotContain("Storage", server);
         Assert.DoesNotContain("Configuration", server);
-        Assert.DoesNotContain("Workflow", server);
-        Assert.DoesNotContain("PowerService", server);
+        Assert.DoesNotContain("IPowerService", server);
+        Assert.DoesNotContain("ShutdownWorkflow", server);
+        Assert.DoesNotContain("ExitWindowsEx", server);
 
         Assert.Contains("TotalTimeoutMilliseconds", client);
         Assert.Contains("CancelAfter", client);
         Assert.Contains("\"ACTIVATE\"", client);
+        Assert.Contains("TryTriggerAsync", client);
     }
 
     [Fact]

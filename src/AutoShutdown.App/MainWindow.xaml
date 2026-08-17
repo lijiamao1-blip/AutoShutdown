@@ -489,6 +489,19 @@
                                     <Button Content="重新查询能力" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RtcStatusSection.RefreshCommand}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                                 </StackPanel>
                             </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Windows 任务计划程序同步" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="把本地任务单向同步到系统「任务计划程序」（AutoShutdown V2 目录），让关机/睡眠/唤醒能绕过本应用自动拉起。任务计划程序里的任务只会回调本应用（--trigger-task），绝不直接执行电源；开启期间自动跟随本地任务增删改。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <CheckBox Content="启用计划任务同步" IsChecked="{Binding TaskSyncSection.Enabled, Mode=TwoWay}" IsEnabled="{Binding TaskSyncSection.CanOperate}"
+                                              FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.StatusText}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,2" Visibility="{Binding TaskSyncSection.DetailText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.LastSyncText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,0" Visibility="{Binding TaskSyncSection.LastSyncText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding TaskSyncSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="立即同步" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding TaskSyncSection.SyncNowCommand}" IsEnabled="{Binding TaskSyncSection.CanOperate}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
