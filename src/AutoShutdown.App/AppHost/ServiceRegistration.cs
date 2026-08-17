@@ -131,9 +131,13 @@ public static class ServiceRegistration
         // S21：WoL 目标机器 + 发送 + 任务执行。只向用户显式配置的局域网目标发送
         // Magic Packet；不扫描、不自动发现、不访问公网。执行器经调度 handler 派发，
         // 失败抛 ScheduledTaskHandlingException → 实例 Faulted（绝不伪造成功）。
+        // S21-D1：网络边界 —— 仅允许默认有限广播与本机活动接口定向广播发送；
+        // 真实接口枚举（LocalNetworkInterfaces）只读本机网络配置，枚举失败 fail-closed。
         services.AddSingleton<TargetMachineStore>();
         services.AddSingleton<TargetMachineManager>();
         services.AddSingleton<IUdpDatagramSender, UdpDatagramSender>();
+        services.AddSingleton<IWakeOnLanLocalNetworks, LocalNetworkInterfaces>();
+        services.AddSingleton<WakeOnLanBroadcastPolicy>();
         services.AddSingleton<IWakeOnLanService, WakeOnLanService>();
         services.AddSingleton<IWakeOnLanTaskExecutor, WakeOnLanTaskExecutor>();
 

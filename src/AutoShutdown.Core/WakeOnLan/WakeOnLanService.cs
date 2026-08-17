@@ -7,18 +7,26 @@ namespace AutoShutdown.Core.WakeOnLan;
 /// Wake-on-LAN 发送编排（S21）。加载目标配置 → 严格 MAC 解析 → 构建 Magic Packet
 /// → 解析广播地址（缺省有限广播 255.255.255.255）与端口（缺省 9）→ 经
 /// <see cref="IUdpDatagramSender"/> 发送。只向用户显式配置的目标发送，绝不伪造成功。
+/// S21-D1 网络边界：任何非本机局域网定向广播的发送目的地一律结构化拒绝（fail-closed），
+/// 绝不发出 UDP 包；默认有限广播恒允许。
 /// </summary>
 public sealed class WakeOnLanService : IWakeOnLanService
 {
     private readonly TargetMachineManager _targets;
     private readonly IUdpDatagramSender _sender;
+    private readonly WakeOnLanBroadcastPolicy _broadcastPolicy;
 
-    public WakeOnLanService(TargetMachineManager targets, IUdpDatagramSender sender)
+    public WakeOnLanService(
+        TargetMachineManager targets,
+        IUdpDatagramSender sender,
+        WakeOnLanBroadcastPolicy broadcastPolicy)
     {
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(sender);
+        ArgumentNullException.ThrowIfNull(broadcastPolicy);
         _targets = targets;
         _sender = sender;
+        _broadcastPolicy = broadcastPolicy;
     }
 
     public async Task<WolSendResult> SendAsync(
@@ -59,6 +67,15 @@ public sealed class WakeOnLanService : IWakeOnLanService
         else
         {
             broadcast = WakeOnLanTarget.DefaultBroadcastAddress;
+        }
+
+        // S21-D1 网络边界：默认有限广播恒允许；自定义地址仅当为本机局域网定向广播时
+        // 才允许。不安全地址一律结构化拒绝，绝不发送 UDP。
+        if (!_broadcastPolicy.IsPermittedDestination(broadcast, out var reason))
+        {
+            return WolSendResult.Failure(
+                WolSendStatus.InvalidTarget,
+                "拒绝向非本机局域网广播发送：" + reason);
         }
 
         var port = target.Port ?? WakeOnLanTarget.DefaultPort;

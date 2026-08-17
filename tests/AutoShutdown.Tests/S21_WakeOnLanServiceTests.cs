@@ -157,7 +157,10 @@ public sealed class S21_WakeOnLanServiceTests
         var sender = new RecordingSender();
         var service = new WakeOnLanService(
             new TargetMachineManager(new TargetMachineStore(storage)),
-            sender);
+            sender,
+            // 本机活动接口 192.168.1.100/24 → 定向广播 192.168.1.255（S21-D1）。
+            new WakeOnLanBroadcastPolicy(
+                new FixedLocalNetworks(("192.168.1.100", "255.255.255.0"))));
         return (service, sender);
     }
 
