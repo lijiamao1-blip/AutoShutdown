@@ -23,6 +23,7 @@ using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
+using AutoShutdown.Core.Unattended;
 using AutoShutdown.Core.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -125,11 +126,24 @@ public static class ServiceRegistration
                 new RunCommandsAction(provider.GetRequiredService<RunCommandsService>()),
                 new CloseAppsAction(provider.GetRequiredService<CloseAppsService>())
             ]));
+
+        // S20：无人值守。版本化授权记录（unattended.json）+ 策略服务（fail-closed）+ 倒计时边界
+        // 等效确认评估器。远程层（S23，未实现）不得写入；本地启用/撤销经 UI 二次确认。
+        services.AddSingleton<UnattendedAuthorizationStore>(provider =>
+            new UnattendedAuthorizationStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<IUnattendedPolicyService>(provider =>
+            new UnattendedPolicyService(
+                provider.GetRequiredService<UnattendedAuthorizationStore>(),
+                provider.GetRequiredService<IClock>()));
+        services.AddSingleton<UnattendedConfirmationEvaluator>();
+
         services.AddSingleton<ShutdownWorkflow>(provider =>
             new ShutdownWorkflow(
                 provider.GetRequiredService<IConfigurationService>(),
                 provider.GetRequiredService<IPowerService>(),
-                provider.GetRequiredService<IPrePipelineRunner>()));
+                provider.GetRequiredService<IPrePipelineRunner>(),
+                provider.GetRequiredService<IUnattendedPolicyService>(),
+                provider.GetRequiredService<UnattendedConfirmationEvaluator>()));
         services.AddSingleton<IShutdownWorkflow>(provider =>
             new LoggingShutdownWorkflowDecorator(
                 provider.GetRequiredService<ShutdownWorkflow>(),

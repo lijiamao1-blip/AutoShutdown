@@ -19,5 +19,8 @@ public enum ShutdownDecisionCode
     RealPowerConfirmationMissing = 14,
 
     /// <summary>Pre-Pipeline 中 block 动作失败，取消电源意图（S16）。</summary>
-    PrePipelineBlocked = 15
+    PrePipelineBlocked = 15,
+
+    /// <summary>无人值守等效确认未获授权（S20）：授权失效/动作不匹配/实例终结，fail-closed 拒绝。</summary>
+    UnattendedNotAuthorized = 16
 }
