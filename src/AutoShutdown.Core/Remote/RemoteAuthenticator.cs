@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using AutoShutdown.Core.Abstractions;
@@ -39,17 +38,26 @@ public sealed class RemoteAuthenticator
     private readonly PairingService _pairing;
     private readonly IClock _clock;
 
-    // key = deviceId + '\n' + nonce，value = 过期 Unix 毫秒。
-    private readonly ConcurrentDictionary<string, long> _seenNonces = new();
+    // key = deviceId + '\n' + nonce，value = 过期 Unix 毫秒。普通字典 + 锁：保证「清理 → 容量检查 →
+    // 添加」在并发下原子，未过期条目数绝不越过 _maxNonceEntries（远程拒绝服务边界）。
+    private readonly Dictionary<string, long> _seenNonces = new();
+    private readonly object _nonceGate = new();
+    private readonly int _maxNonceEntries;
 
     public RemoteAuthenticator(
         PairingService pairing,
-        IClock clock)
+        IClock clock,
+        int? nonceCacheMaxEntries = null)
     {
         ArgumentNullException.ThrowIfNull(pairing);
         ArgumentNullException.ThrowIfNull(clock);
         _pairing = pairing;
         _clock = clock;
+        _maxNonceEntries = nonceCacheMaxEntries ?? RemoteProtocol.NonceCacheMaxEntries;
+        if (_maxNonceEntries < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nonceCacheMaxEntries), "Nonce cache capacity must be at least 1.");
+        }
     }
 
     public async Task<RemoteAuthResult> VerifyAsync(
@@ -82,16 +90,8 @@ public sealed class RemoteAuthenticator
             return Unauthorized("Request nonce is missing.");
         }
 
-        // nonce 防重放（先查后写，同一 nonce 只允许一次）。
-        var nonceKey = payload.DeviceId + "\n" + payload.Nonce;
-        if (!_seenNonces.TryAdd(nonceKey, nowMs + RemoteProtocol.NonceTtlMs))
-        {
-            return Unauthorized("Request nonce was already used (replay).");
-        }
-
-        EvictExpired(nowMs);
-
-        // 取设备密钥并校验 HMAC。
+        // 先验证设备存在 + HMAC（fail-closed），再原子保留 nonce。非法/未知设备/HMAC 失败请求
+        // 不得占用 nonce（防远程拒绝服务：未鉴权请求无法填满缓存）。
         var secret = await _pairing.GetDeviceSecretAsync(payload.DeviceId, cancellationToken).ConfigureAwait(false);
         if (secret is null)
         {
@@ -101,6 +101,23 @@ public sealed class RemoteAuthenticator
         if (!VerifyHmac(secret, rawPayload, hmac))
         {
             return Unauthorized("HMAC verification failed.");
+        }
+
+        // nonce 防重放 + 容量边界：清理过期项后未过期条目达到上限即拒绝新 nonce（绝不越限）；
+        // 锁保证并发下不越界；TryAdd 保证同一 nonce 只允许一次（重放 fail-closed）。
+        var nonceKey = payload.DeviceId + "\n" + payload.Nonce;
+        lock (_nonceGate)
+        {
+            EvictExpired(nowMs);
+            if (_seenNonces.Count >= _maxNonceEntries)
+            {
+                return Unauthorized("Nonce cache is at capacity.");
+            }
+
+            if (!_seenNonces.TryAdd(nonceKey, nowMs + RemoteProtocol.NonceTtlMs))
+            {
+                return Unauthorized("Request nonce was already used (replay).");
+            }
         }
 
         return new RemoteAuthResult
@@ -139,29 +156,22 @@ public sealed class RemoteAuthenticator
 
     private void EvictExpired(long nowMs)
     {
-        if (_seenNonces.Count < RemoteProtocol.NonceCacheMaxEntries)
-        {
-            return;
-        }
-
+        // 完整清理一遍过期条目，保证容量判定基于「未过期」条目数。调用方须持有 _nonceGate。
+        List<string>? expired = null;
         foreach (var pair in _seenNonces)
         {
             if (pair.Value < nowMs)
             {
-                _seenNonces.TryRemove(pair.Key, out _);
+                (expired ??= new List<string>()).Add(pair.Key);
             }
         }
 
-        // 仍超限：拒绝新条目（fail-closed）——由调用方在上层再做一次上限检查。
-        while (_seenNonces.Count > RemoteProtocol.NonceCacheMaxEntries)
+        if (expired is not null)
         {
-            var stale = _seenNonces.FirstOrDefault(pair => pair.Value < nowMs);
-            if (stale.Key is null)
+            foreach (var key in expired)
             {
-                break;
+                _seenNonces.Remove(key);
             }
-
-            _seenNonces.TryRemove(stale.Key, out _);
         }
     }
 

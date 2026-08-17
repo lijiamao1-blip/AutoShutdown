@@ -19,7 +19,7 @@ public sealed record RemoteRequestEnvelope
     [JsonPropertyName("payload")]
     public string Payload { get; init; } = string.Empty;
 
-    /// <summary>base64(HMAC-SHA256(sharedSecret, UTF8(payload)))。配对请求为空串。</summary>
+    /// <summary>hex 小写(HMAC-SHA256(sharedSecret, UTF8(payload)))。配对请求为空串。</summary>
     [JsonPropertyName("hmac")]
     public string Hmac { get; init; } = string.Empty;
 }

@@ -32,8 +32,20 @@ public static class RemoteProtocol
     /// <summary>nonce 防重放缓存 TTL（毫秒），与时间窗一致。</summary>
     public const long NonceTtlMs = TimestampToleranceMs;
 
-    /// <summary>nonce 防重放缓存最大条目数（到达后先清理过期项，仍满则拒绝新条目）。</summary>
+    /// <summary>nonce 防重放缓存最大条目数（到达后先清理过期项，仍满则拒绝新条目，绝不越限）。</summary>
     public const int NonceCacheMaxEntries = 10000;
+
+    /// <summary>连接首字节读取期限（远程拒绝服务防护：慢首字节在此期限内未送达即关闭连接）。</summary>
+    public static readonly TimeSpan ConnectionFirstByteTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>TLS 握手期限（握手停滞在此期限内未完成即关闭连接）。</summary>
+    public static readonly TimeSpan ConnectionTlsHandshakeTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>整行请求读取期限（慢行帧 / 不完整帧在此期限内未收满一行即关闭连接）。</summary>
+    public static readonly TimeSpan ConnectionLineReadTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>在途连接上限（达到上限时新连接立即关闭，fail-closed 无 handler/引擎副作用）。</summary>
+    public const int MaxConcurrentConnections = 64;
 
     /// <summary>配对 PIN 连续失败锁定阈值。</summary>
     public const int PairingMaxFailedAttempts = 5;

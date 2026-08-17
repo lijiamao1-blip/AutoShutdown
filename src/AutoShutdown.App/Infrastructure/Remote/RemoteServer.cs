@@ -20,6 +20,9 @@ namespace AutoShutdown.App.Infrastructure.Remote;
 /// <item>RequireTls=true 时拒绝任何明文连接（下行降级保护）；RequireTls=false 时明文连接仅
 /// 以 IsTls=false 进入处理器 —— 配对与无人值守等效确认在处理器层仍强制 TLS。</item>
 /// <item>请求体超过 <see cref="RemoteProtocol.MaxRequestBytes"/> 一律拒绝（InvalidPayload）。</item>
+/// <item>连接资源边界（D1 远程拒绝服务防护）：首字节 / TLS 握手 / 整行读取各有固定期限；
+/// 在途连接有上限。期限到期、不完整帧或并发超限一律关闭连接，不调用
+/// <see cref="RemoteRequestHandler"/>、不提交引擎、不执行任何电源动作（fail-closed）。</item>
 /// <item>任何传输/解析/握手异常直接关闭连接，绝不执行任何远程命令；决策只在
 /// <see cref="RemoteRequestHandler"/>（走本地调度引擎唯一路径）。</item>
 /// <item>本服务器不写任何配置/白名单/无人值守策略；日志/审计不含 PIN/secret/HMAC/私钥。</item>
@@ -39,6 +42,12 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     private readonly IApplicationLogger _logger;
     private readonly object _sync = new();
 
+    // 连接资源边界（D1 远程拒绝服务防护）：固定、受测的连接期限与在途连接上限。
+    private readonly TimeSpan _firstByteTimeout;
+    private readonly TimeSpan _tlsHandshakeTimeout;
+    private readonly TimeSpan _lineReadTimeout;
+    private readonly SemaphoreSlim _connectionSlots;
+
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _acceptLoop;
@@ -49,7 +58,11 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         RemoteRequestHandler requestHandler,
         IClock clock,
         IRemoteAuditLog auditLog,
-        IApplicationLogger logger)
+        IApplicationLogger logger,
+        TimeSpan? firstByteTimeout = null,
+        TimeSpan? tlsHandshakeTimeout = null,
+        TimeSpan? lineReadTimeout = null,
+        int? maxConcurrentConnections = null)
     {
         ArgumentNullException.ThrowIfNull(settingsStore);
         ArgumentNullException.ThrowIfNull(certificateService);
@@ -64,6 +77,24 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         _clock = clock;
         _auditLog = auditLog;
         _logger = logger;
+
+        _firstByteTimeout = firstByteTimeout ?? RemoteProtocol.ConnectionFirstByteTimeout;
+        _tlsHandshakeTimeout = tlsHandshakeTimeout ?? RemoteProtocol.ConnectionTlsHandshakeTimeout;
+        _lineReadTimeout = lineReadTimeout ?? RemoteProtocol.ConnectionLineReadTimeout;
+        if (_firstByteTimeout <= TimeSpan.Zero
+            || _tlsHandshakeTimeout <= TimeSpan.Zero
+            || _lineReadTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstByteTimeout), "Connection timeouts must be positive.");
+        }
+
+        var slotCount = maxConcurrentConnections ?? RemoteProtocol.MaxConcurrentConnections;
+        if (slotCount < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrentConnections), "Max concurrent connections must be at least 1.");
+        }
+
+        _connectionSlots = new SemaphoreSlim(slotCount, slotCount);
     }
 
     /// <summary>
@@ -214,6 +245,8 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         {
             // 退出路径不因停止失败而阻塞。
         }
+
+        _connectionSlots.Dispose();
     }
 
     // ===== 监听与连接 =====
@@ -240,8 +273,37 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
                 break;
             }
 
-            // 每个连接独立处理，异常内部吞掉（fail-closed 关闭连接）。
-            _ = HandleClientAsync(client, cancellationToken);
+            // 在途连接上限：达到上限立即关闭新连接（fail-closed，无 handler/引擎副作用）。
+            if (!_connectionSlots.Wait(0))
+            {
+                var sourceIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown";
+                try
+                {
+                    client.Dispose();
+                }
+                catch (SocketException)
+                {
+                }
+
+                _auditLog.Write(TransportEntry(sourceIp, RemoteAuditOutcome.Invalid, "Connection rejected: in-flight connection limit reached."));
+                continue;
+            }
+
+            // 每个连接独立处理，异常内部吞掉（fail-closed 关闭连接）；槽位在结束/异常时释放。
+            _ = HandleClientWithSlotAsync(client, cancellationToken);
+        }
+    }
+
+    /// <summary>在途连接槽位包裹：无论正常结束还是异常，都释放槽位。</summary>
+    private async Task HandleClientWithSlotAsync(TcpClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandleClientAsync(client, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _connectionSlots.Release();
         }
     }
 
@@ -249,6 +311,7 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     {
         using (client)
         {
+            var sourceIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown";
             try
             {
                 // 每次连接按当前设置裁决（白名单/开关/RequireTls 即时生效）。
@@ -258,10 +321,10 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
                     return;
                 }
 
-                var sourceIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown";
-
                 using var network = client.GetStream();
-                var firstByte = await ReadSingleByteAsync(network, cancellationToken).ConfigureAwait(false);
+                // 首字节读取期限：慢首字节在此期限内未送达即超时关闭（fail-closed，不进入 handler）。
+                var firstByte = await ReadSingleByteAsync(network, cancellationToken)
+                    .WaitAsync(_firstByteTimeout, cancellationToken).ConfigureAwait(false);
                 if (firstByte < 0)
                 {
                     return;
@@ -284,7 +347,7 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
                             ClientCertificateRequired = settings.RequireClientCertificate,
                             EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
                             CertificateRevocationCheckMode = X509RevocationMode.NoCheck
-                        }, cancellationToken).ConfigureAwait(false);
+                        }, cancellationToken).WaitAsync(_tlsHandshakeTimeout, cancellationToken).ConfigureAwait(false);
                     }
                     catch (AuthenticationException exception)
                     {
@@ -331,6 +394,12 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
             {
                 // 服务停止：静默关闭。
             }
+            catch (TimeoutException)
+            {
+                // 连接期限（首字节 / TLS 握手 / 整行读取）到期：关闭连接，不调用 handler、
+                // 不提交引擎、不执行任何电源动作（fail-closed，远程拒绝服务防护）。
+                _auditLog.Write(TransportEntry(sourceIp, RemoteAuditOutcome.Invalid, "Connection timed out (first-byte / TLS handshake / line-read deadline)."));
+            }
             catch (Exception exception)
             {
                 // fail-closed：任何传输/解析异常直接关闭连接，绝不执行远程命令。
@@ -346,8 +415,9 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         string sourceIp,
         CancellationToken cancellationToken)
     {
+        // 整行读取期限：慢行帧 / 不完整帧在此期限内未收满一行即超时关闭（fail-closed）。
         var line = await ReadLineBytesAsync(transport, RemoteProtocol.MaxRequestBytes + 1, cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(_lineReadTimeout, cancellationToken).ConfigureAwait(false);
         if (line is null || line.Length == 0)
         {
             return null;
