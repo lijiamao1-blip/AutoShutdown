@@ -113,7 +113,34 @@ public sealed class S_PKG_LifecycleContractTests
         Assert.Contains("switch ($Command)", Lifecycle);
     }
 
-    // ---- 5. 测试装置覆盖核心状态机路径 ----
+    // ---- 5. 升级编排 Invoke-ASUpgrade：备份前置、迁移钩子、自检门禁、失败自动回滚 ----
+
+    [Fact]
+    public void Lifecycle_UpgradeOrchestrationIsBackupFirstAndSelfCheckGated()
+    {
+        Assert.Contains("function Invoke-ASUpgrade", Lifecycle);
+        Assert.Contains("Backup-ASDataRoot -Root $dataRoot -Tag $Tag", Lifecycle);
+        Assert.Contains("Replace-ASBinary", Lifecycle);
+        Assert.Contains("Test-ASSelfCheck", Lifecycle);
+        // 迁移失败 / 自检失败都必须自动回滚（绝不带着半迁移数据继续）。
+        Assert.Contains("upgrade data migration failed; automatic rollback performed", Lifecycle);
+        Assert.Contains("upgrade self-check failed; automatic rollback performed", Lifecycle);
+        // 回滚标签精确匹配尾部：{ts}-<Tag>，避免 'upgrade' 误配 'upgrade2'。
+        Assert.Contains("\"*-$Tag\"", Lifecycle);
+    }
+
+    [Fact]
+    public void Lifecycle_ReplaceClearsStaleVersionedExe_AndSelfCheckMatchesExpectedStrictly()
+    {
+        // 替换后清除安装目录中与候选同名之外的过期 AutoShutdown-v*.exe（避免新旧并存）。
+        Assert.Contains("candExeNames", Lifecycle);
+        Assert.Contains("Where-Object { $candExeNames -notcontains $_.Name }", Lifecycle);
+        // 自检严格匹配 ExpectedVersion，且把陈旧版本化 EXE 视为失败。
+        Assert.Contains("stale versioned exe present", Lifecycle);
+        Assert.Contains("expected $ExpectedVersion not found", Lifecycle);
+    }
+
+    // ---- 6. 测试装置覆盖核心状态机路径 ----
 
     [Fact]
     public void Lifecycle_HarnessExercisesCorePaths()
@@ -123,6 +150,23 @@ public sealed class S_PKG_LifecycleContractTests
         Assert.Contains("uninstall Remove clears backups", Harness);
         Assert.Contains("reinstall keeps data root", Harness);
         Assert.Contains("backup failed; original install untouched", Lifecycle);
+    }
+
+    // ---- 7. B-2 升级装置覆盖 V1→V2 迁移与失败回退路径 ----
+
+    [Fact]
+    public void Lifecycle_UpgradeHarnessExercisesB2ValidationSet()
+    {
+        var upgradeHarness = File.ReadAllText(Path.Combine(FindToolsRoot(), "test", "Invoke-SPkgUpgradeTests.ps1"));
+        Assert.Contains("V1->V2 normal upgrade", upgradeHarness);
+        Assert.Contains("runtime.json.v1bak", upgradeHarness);
+        Assert.Contains("corrupt config", upgradeHarness);
+        Assert.Contains("corrupt tasks", upgradeHarness);
+        Assert.Contains("corrupt runtime", upgradeHarness);
+        Assert.Contains("backup failure aborts upgrade", upgradeHarness);
+        Assert.Contains("replace failure rolled back to V1 exe", upgradeHarness);
+        Assert.Contains("self-check failure rolled back to V1 exe", upgradeHarness);
+        Assert.Contains("V2->V2 re-upgrade", upgradeHarness);
     }
 
     private static string FindToolsRoot()

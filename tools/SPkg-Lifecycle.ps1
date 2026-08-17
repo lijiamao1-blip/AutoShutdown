@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 param(
-    [Parameter(Mandatory = $false)][ValidateSet('health', 'backup', 'replace', 'selfcheck', 'rollback', 'uninstall', 'reinstall')]
+    [Parameter(Mandatory = $false)][ValidateSet('health', 'backup', 'replace', 'selfcheck', 'rollback', 'upgrade', 'uninstall', 'reinstall')]
     [string]$Command = '',
     [string]$DataRoot = '',
     [string]$Tag = 'upgrade',
@@ -170,7 +170,10 @@ function Replace-ASBinary {
     }
     $backupDir = $slot
 
-    # 2) 复制候选（单文件 + 伴随文件）到安装目录
+    # 2) 复制候选（单文件 + 伴随文件）到安装目录；随后清除安装目录中过期的版本化
+    #    EXE（与候选同名的除外）。陈旧旧版 EXE 若留在安装目录会让自检出现新旧两个
+    #    AutoShutdown-v*.exe 的歧义，必须移除。只动 AutoShutdown-v*.exe，绝不删除
+    #    安装目录里的用户自定义文件。任何失败 → 自动回滚。
     try {
         $items = Get-ChildItem -LiteralPath $candFull -Force
         foreach ($item in $items) {
@@ -181,6 +184,10 @@ function Replace-ASBinary {
                 Copy-Item -LiteralPath $item.FullName -Destination $target -Force
             }
         }
+        $candExeNames = @(Get-ChildItem -LiteralPath $candFull -Filter 'AutoShutdown-v*.exe' -File | ForEach-Object { $_.Name })
+        Get-ChildItem -LiteralPath $installFull -Filter 'AutoShutdown-v*.exe' -File -ErrorAction SilentlyContinue |
+            Where-Object { $candExeNames -notcontains $_.Name } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
     } catch {
         # 3) 替换失败 → 仅在存在完整备份时自动回滚；否则保持原状并报告（fail-closed）
         if (Test-Path -LiteralPath (Join-Path $backupDir '_complete.marker')) {
@@ -233,16 +240,24 @@ function Test-ASSelfCheck {
     $results = [System.Collections.Generic.List[object]]::new()
     $ok = $true
 
-    $exe = Get-ChildItem -LiteralPath $InstallDir -Filter 'AutoShutdown-v*.exe' -File -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $exe) {
+    $exes = @(Get-ChildItem -LiteralPath $InstallDir -Filter 'AutoShutdown-v*.exe' -File -ErrorAction SilentlyContinue)
+    if ($exes.Count -eq 0) {
         $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Fail'; Message = 'no candidate exe found' })
         $ok = $false
-    } elseif ($ExpectedVersion -and $exe.Name -notlike "*$ExpectedVersion*") {
-        $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Fail'; Message = "name $($exe.Name) != expected $ExpectedVersion" })
-        $ok = $false
+    } elseif ($ExpectedVersion) {
+        $match = @($exes | Where-Object { $_.Name -like "*$ExpectedVersion*" } | Select-Object -First 1)
+        $stale = @($exes | Where-Object { $_.Name -notlike "*$ExpectedVersion*" })
+        if ($match.Count -eq 0) {
+            $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Fail'; Message = "expected $ExpectedVersion not found (present: $([string]::Join(',', @($exes | ForEach-Object { $_.Name })))" })
+            $ok = $false
+        } elseif ($stale.Count -gt 0) {
+            $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Fail'; Message = "stale versioned exe present: $([string]::Join(',', @($stale | ForEach-Object { $_.Name })))" })
+            $ok = $false
+        } else {
+            $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Pass'; Message = $match[0].Name })
+        }
     } else {
-        $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Pass'; Message = $exe.Name })
+        $results.Add([pscustomobject]@{ Check = 'exe'; Status = 'Pass'; Message = $exes[0].Name })
     }
 
     # 各文件 schema：config.json=1（V1→V2 迁移由 app RuntimeStateStore 在 .v1bak 后重建）、
@@ -277,7 +292,8 @@ function Restore-ASRollback {
         Sort-Object LastWriteTime -Descending)
     $matched = $null
     foreach ($m in $metaFiles) {
-        if ($m.Directory.Name -like "*$Tag*") { $matched = $m.Directory; break }
+        # 精确匹配尾部标签：目录名 {ts}-<Tag>，避免 'upgrade' 误配 'upgrade2'。
+        if ($m.Directory.Name -like "*-$Tag") { $matched = $m.Directory; break }
     }
     if (-not $matched) { throw "no spkg data backup found for tag '$Tag' under $backupRoot" }
     $restored = @()
@@ -294,6 +310,52 @@ function Restore-ASRollback {
     # 2) 恢复替换前的安装目录
     Restore-ASInstallBackup -InstallDir ([System.IO.Path]::GetFullPath($InstallDir)) -BackupDir (Join-Path $backupRoot 'rollback-install') | Out-Null
     return [pscustomobject]@{ DataFilesRestored = @($restored); DataRoot = $dataRoot; InstallDir = [System.IO.Path]::GetFullPath($InstallDir) }
+}
+
+# ---- 升级编排：备份 → 替换 → 数据迁移（app 负责，可注入模拟）→ 自检 → 失败自动回滚 ----
+# 编码执行书契约：备份成功是任何替换前置；迁移失败/自检失败一律自动回滚并恢复原数据
+# 与原 EXE（含 V1 EXE 恢复能力）。MigrationScript 为空表示数据无需迁移（V2→V2 或数据已迁移）。
+function Invoke-ASUpgrade {
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidateDir,
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [string]$Root = '',
+        [string]$Tag = 'upgrade',
+        [string]$ExpectedVersion = '',
+        [scriptblock]$MigrationScript = $null
+    )
+    $dataRoot = Get-ASDataRoot -Root $Root
+
+    # 1) 备份：备份成功是任何替换前置；失败直接中止，不触碰安装目录。
+    $backup = Backup-ASDataRoot -Root $dataRoot -Tag $Tag
+
+    # 2) 替换二进制（内部备份安装目录 → 验证 → 原子换槽；复制失败自动回滚并抛出）。
+    $replace = Replace-ASBinary -CandidateDir $CandidateDir -InstallDir $InstallDir -Root $dataRoot -Tag $Tag
+
+    # 3) 数据迁移（V1→V2 由 app 启动时完成；沙箱/离线路径用 MigrationScript 模拟）。
+    #    迁移失败必须自动回滚，绝不带着半迁移数据继续。
+    if ($null -ne $MigrationScript) {
+        try {
+            & $MigrationScript -Root $dataRoot
+        } catch {
+            Restore-ASRollback -InstallDir $InstallDir -Root $dataRoot -Tag $Tag | Out-Null
+            throw 'upgrade data migration failed; automatic rollback performed: ' + $_.Exception.Message
+        }
+    }
+
+    # 4) 自检：配置/tasks 版本、runtime 可解析、EXE 版本一致；失败自动回滚。
+    $sc = Test-ASSelfCheck -InstallDir $InstallDir -Root $dataRoot -ExpectedVersion $ExpectedVersion
+    if (-not $sc.Ok) {
+        $fails = @($sc.Checks | Where-Object { $_.Status -eq 'Fail' } |
+            ForEach-Object { "$($_.Check): $($_.Message)" }) -join '; '
+        Restore-ASRollback -InstallDir $InstallDir -Root $dataRoot -Tag $Tag | Out-Null
+        throw "upgrade self-check failed; automatic rollback performed: $fails"
+    }
+
+    return [pscustomobject]@{
+        BackupDir = $backup.BackupDir; InstallDir = $replace.InstallDir; DataRoot = $dataRoot
+        Migrated = ($null -ne $MigrationScript); SelfCheck = $sc
+    }
 }
 
 # ---- 卸载：默认只移除应用拥有的非用户文件；用户数据显式选择 Keep|Remove ----
@@ -381,6 +443,10 @@ if ($MyInvocation.InvocationName -ne '.') {
             if (-not $r.Ok) { exit 30 }
         }
         'rollback' { Restore-ASRollback -InstallDir $InstallDir -Root $DataRoot -Tag $Tag | Format-List | Out-String | Write-Host }
+        'upgrade' {
+            $r = Invoke-ASUpgrade -CandidateDir $CandidateDir -InstallDir $InstallDir -Root $DataRoot -Tag $Tag -ExpectedVersion $ExpectedVersion
+            $r | Format-List | Out-String | Write-Host
+        }
         'uninstall' { Invoke-ASUninstall -InstallDir $InstallDir -Root $DataRoot -UserData $UserData | Format-List | Out-String | Write-Host }
         'reinstall' { Invoke-ASReinstall -CandidateDir $CandidateDir -InstallDir $InstallDir -Root $DataRoot | Format-List | Out-String | Write-Host }
     }
