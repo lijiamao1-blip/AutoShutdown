@@ -159,7 +159,9 @@ public static class ServiceRegistration
             provider.GetRequiredService<IScheduledTaskHandler>(),
             provider.GetRequiredService<ITaskArbitrator>(),
             provider.GetRequiredService<IIdleMonitor>(),
-            IdleShutdownRule.GlobalDefaultThreshold));
+            IdleShutdownRule.GlobalDefaultThreshold,
+            provider.GetRequiredService<IUnattendedPolicyService>(),
+            provider.GetRequiredService<UnattendedConfirmationEvaluator>()));
 
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();

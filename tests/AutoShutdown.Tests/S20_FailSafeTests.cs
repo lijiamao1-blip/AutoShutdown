@@ -193,7 +193,8 @@ public sealed class S20_FailSafeTests
         ScheduledFireTime = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero),
         StageToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         HasExecuted = true,
-        CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
+        CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
+        UseUnattended = true
     };
 
     private static UnattendedAuthorizationDecision Authorized(PowerAction action)

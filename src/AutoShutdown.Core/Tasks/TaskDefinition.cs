@@ -44,6 +44,13 @@ public sealed record TaskDefinition
     public bool RealPowerConfirmed { get; init; }
 
     /// <summary>
+    /// 任务级「使用无人值守」选择（S20-D1）。默认 false（关闭，维持人工确认路径）。
+    /// 仅当本地无人值守授权有效且与所选电源动作匹配时，UI 才允许置真；置真后创建
+    /// RealPowerConfirmed=false 的任务，由调度器在倒计时边界做无人值守等效确认裁决。
+    /// </summary>
+    public bool UseUnattended { get; init; }
+
+    /// <summary>
     /// 任务启用状态。默认 true（启用）。false 表示禁用，调度器跳过该任务。
     /// </summary>
     public bool IsEnabled { get; init; } = true;

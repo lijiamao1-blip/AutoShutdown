@@ -167,6 +167,12 @@
                                             <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                             <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         </UniformGrid>
+                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
+                                            <StackPanel>
+                                                <CheckBox Content="使用无人值守（到期不等待人工确认）" IsChecked="{Binding UseUnattended}" IsEnabled="{Binding IsUnattendedTaskOptionAvailable}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding UnattendedTaskOptionHint}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="23,4,0,0"/>
+                                            </StackPanel>
+                                        </Border>
                                         <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
                                         <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
                                         <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>

@@ -30,7 +30,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
             unattendedPolicyService: new FixedUnattendedPolicyService(action => Authorized(action)),
             unattendedEvaluator: _evaluator);
 
-        var outcome = await workflow.ExecuteAsync(ValidInstance(), CancellationToken.None);
+        var outcome = await workflow.ExecuteAsync(ValidInstance(useUnattended: true), CancellationToken.None);
 
         Assert.True(outcome.Succeeded);
         Assert.Equal(ShutdownWorkflowStatus.Accepted, outcome.Status);
@@ -57,7 +57,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
                 UnattendedAuthorizationDecision.Denied(UnattendedPolicyStatus.Expired, "expired")),
             unattendedEvaluator: _evaluator);
 
-        var outcome = await workflow.ExecuteAsync(ValidInstance(), CancellationToken.None);
+        var outcome = await workflow.ExecuteAsync(ValidInstance(useUnattended: true), CancellationToken.None);
 
         Assert.False(outcome.Succeeded);
         Assert.Equal(ShutdownDecisionCode.UnattendedNotAuthorized, outcome.DecisionCode);
@@ -79,7 +79,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
             unattendedEvaluator: _evaluator);
 
         var outcome = await workflow.ExecuteAsync(
-            ValidInstance() with { ActionSnapshot = PowerAction.Hibernate },
+            ValidInstance(useUnattended: true) with { ActionSnapshot = PowerAction.Hibernate },
             CancellationToken.None);
 
         Assert.False(outcome.Succeeded);
@@ -98,7 +98,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
                 _ => throw new InvalidOperationException("storage failure")),
             unattendedEvaluator: _evaluator);
 
-        var outcome = await workflow.ExecuteAsync(ValidInstance(), CancellationToken.None);
+        var outcome = await workflow.ExecuteAsync(ValidInstance(useUnattended: true), CancellationToken.None);
 
         Assert.False(outcome.Succeeded);
         Assert.Equal(ShutdownDecisionCode.UnattendedNotAuthorized, outcome.DecisionCode);
@@ -113,7 +113,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
             new FixedConfigurationService(RealPowerConfig()),
             power);
 
-        var outcome = await workflow.ExecuteAsync(ValidInstance(), CancellationToken.None);
+        var outcome = await workflow.ExecuteAsync(ValidInstance(useUnattended: true), CancellationToken.None);
 
         Assert.False(outcome.Succeeded);
         Assert.Equal(ShutdownDecisionCode.RealPowerConfirmationMissing, outcome.DecisionCode);
@@ -176,7 +176,7 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
         Logging = new LoggingConfig { Level = LogLevel.Information, RetentionDays = 14 }
     };
 
-    private static TaskInstance ValidInstance() => new()
+    private static TaskInstance ValidInstance(bool useUnattended = false) => new()
     {
         InstanceId = InstanceId1,
         SourceTaskId = SourceTaskId,
@@ -186,7 +186,8 @@ public sealed class S20_ShutdownWorkflowUnattendedTests
         WarningStartTime = null,
         StageToken = StageToken1,
         HasExecuted = true,
-        CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero)
+        CreatedAt = new DateTimeOffset(2024, 1, 15, 10, 0, 0, TimeSpan.Zero),
+        UseUnattended = useUnattended
     };
 
     private static UnattendedAuthorizationDecision Authorized(PowerAction action)

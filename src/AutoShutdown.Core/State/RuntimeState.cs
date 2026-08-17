@@ -58,4 +58,10 @@ public sealed record TaskInstance
 
     /// <summary>真实电源确认的标识（可选）。默认 null，向后兼容。</summary>
     public Guid? RealPowerConfirmationId { get; init; }
+
+    /// <summary>
+    /// 该实例是否显式选择无人值守执行（S20-D1）。默认 false。仅当为 true 时，调度器在
+    /// 倒计时边界评估无人值守等效确认；否则维持人工确认路径（RealPowerConfirmed）。
+    /// </summary>
+    public bool UseUnattended { get; init; }
 }

@@ -293,6 +293,18 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
             };
         }
 
+        // S20-D1：无人值守等效确认仅对显式选择 UseUnattended 的任务生效。未选择（默认关闭）
+        // 且无人工确认时拒绝，不得把全局无人值守授权自动应用到所有任务（不默认跳过人工确认）。
+        if (!instance.UseUnattended)
+        {
+            return new RealPowerConfirmationResolution
+            {
+                Allowed = false,
+                DecisionCode = ShutdownDecisionCode.RealPowerConfirmationMissing,
+                Message = "Real power execution requires an explicit user confirmation."
+            };
+        }
+
         if (_unattendedPolicyService is null || _unattendedEvaluator is null)
         {
             return new RealPowerConfirmationResolution

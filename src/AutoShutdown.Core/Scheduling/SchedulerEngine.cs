@@ -4,6 +4,7 @@ using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
+using AutoShutdown.Core.Unattended;
 using AutoShutdown.Core.Workflow;
 
 namespace AutoShutdown.Core.Scheduling;
@@ -26,6 +27,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private readonly TasksDocumentStore _tasksDocumentStore;
     private readonly IIdleMonitor? _idleMonitor;
     private readonly TimeSpan _globalDefaultIdleThreshold;
+    private readonly IUnattendedPolicyService? _unattendedPolicyService;
+    private readonly UnattendedConfirmationEvaluator? _unattendedEvaluator;
     private readonly object _sync = new();
 
     private SchedulerSnapshot _snapshot = SchedulerSnapshot.Empty;
@@ -41,7 +44,9 @@ public sealed class SchedulerEngine : ISchedulerEngine
         IScheduledTaskHandler handler,
         ITaskArbitrator arbitrator,
         IIdleMonitor? idleMonitor = null,
-        TimeSpan? globalDefaultIdleThreshold = null)
+        TimeSpan? globalDefaultIdleThreshold = null,
+        IUnattendedPolicyService? unattendedPolicyService = null,
+        UnattendedConfirmationEvaluator? unattendedEvaluator = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(clock);
@@ -61,6 +66,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
         _arbitrator = arbitrator;
         _idleMonitor = idleMonitor;
         _globalDefaultIdleThreshold = globalDefaultIdleThreshold ?? IdleShutdownRule.GlobalDefaultThreshold;
+        _unattendedPolicyService = unattendedPolicyService;
+        _unattendedEvaluator = unattendedEvaluator;
         _runtimeStateStore = new RuntimeStateStore(storage);
         _tasksDocumentStore = new TasksDocumentStore(storage);
 
@@ -772,12 +779,112 @@ public sealed class SchedulerEngine : ISchedulerEngine
         await PersistAndCommitInstanceAsync(updated, now, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// S20-D1 倒计时边界确认裁决。在 Confirming→Running 之前，基于最新实例状态重新裁决：
+    /// <list type="number">
+    /// <item>取消/终态胜出：实例非 Waiting/Confirming 一律拒绝。</item>
+    /// <item>输入恢复胜出：空闲触发且已进入倒计时的实例，到期边界重新检测输入，恢复即取消。</item>
+    /// <item>无人值守等效确认：仅对显式选择 UseUnattended 的任务评估；授权异常/失效一律 fail-closed 取消。</item>
+    /// </list>
+    /// 返回 true 表示可继续（有效人工确认已内置于 RealPowerConfirmed，或无人值守等效确认有效）；
+    /// false 表示已拒绝（实例被取消，不进 Pipeline、不调用电源）。不改冻结状态机、双闸门、
+    /// 唯一电源出口与 Pre-Pipeline 顺序。
+    /// </summary>
+    private async Task<bool> ResolveCountdownConfirmationAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // 基于最新实例状态裁决（取消/终态在快照中已反映，绝不信任过期候选副本）。
+        var latest = FindInstance(instance.InstanceId) ?? instance;
+
+        if (latest.State is not (TaskInstanceState.Waiting or TaskInstanceState.Confirming))
+        {
+            return false;
+        }
+
+        // 输入恢复胜出：仅空闲触发且已进入倒计时的实例，在到期边界重新检测输入。
+        if (latest.State == TaskInstanceState.Confirming
+            && latest.IsIdleTriggered
+            && _idleMonitor is not null)
+        {
+            var definition = _taskService.Get(latest.SourceTaskId);
+            if (definition is not null)
+            {
+                var idleDuration = _idleMonitor.GetIdleDuration();
+                if (idleDuration is not null
+                    && !IdleShutdownRule.IsIdleDue(definition, _globalDefaultIdleThreshold, idleDuration))
+                {
+                    await CancelIdleTriggeredAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                    return false;
+                }
+            }
+        }
+
+        // 无人值守等效确认：仅对显式选择无人值守的任务评估（默认关闭、fail-closed）。
+        if (latest.UseUnattended)
+        {
+            if (_unattendedPolicyService is null || _unattendedEvaluator is null)
+            {
+                await CancelUnattendedAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            UnattendedAuthorizationDecision authorization;
+            try
+            {
+                authorization = await _unattendedPolicyService
+                    .EvaluateAsync(latest.ActionSnapshot, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                await CancelUnattendedAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var decision = _unattendedEvaluator.Evaluate(authorization, latest);
+            if (!decision.AllowsPower)
+            {
+                await CancelUnattendedAsync(latest, now, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>无人值守等效确认被拒绝：通过冻结白名单 Confirming→Cancelled 终结，不执行电源。</summary>
+    private async Task CancelUnattendedAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cancelled = _taskService.Cancel(instance);
+        if (cancelled.Succeeded && cancelled.Instance is not null)
+        {
+            await PersistAndCommitInstanceAsync(cancelled.Instance, now, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private async Task EnterExecutingAsync(
         TaskInstance instance,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         if (instance.HasExecuted)
+        {
+            return;
+        }
+
+        // S20-D1：倒计时边界确认裁决。基于最新实例状态 + 取消/输入事实 + 有效授权，
+        // 在 Confirming→Running 之前完成；取消/输入恢复/终态/授权异常或失效一律拒绝，
+        // 不进 Pipeline、不调用电源（仅有效人工确认或有效无人值守等效确认可继续）。
+        if (!await ResolveCountdownConfirmationAsync(instance, now, cancellationToken).ConfigureAwait(false))
         {
             return;
         }

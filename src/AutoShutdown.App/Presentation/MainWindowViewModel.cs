@@ -681,6 +681,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ActionIsRestart));
                 OnPropertyChanged(nameof(ActionIsSleep));
                 OnPropertyChanged(nameof(ActionIsHibernate));
+                // S20-D1：动作变化会改变「使用无人值守」是否可选（授权需与动作匹配）。
+                _ = RefreshUnattendedTaskAvailabilityAsync();
             }
         }
     }
@@ -1263,6 +1265,86 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsUnattendedEnabled => _unattendedAuthorized;
 
+    // ---- S20-D1：任务级「使用无人值守」选择 ----
+
+    private bool _useUnattended;
+    private bool _unattendedAuthorizedForAction;
+
+    /// <summary>
+    /// 任务级「使用无人值守」选择（S20-D1）。默认关闭。选中后创建 RealPowerConfirmed=false
+    /// 的任务，由调度器在倒计时边界做无人值守等效确认裁决；未选中维持现有人工确认路径。
+    /// </summary>
+    public bool UseUnattended
+    {
+        get => _useUnattended;
+        set
+        {
+            if (SetProperty(ref _useUnattended, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    /// <summary>任务级「使用无人值守」选项是否可见：仅真实电源模式显示。</summary>
+    public bool IsUnattendedTaskOptionVisible => _configRealPowerEnabled;
+
+    /// <summary>
+    /// 任务级「使用无人值守」选项是否可选：真实电源模式 + 本地无人值守授权有效且与所选动作匹配。
+    /// 授权失效/动作不匹配/策略异常一律不可选（fail-closed）。
+    /// </summary>
+    public bool IsUnattendedTaskOptionAvailable => _configRealPowerEnabled && _unattendedAuthorizedForAction;
+
+    /// <summary>任务级「使用无人值守」选项的禁用/可用提示。</summary>
+    public string UnattendedTaskOptionHint
+    {
+        get
+        {
+            if (!_configRealPowerEnabled)
+            {
+                return "仅真实电源模式下可用无人值守。";
+            }
+
+            return _unattendedAuthorizedForAction
+                ? "本地无人值守授权有效，选中后任务到期将不再等待人工确认。"
+                : "本地无人值守授权未生效或与所选动作不匹配，暂不可选。";
+        }
+    }
+
+    /// <summary>
+    /// 刷新任务级「使用无人值守」的可选状态：评估本地无人值守授权对当前所选动作是否有效。
+    /// 失败/异常一律 fail-closed（不可选），并在不可选时强制关闭选择。
+    /// </summary>
+    public async Task RefreshUnattendedTaskAvailabilityAsync()
+    {
+        if (_unattendedPolicy is null || !_configRealPowerEnabled)
+        {
+            _unattendedAuthorizedForAction = false;
+        }
+        else
+        {
+            try
+            {
+                var decision = await _unattendedPolicy.EvaluateAsync(SelectedAction, CancellationToken.None);
+                _unattendedAuthorizedForAction = decision.IsAuthorized;
+            }
+            catch
+            {
+                _unattendedAuthorizedForAction = false;
+            }
+        }
+
+        if (!IsUnattendedTaskOptionAvailable && _useUnattended)
+        {
+            _useUnattended = false;
+            OnPropertyChanged(nameof(UseUnattended));
+        }
+
+        OnPropertyChanged(nameof(IsUnattendedTaskOptionAvailable));
+        OnPropertyChanged(nameof(UnattendedTaskOptionHint));
+        RefreshCreateState();
+    }
+
     public AsyncRelayCommand EnableUnattendedCommand { get; }
 
     public AsyncRelayCommand RevokeUnattendedCommand { get; }
@@ -1272,6 +1354,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_unattendedPolicy is null)
         {
             SetUnattended(false, "不可用", "无人值守策略服务未注册（当前为安全环境）。");
+            await RefreshUnattendedTaskAvailabilityAsync();
             return;
         }
 
@@ -1283,6 +1366,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception exception)
         {
             SetUnattended(false, "不可用", "无人值守策略评估失败（fail-closed）：" + exception.Message);
+            await RefreshUnattendedTaskAvailabilityAsync();
             return;
         }
 
@@ -1290,6 +1374,8 @@ public sealed class MainWindowViewModel : ObservableObject
             decision.IsAuthorized,
             MapUnattendedStatus(decision.Status),
             BuildUnattendedDetail(decision));
+
+        await RefreshUnattendedTaskAvailabilityAsync();
     }
 
     private void SetUnattended(bool authorized, string status, string detail)
@@ -1757,7 +1843,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         RefreshCloseAppsTargets();
-        RefreshCreateState();
+        await RefreshUnattendedTaskAvailabilityAsync();
     }
 
     /// <summary>
@@ -2045,23 +2131,40 @@ public sealed class MainWindowViewModel : ObservableObject
         };
 
         // 真实电源模式：创建真实任务前必须获得用户明确人工确认（双闸门之二）。
+        // S20-D1：任务级「使用无人值守」——选中且授权有效时跳过人工确认，创建
+        // RealPowerConfirmed=false 的任务，由调度器在倒计时边界做无人值守等效确认
+        // 裁决；未选中维持现有人工确认路径（RealPowerConfirmed=true）。
         var realPowerConfirmed = false;
+        var useUnattended = false;
         if (_configRealPowerEnabled)
         {
-            var confirmed = _realPowerConfirmation is not null
-                ? _realPowerConfirmation()
-                : System.Windows.MessageBox.Show(
-                    "当前为真实电源模式。任务到期后将执行真实关机/重启/睡眠/休眠，\n请先保存所有工作。确认创建？",
-                    "真实电源确认",
-                    MessageBoxButton.OKCancel,
-                    MessageBoxImage.Warning) == MessageBoxResult.OK;
-            if (!confirmed)
+            if (UseUnattended)
             {
-                error = "已取消创建真实电源任务";
-                return false;
-            }
+                if (!IsUnattendedTaskOptionAvailable)
+                {
+                    error = "无人值守授权无效或与所选动作不匹配，无法以无人值守方式创建任务";
+                    return false;
+                }
 
-            realPowerConfirmed = true;
+                useUnattended = true;
+            }
+            else
+            {
+                var confirmed = _realPowerConfirmation is not null
+                    ? _realPowerConfirmation()
+                    : System.Windows.MessageBox.Show(
+                        "当前为真实电源模式。任务到期后将执行真实关机/重启/睡眠/休眠，\n请先保存所有工作。确认创建？",
+                        "真实电源确认",
+                        MessageBoxButton.OKCancel,
+                        MessageBoxImage.Warning) == MessageBoxResult.OK;
+                if (!confirmed)
+                {
+                    error = "已取消创建真实电源任务";
+                    return false;
+                }
+
+                realPowerConfirmed = true;
+            }
         }
 
         TryParseHolidayDates(out var holidays, out _);
@@ -2080,7 +2183,8 @@ public sealed class MainWindowViewModel : ObservableObject
             IdleThresholdSeconds = kind == TaskKind.Idle ? IdleThresholdSecondsForIndex(IdleThresholdIndex) : null,
             WarningSeconds = GetWarningSeconds(),
             CreatedAt = _clock.UtcNow,
-            RealPowerConfirmed = realPowerConfirmed
+            RealPowerConfirmed = realPowerConfirmed,
+            UseUnattended = useUnattended
         };
 
         error = string.Empty;

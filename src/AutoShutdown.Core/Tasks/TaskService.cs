@@ -100,7 +100,8 @@ public sealed class TaskService : ITaskService
                 StageToken = expiredStageToken,
                 HasExecuted = false,
                 CreatedAt = now.ToUniversalTime(),
-                RealPowerConfirmed = definition.RealPowerConfirmed
+                RealPowerConfirmed = definition.RealPowerConfirmed,
+                UseUnattended = definition.UseUnattended
             };
 
             return new TaskCommandResult
@@ -145,7 +146,8 @@ public sealed class TaskService : ITaskService
             StageToken = stageToken,
             HasExecuted = false,
             CreatedAt = now.ToUniversalTime(),
-            RealPowerConfirmed = definition.RealPowerConfirmed
+            RealPowerConfirmed = definition.RealPowerConfirmed,
+            UseUnattended = definition.UseUnattended
         };
 
         return new TaskCommandResult
