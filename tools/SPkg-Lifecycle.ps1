@@ -15,13 +15,24 @@ param(
 # 覆盖：数据根定位、JSON 健康分类（NotFound/Corrupt/Invalid/UnsupportedVersion）、
 #       备份、二进制替换、自检、回滚、卸载、重装。
 #
-# 安全契约（与执行书一致）：
+# 安全契约（与执行书一致 + D1 所有权边界）：
 #  - 备份成功是任何替换前置；备份失败不得继续。
 #  - 回滚包与目标发布一一对应（记录 source-commit / candidate 名），保留被替换前的
 #    EXE 与配置（含 V1 EXE 恢复能力）。
 #  - 损坏 JSON 只分类、只标记，绝不静默回退为可能触发任务的默认值。
 #  - 本模块不触碰注册表、防火墙、Task Scheduler、自启或电源。系统集成在 B3 单独处理。
 #  - 所有写路径都限定在数据根或安装目录之内（Assert-AllowedPath）。
+#
+# D1 安装所有权与破坏性路径加固：
+#  - 新安装只允许进入「不存在的目录」或「空目录」；对已有非空目录的替换/回滚/卸载/重装
+#    必须先通过 Test-ASInstallOwnership：目录内必须存在 AutoShutdown.owner.json，且其
+#    schema/app/installDir 与该绝对路径绑定一致。未通过一律拒绝，不删除任何文件。
+#  - 备份槽携带 backup.json 元数据，sourceInstallDir 与该绝对安装路径绑定；回滚前校验，
+#    防止把其他目录/数据根的备份恢复到错误目标。
+#  - 卸载/回滚/重装只删除所有权清单（appFiles）中的应用文件（并清理失败替换残留的候选
+#    文件）；目录仅在为空时删除。绝不 Remove-Item <InstallDir> -Recurse 或枚举整目录全删。
+#  - DataRoot 同样受保护：UserData=Remove 只删除经本应用标记的 S-PKG 备份
+#    （backups\spkg\owner.json 绑定数据根），不因任意传入 DataRoot 删除其他数据。
 #
 # 使用：
 #   . ./SPkg-Lifecycle.ps1            # 点源加载函数
@@ -40,6 +51,277 @@ $ErrorActionPreference = 'Stop'
 
 # 与本阶段可追溯的元数据文件名（manifest 名由候选目录决定，backup 里写 life 记录）
 $script:LifecycleMetaFile = 'spkg-lifecycle.json'
+
+# ---- D1：安装所有权与路径绑定元数据 ----
+$script:OwnerMarkerFile = 'AutoShutdown.owner.json'
+$script:InstallBackupMetaFile = 'backup.json'
+$script:SpkgBackupsOwnerFile = 'owner.json'
+$script:OwnerMarkerSchema = 1
+$script:OwnerAppName = 'AutoShutdown V2'
+
+# ---- 路径规范化 ----
+function Resolve-ASPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ($full -ne $root) { $full = $full.TrimEnd('\', '/') }
+    return $full
+}
+
+# ---- D1：危险路径硬守卫（文件系统根/用户主目录/Windows 系统根/工作区根/artifacts） ----
+# 这些位置即使出现所有权标记也一律拒绝，是所有权机制之外的最后防线。
+function Test-ASForbiddenPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = Resolve-ASPath $Path
+    if ($full -eq ([System.IO.Path]::GetPathRoot($full))) { return $true }
+    $userHome = Resolve-ASPath ([Environment]::GetFolderPath('UserProfile'))
+    if ($full -eq $userHome) { return $true }
+    $sysRoot = Resolve-ASPath $env:SystemRoot
+    if ($full -eq $sysRoot) { return $true }
+    $repoRoot = Resolve-ASPath (Split-Path -Parent $PSScriptRoot)
+    if ($full -eq $repoRoot) { return $true }
+    $artifacts = Resolve-ASPath (Join-Path $repoRoot 'artifacts')
+    if ($full -eq $artifacts) { return $true }
+    if ($full.StartsWith($artifacts + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $false
+}
+
+# ---- 替换失败的内部回滚（仅在本函数刚创建的 rollback-install 槽上调用） ----
+# 有完整的 backup.json 绑定（sourceInstallDir==本路径）作证据；只删除所有权清单文件 +
+# 候选残留 + 标记文件，再按 complete/no-install 标记恢复或清理，绝不整目录删除。
+function Restore-ASReplaceFailure {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [Parameter(Mandatory = $true)][string]$BackupDir,
+        [Parameter(Mandatory = $true)][string]$CandidateDir
+    )
+    $installFull = Resolve-ASPath $InstallDir
+    $binding = Test-ASBackupBinding -BackupDir $BackupDir -InstallDir $installFull
+    if (-not $binding.Ok) { throw "refusing to roll back ${installFull}: $($binding.Message)" }
+    $complete = Test-Path -LiteralPath (Join-Path $BackupDir '_complete.marker')
+    $noInstall = Test-Path -LiteralPath (Join-Path $BackupDir '_no-install.marker')
+    $deleteRel = @()
+    $marker = Read-ASOwnerMarker -InstallDir $installFull
+    if ($null -ne $marker -and $null -ne $marker.PSObject.Properties['appFiles']) { $deleteRel = @($marker.appFiles) }
+    if ($null -ne $binding.Meta.PSObject.Properties['candidateFiles']) { $deleteRel += @($binding.Meta.candidateFiles) }
+    $deleteRel = @($deleteRel | Where-Object { $_ -and ($_ -ne $script:OwnerMarkerFile) } | Sort-Object -Unique)
+    Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $deleteRel
+    $markerPath = Join-Path $installFull $script:OwnerMarkerFile
+    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+    $markerTmp = Join-Path $installFull ($script:OwnerMarkerFile + '.tmp')
+    if (Test-Path -LiteralPath $markerTmp) { Remove-Item -LiteralPath $markerTmp -Force }
+    if ($complete) {
+        $saved = Join-Path $BackupDir (Split-Path -Leaf $installFull)
+        if (Test-Path -LiteralPath $saved) {
+            # 逐子项、逐级合并复制备份内容到安装目录（目标目录存在时避免嵌套 <install>\<install> 或同名子目录）。
+            Copy-ASDirContents -SourceDir $saved -DestinationDir $installFull
+            return 'restored'
+        }
+    }
+    if ($noInstall) {
+        Remove-ASEmptyDirsUnder -InstallDir $installFull
+        if ((Test-Path -LiteralPath $installFull) -and -not (Get-ChildItem -LiteralPath $installFull -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $installFull -Force
+        }
+        return 'cleaned'
+    }
+    throw "install rollback backup incomplete; refusing to modify $installFull"
+}
+
+# ---- 目录内文件相对路径清单（只读枚举，用于所有权清单与候选清单） ----
+function Get-ASRelFileList {
+    param([Parameter(Mandatory = $true)][string]$BaseDir)
+    $base = Resolve-ASPath $BaseDir
+    $rel = @()
+    if (Test-Path -LiteralPath $base) {
+        $rel = @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName.Substring($base.Length).TrimStart('\', '/') })
+    }
+    return $rel
+}
+
+# ---- 安装所有权标记读取（解析失败/缺失一律 $null） ----
+function Read-ASOwnerMarker {
+    param([Parameter(Mandatory = $true)][string]$InstallDir)
+    $markerPath = Join-Path $InstallDir $script:OwnerMarkerFile
+    if (-not (Test-Path -LiteralPath $markerPath)) { return $null }
+    try {
+        return (Get-Content -LiteralPath $markerPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+# ---- 安装所有权标记写入（原子：临时文件后换名；appFiles 为相对路径清单） ----
+function Write-ASOwnerMarker {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [string[]]$AppFiles,
+        [string]$CandidateName = ''
+    )
+    $full = Resolve-ASPath $InstallDir
+    $marker = [ordered]@{
+        schema = $script:OwnerMarkerSchema
+        app = $script:OwnerAppName
+        installDir = $full
+        appFiles = @($AppFiles | Where-Object { $_ } | Sort-Object -Unique)
+        candidate = $CandidateName
+        created = (Get-Date -Format o)
+    }
+    $tmp = Join-Path $full ($script:OwnerMarkerFile + '.tmp')
+    $final = Join-Path $full $script:OwnerMarkerFile
+    $marker | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    Move-Item -LiteralPath $tmp -Destination $final -Force
+}
+
+# ---- D1 核心：安装目录所有权验证 ----
+# 返回 { Ok, Reason, Message, Marker }：
+#   forbidden / no-marker / bad-marker / path-mismatch -> Ok=$false（拒绝，不删除任何文件）
+#   new（目录不存在）/ empty（空目录）-> Ok=$true（允许作为新安装目标）
+#   owned（标记有效且绑定本路径）-> Ok=$true
+function Test-ASInstallOwnership {
+    param([Parameter(Mandatory = $true)][string]$InstallDir)
+    $full = Resolve-ASPath $InstallDir
+    if (Test-ASForbiddenPath $full) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'forbidden'; Message = "protected location (filesystem root / user home / workspace / artifacts): $full"; Marker = $null }
+    }
+    if (-not (Test-Path -LiteralPath $full)) {
+        return [pscustomobject]@{ Ok = $true; Reason = 'new'; Message = "install dir does not exist: $full"; Marker = $null }
+    }
+    $entries = @(Get-ChildItem -LiteralPath $full -Force -ErrorAction SilentlyContinue)
+    if ($entries.Count -eq 0) {
+        return [pscustomobject]@{ Ok = $true; Reason = 'empty'; Message = "install dir is empty: $full"; Marker = $null }
+    }
+    $marker = Read-ASOwnerMarker -InstallDir $full
+    if ($null -eq $marker) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'no-marker'; Message = "install dir not owned by $($script:OwnerAppName) (no $script:OwnerMarkerFile): $full"; Marker = $null }
+    }
+    $schemaOk = $false; $appOk = $false
+    if ($null -ne $marker.PSObject.Properties['schema']) { $schemaOk = ([int]$marker.schema -eq $script:OwnerMarkerSchema) }
+    if ($null -ne $marker.PSObject.Properties['app']) { $appOk = ([string]$marker.app -eq $script:OwnerAppName) }
+    if (-not ($schemaOk -and $appOk)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'bad-marker'; Message = "install ownership marker invalid (schema/app) at $full"; Marker = $marker }
+    }
+    if ([string]$marker.installDir -ne $full) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'path-mismatch'; Message = "install ownership marker bound to '$($marker.installDir)' but target is '$full'"; Marker = $marker }
+    }
+    return [pscustomobject]@{ Ok = $true; Reason = 'owned'; Message = "install dir owned: $full"; Marker = $marker }
+}
+
+# ---- 只删除所有权清单中的应用文件（逐文件、路径越界防御；标记文件最后单独删） ----
+function Remove-ASOwnedFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [string[]]$AppFiles
+    )
+    $base = Resolve-ASPath $InstallDir
+    $prefix = $base + [System.IO.Path]::DirectorySeparatorChar
+    $markerPath = Join-Path $base $script:OwnerMarkerFile
+    foreach ($rel in $AppFiles) {
+        if ([string]::IsNullOrWhiteSpace($rel)) { continue }
+        if ($rel.IndexOf('..', [System.StringComparison]::Ordinal) -ge 0) { continue }
+        $full = [System.IO.Path]::GetFullPath((Join-Path $base $rel))
+        if (-not $full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($full -eq $markerPath) { continue }
+        if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Force }
+    }
+}
+
+# ---- 仅删除安装目录下已为空的子目录（目录仅在为空时删除） ----
+function Remove-ASEmptyDirsUnder {
+    param([Parameter(Mandatory = $true)][string]$InstallDir)
+    $base = Resolve-ASPath $InstallDir
+    if (-not (Test-Path -LiteralPath $base)) { return }
+    Get-ChildItem -LiteralPath $base -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object {
+            if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $_.FullName -Force
+            }
+        }
+}
+
+# ---- 目录内容合并复制（逐文件、逐级）----
+# 目标目录已存在时逐子项复制并建立相对路径，绝不 Copy-Item <源目录> -Destination <已存在目录>
+# 造成 <目标>\<同名>\… 嵌套（D1：候选/备份中的子目录在安装槽已有同名目录时同样适用）。
+# 只复制文件并建立其父目录；空目录无内容，不保留。
+function Copy-ASDirContents {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$DestinationDir
+    )
+    $src = Resolve-ASPath $SourceDir
+    $dst = Resolve-ASPath $DestinationDir
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    Get-ChildItem -LiteralPath $src -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+        $dest = Join-Path $dst $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+    }
+}
+
+# ---- 备份元数据与该绝对安装路径绑定校验（D1） ----
+function Test-ASBackupBinding {
+    param(
+        [Parameter(Mandatory = $true)][string]$BackupDir,
+        [Parameter(Mandatory = $true)][string]$InstallDir
+    )
+    $metaPath = Join-Path $BackupDir $script:InstallBackupMetaFile
+    if (-not (Test-Path -LiteralPath $metaPath)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'no-backup-meta'; Message = "install rollback backup metadata ($script:InstallBackupMetaFile) missing in $BackupDir"; Meta = $null }
+    }
+    $meta = $null
+    try {
+        $meta = Get-Content -LiteralPath $metaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Reason = 'bad-backup-meta'; Message = "install rollback backup metadata corrupt in $BackupDir"; Meta = $null }
+    }
+    if ([string]$meta.sourceInstallDir -ne (Resolve-ASPath $InstallDir)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'backup-path-mismatch'; Message = "rollback backup bound to '$($meta.sourceInstallDir)' but target is '$(Resolve-ASPath $InstallDir)'"; Meta = $meta }
+    }
+    if ([int]$meta.schema -ne $script:OwnerMarkerSchema -or [string]$meta.app -ne $script:OwnerAppName) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'bad-backup-meta'; Message = "install rollback backup metadata invalid in $BackupDir"; Meta = $meta }
+    }
+    return [pscustomobject]@{ Ok = $true; Reason = 'bound'; Message = 'backup bound to install dir'; Meta = $meta }
+}
+
+# ---- S-PKG 备份根的所有权标记（DataRoot 保护） ----
+function Ensure-ASSpkgBackupsRoot {
+    param([Parameter(Mandatory = $true)][string]$DataRoot)
+    $dataRootFull = Resolve-ASPath $DataRoot
+    $backupRoot = Join-Path $dataRootFull 'backups\spkg'
+    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    $ownerPath = Join-Path $backupRoot $script:SpkgBackupsOwnerFile
+    if (-not (Test-Path -LiteralPath $ownerPath)) {
+        $owner = [ordered]@{
+            schema = $script:OwnerMarkerSchema; app = $script:OwnerAppName
+            kind = 'spkg-backups-root'; dataRoot = $dataRootFull; created = (Get-Date -Format o)
+        }
+        $owner | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ownerPath -Encoding UTF8
+    }
+    return $backupRoot
+}
+
+# ---- 校验 backups\spkg 是本应用标记的 S-PKG 备份（UserData=Remove 前必查） ----
+function Test-ASSpkgBackupsOwned {
+    param([Parameter(Mandatory = $true)][string]$DataRoot)
+    $dataRootFull = Resolve-ASPath $DataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { return $false }
+    $ownerPath = Join-Path $dataRootFull ("backups\spkg\" + $script:SpkgBackupsOwnerFile)
+    if (-not (Test-Path -LiteralPath $ownerPath)) { return $false }
+    $owner = $null
+    try {
+        $owner = Get-Content -LiteralPath $ownerPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        return $false
+    }
+    if ([string]$owner.app -ne $script:OwnerAppName) { return $false }
+    if ([int]$owner.schema -ne $script:OwnerMarkerSchema) { return $false }
+    if ([string]$owner.dataRoot -ne $dataRootFull) { return $false }
+    return $true
+}
 
 # ---- 数据根 ----
 function Get-ASDataRoot {
@@ -100,33 +382,38 @@ function Backup-ASDataRoot {
         [string]$CandidateName = ''
     )
     $dataRoot = Get-ASDataRoot -Root $Root
-    if (-not (Test-Path -LiteralPath $dataRoot)) { New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null }
-    $backupRoot = Join-Path $dataRoot 'backups\spkg'
+    $dataRootFull = Resolve-ASPath $dataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to back up into a protected data root: $dataRootFull" }
+    if (-not (Test-Path -LiteralPath $dataRootFull)) { New-Item -ItemType Directory -Force -Path $dataRootFull | Out-Null }
+    $backupRoot = Ensure-ASSpkgBackupsRoot -DataRoot $dataRootFull
     $ts = Get-Date -Format 'yyyyMMddHHmmss'
     $backupDir = Join-Path $backupRoot ("{0}-{1}" -f $ts, $Tag)
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-    $files = Get-ChildItem -LiteralPath $dataRoot -File -Recurse |
-        Where-Object { $_.FullName -notlike (Join-Path $backupRoot '*') } |
-        Select-Object -ExpandProperty FullName
-    foreach ($f in $files) {
-        $rel = $f.Substring($dataRoot.Length).TrimStart('\', '/')
+    $files = @()
+    $rawFiles = Get-ChildItem -LiteralPath $dataRootFull -File -Recurse |
+        Where-Object { $_.FullName -notlike (Join-Path $backupRoot '*') }
+    foreach ($f in $rawFiles) {
+        $rel = $f.FullName.Substring($dataRootFull.Length).TrimStart('\', '/')
         $dest = Join-Path $backupDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-        Copy-Item -LiteralPath $f -Destination $dest -Force
+        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
+        $files += $rel
     }
     $meta = [ordered]@{
         kind = 'spkg-backup'; tag = $Tag; created = (Get-Date -Format o)
-        candidate = $CandidateName; dataRoot = $dataRoot
+        candidate = $CandidateName; dataRoot = $dataRootFull
         files = @($files)
     }
     $meta | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backupDir $script:LifecycleMetaFile) -Encoding UTF8
-    return [pscustomobject]@{ BackupDir = $backupDir; FileCount = @($files).Count; DataRoot = $dataRoot }
+    return [pscustomobject]@{ BackupDir = $backupDir; FileCount = @($files).Count; DataRoot = $dataRootFull }
 }
 
 # ---- 二进制替换（备份成功是前置；失败自动回滚并恢复备份） ----
 # 回滚槽采用“新备份验证完成后原子换名”策略：备份写入 .new 槽，文件数核对一致后才
 # 交换为正式槽；备份阶段任何失败都保留上一个回滚槽与原始安装目录原样（绝不因一次失败
 # 的替换而破坏 V1 EXE/配置恢复能力）。
+# D1：替换前必须通过 Test-ASInstallOwnership；备份槽写入 backup.json 绑定 sourceInstallDir；
+# 替换后刷新所有权清单（候选文件 + 仍存在的既有应用文件）。
 function Replace-ASBinary {
     param(
         [Parameter(Mandatory = $true)][string]$CandidateDir,
@@ -135,10 +422,21 @@ function Replace-ASBinary {
         [string]$Tag = 'upgrade'
     )
     $dataRoot = Get-ASDataRoot -Root $Root
-    $installFull = [System.IO.Path]::GetFullPath($InstallDir)
-    $candFull = [System.IO.Path]::GetFullPath($CandidateDir)
+    $dataRootFull = Resolve-ASPath $dataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    $installFull = Resolve-ASPath $InstallDir
+    $candFull = Resolve-ASPath $CandidateDir
     if (-not (Test-Path -LiteralPath $candFull)) { throw "candidate dir not found: $candFull" }
-    $backupRoot = Join-Path $dataRoot 'backups\spkg'
+
+    # 0) 所有权门禁（fail-closed）：非空既有目录必须有绑定本绝对路径的有效所有权标记；
+    #    危险路径（文件系统根/用户主目录/工作区/artifacts）一律拒绝。
+    $ownership = Test-ASInstallOwnership -InstallDir $installFull
+    if (-not $ownership.Ok) {
+        throw "refusing to modify install dir: $($ownership.Message)"
+    }
+    $hadInstall = Test-Path -LiteralPath $installFull
+
+    $backupRoot = Join-Path $dataRootFull 'backups\spkg'
     $slot = Join-Path $backupRoot 'rollback-install'
     $slotNew = Join-Path $backupRoot 'rollback-install.new'
     $completeMarker = Join-Path $slotNew '_complete.marker'
@@ -147,7 +445,6 @@ function Replace-ASBinary {
     # 1) 备份现有安装目录（含被替换前的 EXE，保留 V1 EXE 恢复能力）→ 验证 → 原子交换
     if (Test-Path -LiteralPath $slotNew) { Remove-Item -Recurse -Force -LiteralPath $slotNew }
     New-Item -ItemType Directory -Force -Path $slotNew | Out-Null
-    $hadInstall = Test-Path -LiteralPath $installFull
     try {
         if ($hadInstall) {
             Copy-Item -LiteralPath $installFull -Destination $slotNew -Recurse -Force
@@ -161,6 +458,14 @@ function Replace-ASBinary {
             Set-Content -LiteralPath $noInstallMarker -Value (Get-Date -Format o) -Encoding UTF8
             New-Item -ItemType Directory -Force -Path $installFull | Out-Null
         }
+        # 备份元数据与该绝对安装路径绑定（D1）：回滚时校验，防止跨目录/跨数据根误恢复。
+        $backupMeta = [ordered]@{
+            schema = $script:OwnerMarkerSchema; app = $script:OwnerAppName; kind = 'install-rollback'
+            sourceInstallDir = $installFull; hadInstall = $hadInstall
+            candidateFiles = @(Get-ASRelFileList -BaseDir $candFull)
+            created = (Get-Date -Format o)
+        }
+        $backupMeta | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $slotNew $script:InstallBackupMetaFile) -Encoding UTF8
         # 交换：仅在备份验证完成后替换正式槽
         if (Test-Path -LiteralPath $slot) { Remove-Item -Recurse -Force -LiteralPath $slot }
         Rename-Item -LiteralPath $slotNew -NewName 'rollback-install'
@@ -179,7 +484,8 @@ function Replace-ASBinary {
         foreach ($item in $items) {
             $target = Join-Path $installFull $item.Name
             if ($item.PSIsContainer) {
-                Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force
+                # 逐子项、逐级合并复制：目标已有同名目录时不产生 <目标>\<同名>\… 嵌套。
+                Copy-ASDirContents -SourceDir $item.FullName -DestinationDir $target
             } else {
                 Copy-Item -LiteralPath $item.FullName -Destination $target -Force
             }
@@ -188,13 +494,24 @@ function Replace-ASBinary {
         Get-ChildItem -LiteralPath $installFull -Filter 'AutoShutdown-v*.exe' -File -ErrorAction SilentlyContinue |
             Where-Object { $candExeNames -notcontains $_.Name } |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
-    } catch {
-        # 3) 替换失败 → 仅在存在完整备份时自动回滚；否则保持原状并报告（fail-closed）
-        if (Test-Path -LiteralPath (Join-Path $backupDir '_complete.marker')) {
-            Restore-ASInstallBackup -InstallDir $installFull -BackupDir $backupDir | Out-Null
-            throw 'binary replace failed and was rolled back: ' + $_.Exception.Message
+        # 3) 刷新所有权清单：候选文件 + 仍存在的既有应用文件（排除标记文件本身）
+        $oldOwned = @()
+        if ($null -ne $ownership.Marker -and $null -ne $ownership.Marker.PSObject.Properties['appFiles']) {
+            $oldOwned = @($ownership.Marker.appFiles)
         }
-        throw 'binary replace failed with no complete backup; original install preserved: ' + $_.Exception.Message
+        $candRel = @(Get-ASRelFileList -BaseDir $candFull)
+        $newOwned = @()
+        foreach ($rel in $oldOwned) {
+            if ($rel -and (Test-Path -LiteralPath (Join-Path $installFull $rel))) { $newOwned += $rel }
+        }
+        foreach ($rel in $candRel) { $newOwned += $rel }
+        $newOwned = @($newOwned | Where-Object { $_ -and ($_ -ne $script:OwnerMarkerFile) } | Sort-Object -Unique)
+        Write-ASOwnerMarker -InstallDir $installFull -AppFiles $newOwned -CandidateName ($candExeNames | Select-Object -First 1)
+    } catch {
+        # 4) 替换失败 → 自动回滚（备份绑定本路径为证据；只删除清单文件+候选残留，绝不整目录删除）；
+        #    无论原目录是「已拥有/空/新建」，都恢复为其替换前状态。
+        $rolledBack = Restore-ASReplaceFailure -InstallDir $installFull -BackupDir $backupDir -CandidateDir $candFull
+        throw "binary replace failed and was rolled back ($rolledBack): " + $_.Exception.Message
     }
     return [pscustomobject]@{
         InstallDir = $installFull; BackupDir = $backupDir
@@ -202,31 +519,57 @@ function Replace-ASBinary {
     }
 }
 
+# ---- 回滚：恢复替换前的安装目录 ----
+# D1：只删除所有权清单中的应用文件 + 失败替换残留的候选文件，然后从绑定本绝对路径的
+# 完整备份复制恢复；绝不整目录递归删除。
 function Restore-ASInstallBackup {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [Parameter(Mandatory = $true)][string]$BackupDir
     )
     if (-not (Test-Path -LiteralPath $BackupDir)) { throw 'rollback backup missing; cannot restore' }
-    $leaf = Split-Path -Leaf $InstallDir
+    $installFull = Resolve-ASPath $InstallDir
+    $leaf = Split-Path -Leaf $installFull
     $saved = Join-Path $BackupDir $leaf
     $completeMarker = Join-Path $BackupDir '_complete.marker'
     $noInstallMarker = Join-Path $BackupDir '_no-install.marker'
+
+    # 备份元数据必须存在且与该绝对安装路径绑定；否则拒绝，不删除任何文件。
+    $binding = Test-ASBackupBinding -BackupDir $BackupDir -InstallDir $installFull
+    if (-not $binding.Ok) { throw "refusing to modify ${installFull}: $($binding.Message)" }
+
+    # 当前安装目录必须是本应用拥有（或不存在/空）；非拥有且非空 → 拒绝。
+    $ownership = Test-ASInstallOwnership -InstallDir $installFull
+    if (-not $ownership.Ok) { throw "refusing to modify ${installFull}: $($ownership.Message)" }
+
+    # 只删除所有权清单中的应用文件 + 失败替换残留的候选文件（逐文件、越界防御）。
+    $deleteRel = @()
+    if ($ownership.Reason -eq 'owned' -and $null -ne $ownership.Marker.PSObject.Properties['appFiles']) {
+        $deleteRel = @($ownership.Marker.appFiles)
+    }
+    $candResidue = @()
+    if ($null -ne $binding.Meta.PSObject.Properties['candidateFiles']) { $candResidue = @($binding.Meta.candidateFiles) }
+    $deleteRel = @($deleteRel + $candResidue | Where-Object { $_ -and ($_ -ne $script:OwnerMarkerFile) } | Sort-Object -Unique)
+    Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $deleteRel
+    $markerPath = Join-Path $installFull $script:OwnerMarkerFile
+    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+
     if ((Test-Path -LiteralPath $completeMarker) -and (Test-Path -LiteralPath $saved)) {
-        # 整目录删除后复制，避免 Copy-Item 把备份目录嵌套成 $InstallDir\<leaf> 子目录。
-        if (Test-Path -LiteralPath $InstallDir) {
-            Remove-Item -LiteralPath $InstallDir -Recurse -Force
-        }
-        Copy-Item -LiteralPath $saved -Destination $InstallDir -Recurse -Force
+        # 只复制备份目录的「内容」到安装目录（绝不整目录删除；目标目录存在时逐子项、逐级
+        # 合并复制，避免 Copy-Item 把源文件夹嵌套成 <install>\<install>\… 或同名子目录）。
+        Copy-ASDirContents -SourceDir $saved -DestinationDir $installFull
         return $true
     }
     if (Test-Path -LiteralPath $noInstallMarker) {
-        if (Test-Path -LiteralPath $InstallDir) {
-            Remove-Item -LiteralPath $InstallDir -Recurse -Force
+        if (Test-Path -LiteralPath $installFull) {
+            Remove-ASEmptyDirsUnder -InstallDir $installFull
+            if (-not (Get-ChildItem -LiteralPath $installFull -Force -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $installFull -Force
+            }
         }
         return $true
     }
-    throw "install rollback backup incomplete; refusing to modify $InstallDir"
+    throw "install rollback backup incomplete; refusing to modify $installFull"
 }
 
 # ---- 自检：安装目录存在、EXE 版本与期望一致、数据根 JSON 健康 ----
@@ -285,9 +628,12 @@ function Restore-ASRollback {
         [string]$Tag = 'upgrade'
     )
     $dataRoot = Get-ASDataRoot -Root $Root
+    $dataRootFull = Resolve-ASPath $dataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    $installFull = Resolve-ASPath $InstallDir
 
     # 1) 恢复最近一次 spkg 备份的数据文件
-    $backupRoot = Join-Path $dataRoot 'backups\spkg'
+    $backupRoot = Join-Path $dataRootFull 'backups\spkg'
     $metaFiles = @(Get-ChildItem -LiteralPath $backupRoot -Filter $script:LifecycleMetaFile -Recurse -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
     $matched = $null
@@ -298,18 +644,30 @@ function Restore-ASRollback {
     if (-not $matched) { throw "no spkg data backup found for tag '$Tag' under $backupRoot" }
     $restored = @()
     $meta = Get-Content -LiteralPath (Join-Path $matched.FullName $script:LifecycleMetaFile) -Raw -Encoding UTF8 | ConvertFrom-Json
+    # 数据备份与该数据根绑定：跨数据根恢复会污染目标，一律拒绝。
+    if ([string]$meta.dataRoot -ne $dataRootFull) {
+        throw "spkg data backup bound to '$($meta.dataRoot)' but current data root is '$dataRootFull'; refusing to restore"
+    }
+    $dataPrefix = $dataRootFull + [System.IO.Path]::DirectorySeparatorChar
     foreach ($rel in $meta.files) {
         $relPath = [string]$rel
+        # 兼容旧备份：若记录为绝对路径则换算为相对路径；同时校验不得越出数据根。
+        if ($relPath.StartsWith($dataPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relPath = $relPath.Substring($dataRootFull.Length).TrimStart('\', '/')
+        }
+        if ([string]::IsNullOrWhiteSpace($relPath)) { continue }
+        if ($relPath.IndexOf('..', [System.StringComparison]::Ordinal) -ge 0) { continue }
+        $destFull = [System.IO.Path]::GetFullPath((Join-Path $dataRootFull $relPath))
+        if (-not $destFull.StartsWith($dataPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
         $src = Join-Path $matched.FullName $relPath
         if (-not (Test-Path -LiteralPath $src)) { continue }
-        $dest = Join-Path $dataRoot $relPath
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-        Copy-Item -LiteralPath $src -Destination $dest -Force
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destFull) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $destFull -Force
         $restored += $relPath
     }
     # 2) 恢复替换前的安装目录
-    Restore-ASInstallBackup -InstallDir ([System.IO.Path]::GetFullPath($InstallDir)) -BackupDir (Join-Path $backupRoot 'rollback-install') | Out-Null
-    return [pscustomobject]@{ DataFilesRestored = @($restored); DataRoot = $dataRoot; InstallDir = [System.IO.Path]::GetFullPath($InstallDir) }
+    Restore-ASInstallBackup -InstallDir $installFull -BackupDir (Join-Path $backupRoot 'rollback-install') | Out-Null
+    return [pscustomobject]@{ DataFilesRestored = @($restored); DataRoot = $dataRootFull; InstallDir = [System.IO.Path]::GetFullPath($InstallDir) }
 }
 
 # ---- 升级编排：备份 → 替换 → 数据迁移（app 负责，可注入模拟）→ 自检 → 失败自动回滚 ----
@@ -329,7 +687,7 @@ function Invoke-ASUpgrade {
     # 1) 备份：备份成功是任何替换前置；失败直接中止，不触碰安装目录。
     $backup = Backup-ASDataRoot -Root $dataRoot -Tag $Tag
 
-    # 2) 替换二进制（内部备份安装目录 → 验证 → 原子换槽；复制失败自动回滚并抛出）。
+    # 2) 替换二进制（内部备份安装目录 → 所有权门禁 → 原子换槽；复制失败自动回滚并抛出）。
     $replace = Replace-ASBinary -CandidateDir $CandidateDir -InstallDir $InstallDir -Root $dataRoot -Tag $Tag
 
     # 3) 数据迁移（V1→V2 由 app 启动时完成；沙箱/离线路径用 MigrationScript 模拟）。
@@ -359,6 +717,8 @@ function Invoke-ASUpgrade {
 }
 
 # ---- 卸载：默认只移除应用拥有的非用户文件；用户数据显式选择 Keep|Remove ----
+# D1：所有权门禁——非空目录必须拥有绑定本路径的有效标记，否则拒绝；只删除所有权清单
+# 中的应用文件，目录仅在为空时删除；UserData=Remove 只删除经本应用标记的 S-PKG 备份。
 function Invoke-ASUninstall {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
@@ -366,36 +726,49 @@ function Invoke-ASUninstall {
         [ValidateSet('Keep', 'Remove')][string]$UserData = 'Keep'
     )
     $dataRoot = Get-ASDataRoot -Root $Root
+    $dataRootFull = Resolve-ASPath $dataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    $installFull = Resolve-ASPath $InstallDir
     $removed = @()
 
-    # 安装目录中的候选/伴随文件（删除安装内容）
-    if (Test-Path -LiteralPath $InstallDir) {
-        $installFiles = @(Get-ChildItem -LiteralPath $InstallDir -File -Recurse -ErrorAction SilentlyContinue)
-        foreach ($f in $installFiles) { Remove-Item -LiteralPath $f.FullName -Force; $removed += $f.FullName }
-        # 仅删除由安装产生的空目录（若还有残留说明有其他占用，保留不动）
-        Get-ChildItem -LiteralPath $InstallDir -Recurse -Directory -ErrorAction SilentlyContinue |
-            Sort-Object { $_.FullName.Length } -Descending |
-            ForEach-Object { if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $_.FullName -Force } }
+    $ownership = Test-ASInstallOwnership -InstallDir $installFull
+    if (-not $ownership.Ok) { throw "refusing to modify ${installFull}: $($ownership.Message)" }
+    if ($ownership.Reason -eq 'owned') {
+        $appFiles = @()
+        if ($null -ne $ownership.Marker.PSObject.Properties['appFiles']) { $appFiles = @($ownership.Marker.appFiles) }
+        Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $appFiles
+        $markerPath = Join-Path $installFull $script:OwnerMarkerFile
+        if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force; $removed += $markerPath }
+        Remove-ASEmptyDirsUnder -InstallDir $installFull
+        if (-not (Get-ChildItem -LiteralPath $installFull -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $installFull -Force
+            $removed += $installFull
+        }
     }
 
-    # 备份是应用拥有的可清理证据；但保留最近一份以便回滚观察窗口人工复核（登记到报告）。
+    # 备份是应用拥有的可清理证据；但只有经本应用标记的 S-PKG 备份才会被 Remove 删除。
     if ($UserData -eq 'Remove') {
-        $backupRoot = Join-Path $dataRoot 'backups\spkg'
+        $backupRoot = Join-Path $dataRootFull 'backups\spkg'
         if (Test-Path -LiteralPath $backupRoot) {
+            if (-not (Test-ASSpkgBackupsOwned -DataRoot $dataRootFull)) {
+                throw "refusing to remove user data: spkg backups at $dataRootFull\backups\spkg are not app-owned"
+            }
             Remove-Item -LiteralPath $backupRoot -Recurse -Force
             $removed += $backupRoot
         }
-        $backupsDir = Join-Path $dataRoot 'backups'
+        $backupsDir = Join-Path $dataRootFull 'backups'
         if ((Test-Path -LiteralPath $backupsDir) -and -not (Get-ChildItem -LiteralPath $backupsDir -Force -ErrorAction SilentlyContinue)) {
             Remove-Item -LiteralPath $backupsDir -Force
             $removed += $backupsDir
         }
     }
 
-    return [pscustomobject]@{ Removed = @($removed); UserData = $UserData; DataRoot = $dataRoot; InstallDir = [System.IO.Path]::GetFullPath($InstallDir) }
+    return [pscustomobject]@{ Removed = @($removed); UserData = $UserData; DataRoot = $dataRootFull; InstallDir = $installFull }
 }
 
 # ---- 重装：全新安装目录 + 候选副本 ----
+# D1：新安装只允许进入不存在/空目录；已有安装需通过所有权验证，只删除所有权清单中的
+# 应用文件后重装，绝不整目录递归删除。
 function Invoke-ASReinstall {
     param(
         [Parameter(Mandatory = $true)][string]$CandidateDir,
@@ -403,20 +776,34 @@ function Invoke-ASReinstall {
         [string]$Root = ''
     )
     $dataRoot = Get-ASDataRoot -Root $Root
-    $installFull = [System.IO.Path]::GetFullPath($InstallDir)
-    if (Test-Path -LiteralPath $installFull) {
-        Get-ChildItem -LiteralPath $installFull -Force | Remove-Item -Recurse -Force
-    } else {
+    $dataRootFull = Resolve-ASPath $dataRoot
+    if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    $installFull = Resolve-ASPath $InstallDir
+    $candFull = Resolve-ASPath $CandidateDir
+    if (-not (Test-Path -LiteralPath $candFull)) { throw "candidate dir not found: $candFull" }
+
+    $ownership = Test-ASInstallOwnership -InstallDir $installFull
+    if (-not $ownership.Ok) { throw "refusing to modify install dir: $($ownership.Message)" }
+    if ($ownership.Reason -eq 'owned') {
+        $appFiles = @()
+        if ($null -ne $ownership.Marker.PSObject.Properties['appFiles']) { $appFiles = @($ownership.Marker.appFiles) }
+        Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $appFiles
+        $markerPath = Join-Path $installFull $script:OwnerMarkerFile
+        if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+        Remove-ASEmptyDirsUnder -InstallDir $installFull
+    } elseif (-not (Test-Path -LiteralPath $installFull)) {
         New-Item -ItemType Directory -Force -Path $installFull | Out-Null
     }
     $copied = @()
-    foreach ($item in (Get-ChildItem -LiteralPath ([System.IO.Path]::GetFullPath($CandidateDir)) -Force)) {
+    foreach ($item in (Get-ChildItem -LiteralPath $candFull -Force)) {
         $target = Join-Path $installFull $item.Name
-        if ($item.PSIsContainer) { Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force }
+        if ($item.PSIsContainer) { Copy-ASDirContents -SourceDir $item.FullName -DestinationDir $target }
         else { Copy-Item -LiteralPath $item.FullName -Destination $target -Force }
         $copied += $item.Name
     }
-    return [pscustomobject]@{ InstallDir = $installFull; Copied = @($copied); DataRoot = $dataRoot }
+    $candExe = @(Get-ChildItem -LiteralPath $candFull -Filter 'AutoShutdown-v*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+    Write-ASOwnerMarker -InstallDir $installFull -AppFiles @(Get-ASRelFileList -BaseDir $candFull) -CandidateName ($candExe | ForEach-Object { $_.Name })
+    return [pscustomobject]@{ InstallDir = $installFull; Copied = @($copied); DataRoot = $dataRootFull }
 }
 
 # ---- 命令行分发（点源时不触发） ----

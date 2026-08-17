@@ -42,6 +42,8 @@ $v1ExeName = 'AutoShutdown-v1.0.0-win-x64.exe'
 $v1Exe = Join-Path $installDir $v1ExeName
 $v1Bytes = [byte[]](1..2048 | ForEach-Object { ($_ % 251) })
 [System.IO.File]::WriteAllBytes($v1Exe, $v1Bytes)
+# D1：既有 V1 安装目录须先声明所有权（非空目录未拥有则生命周期门禁 fail-closed 拒绝）。
+Write-ASOwnerMarker -InstallDir $installDir -AppFiles $v1ExeName -CandidateName $v1ExeName
 
 $v1Config = @{
     SchemaVersion = 1; TestMode = $true; AllowedActions = @('Shutdown', 'Restart')
@@ -162,6 +164,8 @@ function Reset-V1State {
     if (Test-Path -LiteralPath $dataRoot) { Remove-Item -LiteralPath $dataRoot -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $installDir, $dataRoot | Out-Null
     [System.IO.File]::WriteAllBytes($v1Exe, $v1Bytes)
+    # D1：每个失败用例从干净的 V1 状态开始，重建安装目录后须重新声明所有权。
+    Write-ASOwnerMarker -InstallDir $installDir -AppFiles $v1ExeName -CandidateName $v1ExeName
     [System.IO.File]::WriteAllText((Join-Path $dataRoot 'config.json'), $v1Config, [System.Text.UTF8Encoding]::new($true))
     [System.IO.File]::WriteAllText((Join-Path $dataRoot 'tasks.json'), $v1Tasks, [System.Text.UTF8Encoding]::new($true))
     [System.IO.File]::WriteAllText((Join-Path $dataRoot 'runtime.json'), $v1Runtime, [System.Text.UTF8Encoding]::new($true))

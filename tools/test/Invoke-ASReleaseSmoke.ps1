@@ -311,6 +311,8 @@ Get-ChildItem -LiteralPath $releaseDir -Force | Copy-Item -Destination $candC -R
 # 安装槽模拟「旧版已安装」：移除候选 EXE，放入 V1 槽位 EXE
 Remove-Item -LiteralPath (Join-Path $installC $v2Name) -Force
 [System.IO.File]::Copy($releaseExe, (Join-Path $installC $v1Name), $true)
+# D1：安装槽声明所有权（所有权清单 = 槽内全部相对路径），非空目录门禁才放行替换/回滚/卸载。
+Write-ASOwnerMarker -InstallDir $installC -AppFiles (Get-ASRelFileList -BaseDir $installC) -CandidateName $v2Name
 $goodConfig  = @{ SchemaVersion = 1; TestMode = $true } | ConvertTo-Json
 $goodTasks   = @{ SchemaVersion = 2; Tasks = @() } | ConvertTo-Json -Depth 4
 $goodRuntime = @{ SchemaVersion = 2; Instances = @{} } | ConvertTo-Json -Depth 4

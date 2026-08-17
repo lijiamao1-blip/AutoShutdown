@@ -40,6 +40,8 @@ function Note-Skip([string]$Name, [string]$Why) {
 # ---------- 沙箱夹具（与 B-2 同构的 V1 数据根 + V2 候选） ----------
 $v1Exe = Join-Path $installDir 'AutoShutdown-v1.0.0-win-x64.exe'
 [System.IO.File]::WriteAllBytes($v1Exe, [byte[]](1..1024 | ForEach-Object { ($_ % 251) }))
+# D1：既有 V1 安装目录须先声明所有权（非空目录未拥有则生命周期门禁 fail-closed 拒绝）。
+Write-ASOwnerMarker -InstallDir $installDir -AppFiles 'AutoShutdown-v1.0.0-win-x64.exe' -CandidateName 'AutoShutdown-v1.0.0-win-x64.exe'
 $v2ExeName = 'AutoShutdown-v2.0.0-PKG.fe54711.exe'
 [System.IO.File]::WriteAllBytes((Join-Path $candDir $v2ExeName), [byte[]](255..0 | ForEach-Object { $_ }))
 [System.IO.File]::WriteAllBytes((Join-Path $candDir 'AutoShutdown.OfficeSaveHelper.exe'), [byte[]](0..255 | ForEach-Object { $_ }))

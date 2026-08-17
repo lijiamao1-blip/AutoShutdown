@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # tools/test/Invoke-SPkgLifecycleTests.ps1
 # S-PKG lifecycle state-machine tests (pure file ops, temp sandbox only).
 # Exercises: JSON health classification, backup, replace (with/without injected
@@ -29,6 +29,8 @@ function Assert-True([string]$Name, [bool]$Cond, [string]$Detail = '') {
 $oldExe = Join-Path $installDir 'AutoShutdown-v2.0.0-S13.4289bc1.exe'
 $oldBytes = [byte[]](1..2048 | ForEach-Object { ($_ % 251) })
 [System.IO.File]::WriteAllBytes($oldExe, $oldBytes)
+# D1：既有安装目录须先声明所有权（非空目录未拥有则生命周期门禁 fail-closed 拒绝）。
+Write-ASOwnerMarker -InstallDir $installDir -AppFiles 'AutoShutdown-v2.0.0-S13.4289bc1.exe' -CandidateName 'AutoShutdown-v2.0.0-S13.4289bc1.exe'
 $newExeName = 'AutoShutdown-v2.0.0-PKG.fe54711.exe'
 $newExe = Join-Path $candDir $newExeName
 $newBytes = [byte[]](255..0 | ForEach-Object { $_ })
@@ -85,6 +87,8 @@ Write-Host "== replace failure injection (file lock) =="
 Remove-Item -LiteralPath $installDir -Recurse -Force
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 [System.IO.File]::WriteAllBytes($oldExe, $oldBytes)
+# D1：重建安装目录后重新声明所有权（非空目录门禁放行，锁注入才真正触发替换失败回滚）。
+Write-ASOwnerMarker -InstallDir $installDir -AppFiles 'AutoShutdown-v2.0.0-S13.4289bc1.exe' -CandidateName 'AutoShutdown-v2.0.0-S13.4289bc1.exe'
 $lockStream = [System.IO.File]::Open($oldExe, 'Open', 'Read', [System.IO.FileShare]::None)
 $replaced = $false
 try {
@@ -102,7 +106,8 @@ Assert-True 'locked old exe preserved' ($oldHashAfter -eq $oldHashBefore)
 
 Write-Host "== rollback =="
 # 把配置改为“升级后污染”值，再回滚
-[System.IO.File]::WriteAllText((Join-Path $dataRoot 'config.json'), @{ SchemaVersion = 1; TestMode = $false; Contaminated = $true } | ConvertTo-Json, [System.Text.UTF8Encoding]::new($true))
+$contaminatedConfig = @{ SchemaVersion = 1; TestMode = $false; Contaminated = $true } | ConvertTo-Json
+[System.IO.File]::WriteAllText((Join-Path $dataRoot 'config.json'), $contaminatedConfig, [System.Text.UTF8Encoding]::new($true))
 $rb = Restore-ASRollback -InstallDir $installDir -Root $dataRoot -Tag 'upgrade'
 $restoredConfig = Get-Content -LiteralPath (Join-Path $dataRoot 'config.json') -Raw | ConvertFrom-Json
 $contaminated = $null -ne $restoredConfig.PSObject.Properties['Contaminated']
