@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Idle;
+using AutoShutdown.Core.Remote;
 using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
@@ -785,6 +786,193 @@ public sealed class SchedulerEngine : ISchedulerEngine
     }
 
     /// <summary>
+    /// 局域网远程触发（S23 CP3/CP4）：与外部触发同构的「本地调度引擎唯一接入/仲裁路径」。
+    /// 只经 <see cref="Remote.RemoteRequestHandler"/> 提交（已过鉴权 + 白名单 + TLS 判定）。
+    /// 裁决顺序与外部触发一致：任务存在且启用 → 并发去重（本地调度器唯一事实源）→
+    /// 无人值守等效确认（仅 TLS+白名单+UseUnattended）或本地倒计时回退 → 唯一 handler/双闸门。
+    /// 无人值守任务 + 无等效确认 → 一律拒绝（fail-closed，不绕过无人值守策略、不创建倒计时）。
+    /// </summary>
+    private async Task<SchedulerCommandResult> HandleRemoteTriggerAsync(
+        RemoteTriggerTaskCommand command,
+        CancellationToken cancellationToken)
+    {
+        var definition = _taskService.Get(command.TaskId);
+        if (definition is null)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "Local task " + command.TaskId.ToString("D")
+                + " no longer exists; stale remote trigger ignored.");
+        }
+
+        if (!definition.IsEnabled)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.InvalidCommand,
+                "Local task is disabled; no power action.");
+        }
+
+        // 无人值守任务无等效确认（非 TLS 或白名单未启用）→ fail-closed 拒绝。
+        // 倒计时回退只对带本地人工确认的任务有意义；无人值守任务绝不允许
+        // 以 UseUnattended=false 的倒计时绕过无人值守策略。
+        if (definition.UseUnattended && !command.EquivalentUnattendedAllowed)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.InvalidCommand,
+                "Unattended task requires TLS-equivalent remote confirmation; no countdown fallback.");
+        }
+
+        var now = _clock.UtcNow.ToUniversalTime();
+
+        // 并发去重：本地调度器已拥有该任务触发窗口 → 远程触发冗余。
+        if (IsExternalTriggerRedundant(definition, command.TaskId, now))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.ActiveTaskExists,
+                "Remote trigger is redundant: the local scheduler already owns this firing window; no duplicate pipeline or power call.");
+        }
+
+        var instance = BuildRemoteTriggerInstance(definition, now, command.EquivalentUnattendedAllowed);
+
+        // 等效确认路径：倒计时边界立即裁决，仅有效的无人值守等效确认可继续执行。
+        if (command.EquivalentUnattendedAllowed && definition.UseUnattended)
+        {
+            await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+
+            var snapshot = GetSnapshot();
+            if (snapshot.EngineStatus == SchedulerEngineStatus.Faulted)
+            {
+                return Rejected(
+                    snapshot,
+                    SchedulerCommandStatus.Faulted,
+                    "The scheduler engine faulted while executing the remote trigger: "
+                    + (snapshot.FaultMessage ?? "unknown failure."));
+            }
+
+            var after = snapshot.Instances.TryGetValue(command.TaskId, out var current) ? current : null;
+            if (after is { State: TaskInstanceState.Executed or TaskInstanceState.Waiting })
+            {
+                return Success(
+                    "The remote trigger was routed through the local scheduler engine and executed with unattended-equivalent confirmation.");
+            }
+
+            return Rejected(
+                snapshot,
+                SchedulerCommandStatus.TransitionRejected,
+                "The remote trigger was rejected by the countdown boundary adjudication; no power action. (state="
+                + (after?.State.ToString() ?? "not-found") + ")");
+        }
+
+        // 本地倒计时回退：创建 Confirming 实例，fire = now + 固定回退窗口，由本地用户取消或确认。
+        if (!await PersistAndCommitInstanceAsync(instance, now, cancellationToken).ConfigureAwait(false))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the remote countdown fallback instance.");
+        }
+
+        return Success("The remote trigger started a local countdown fallback; the local user can cancel it.");
+    }
+
+    /// <summary>
+    /// 局域网远程取消（S23 CP4）：按本地任务 id 定位。仅允许取消 Confirming（倒计时/待决）实例；
+    /// 其它状态一律拒绝——远程不得替用户撤销已排定（Waiting）或正在执行（Running/Executing）
+    /// 的动作，也不得清理终态。
+    /// </summary>
+    private async Task<SchedulerCommandResult> HandleRemoteCancelAsync(
+        RemoteCancelTaskCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (!GetSnapshot().Instances.TryGetValue(command.TaskId, out var instance))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "No live instance matches the remote cancel target; nothing to cancel.");
+        }
+
+        if (instance.State != TaskInstanceState.Confirming)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.TransitionRejected,
+                "Remote cancel only applies to a Confirming (countdown) instance; state was "
+                + instance.State + ".");
+        }
+
+        var taskResult = _taskService.Cancel(instance);
+        if (!taskResult.Succeeded)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.TaskServiceRejected,
+                taskResult.Message,
+                taskResult.Status,
+                taskResult.TransitionDecisionCode);
+        }
+
+        var now = _clock.UtcNow.ToUniversalTime();
+        var next = WithInstance(GetSnapshot().Instances, taskResult.Instance!);
+        if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.PersistenceFailed,
+                "Failed to persist the remotely cancelled instance.");
+        }
+
+        return Success("The pending remote countdown was cancelled.");
+    }
+
+    /// <summary>
+    /// 构造远程触发的实例：
+    /// <list type="bullet">
+    /// <item>等效确认：State=Confirming、fire=now、UseUnattended=任务原值（=true，边界立即做
+    /// 无人值守等效确认裁决）、WarningStartTime=null（瞬时）。</item>
+    /// <item>本地倒计时回退：State=Confirming、fire=now+FallbackCountdownSeconds、
+    /// UseUnattended=false（倒计时只对本地人工确认任务有意义）、WarningStartTime=now
+    /// （本地 UI 显示 60 秒倒计时供取消）。</item>
+    /// <item>Idle 任务标记 IsIdleTriggered=true：倒计时边界仍重新检测输入，fail-closed。
+    /// 非 Idle 任务 IsIdleTriggered=false（远程显式触发不依赖空闲输入）。</item>
+    /// </list>
+    /// </summary>
+    private TaskInstance BuildRemoteTriggerInstance(
+        TaskDefinition definition,
+        DateTimeOffset now,
+        bool equivalentUnattendedAllowed)
+    {
+        var equivalent = equivalentUnattendedAllowed && definition.UseUnattended;
+        var fireTime = equivalent
+            ? now
+            : now.AddSeconds(RemoteProtocol.FallbackCountdownSeconds).ToUniversalTime();
+
+        var instanceId = _identifierGenerator.NewId();
+        var stageToken = _identifierGenerator.NewId();
+        return new TaskInstance
+        {
+            InstanceId = instanceId,
+            SourceTaskId = definition.Id,
+            ActionSnapshot = definition.Action,
+            State = TaskInstanceState.Confirming,
+            ScheduledFireTime = fireTime,
+            WarningStartTime = equivalent ? null : now,
+            StageToken = stageToken,
+            HasExecuted = false,
+            CreatedAt = now,
+            RealPowerConfirmed = definition.RealPowerConfirmed,
+            UseUnattended = equivalent ? definition.UseUnattended : false,
+            TargetMachineId = definition.TargetMachineId,
+            RtcWakeTimeUtc = definition.RtcWakeTimeUtc,
+            IsIdleTriggered = definition.Kind == TaskKind.Idle
+        };
+    }
+
+    /// <summary>
     /// 并发去重裁决：同一任务是否已有本触发窗口的有效执行载体。
     /// 非 Idle：任何活实例（本地调度器已接管，且因循环到期优先必然先于命令触发）→ 冗余；
     /// 终态实例仅当 fire time 落在当前触发容差窗口内（本窗口刚被本地消费）→ 冗余。
@@ -1215,6 +1403,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
             SetTaskEnabledCommand setEnabled => HandleSetEnabledAsync(setEnabled),
             ResolveArbitrationCommand resolve => await HandleResolveArbitrationAsync(resolve, cancellationToken).ConfigureAwait(false),
             ExternalTriggerTaskCommand external => await HandleExternalTriggerAsync(external, cancellationToken).ConfigureAwait(false),
+            RemoteTriggerTaskCommand remoteTrigger => await HandleRemoteTriggerAsync(remoteTrigger, cancellationToken).ConfigureAwait(false),
+            RemoteCancelTaskCommand remoteCancel => await HandleRemoteCancelAsync(remoteCancel, cancellationToken).ConfigureAwait(false),
             _ => Rejected(GetSnapshot(), SchedulerCommandStatus.InvalidCommand, "Unknown command type.")
         };
     }

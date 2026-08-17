@@ -113,6 +113,68 @@ public sealed record RemoteTriggerResult
     public string Message { get; init; } = string.Empty;
 }
 
+/// <summary>queryStatus 响应结果（只读状态快照，绝不包含敏感材料）。</summary>
+public sealed record RemoteStatusResult
+{
+    [JsonPropertyName("serverName")]
+    public string ServerName { get; init; } = string.Empty;
+
+    /// <summary>调度引擎状态（Running/Faulted/Stopped/Created）。</summary>
+    [JsonPropertyName("engineStatus")]
+    public string EngineStatus { get; init; } = string.Empty;
+
+    /// <summary>当前活跃实例数（Waiting/Confirming/Running/Executing）。</summary>
+    [JsonPropertyName("activeCount")]
+    public int ActiveCount { get; init; }
+
+    /// <summary>当前处于倒计时（Confirming）的实例数。</summary>
+    [JsonPropertyName("pendingCountdownCount")]
+    public int PendingCountdownCount { get; init; }
+
+    [JsonPropertyName("faultMessage")]
+    public string? FaultMessage { get; init; }
+}
+
+/// <summary>listTasks 响应里的单个任务条目（只读；不含任何策略/白名单内容）。</summary>
+public sealed record RemoteTaskInfo
+{
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; init; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = string.Empty;
+
+    [JsonPropertyName("action")]
+    public string Action { get; init; } = string.Empty;
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; }
+
+    /// <summary>当前实例状态（无实例为 null）。</summary>
+    [JsonPropertyName("state")]
+    public string? State { get; init; }
+
+    [JsonPropertyName("scheduledFireTimeUtc")]
+    public DateTimeOffset? ScheduledFireTimeUtc { get; init; }
+}
+
+/// <summary>listTasks 响应结果。</summary>
+public sealed record RemoteListTasksResult
+{
+    [JsonPropertyName("tasks")]
+    public IReadOnlyList<RemoteTaskInfo> Tasks { get; init; } = [];
+}
+
+/// <summary>cancelShutdown 响应结果。</summary>
+public sealed record RemoteActionResult
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; init; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; init; } = string.Empty;
+}
+
 /// <summary>audit 日志条目。绝不包含 PIN/secret/HMAC/私钥。</summary>
 public sealed record RemoteAuditEntry
 {

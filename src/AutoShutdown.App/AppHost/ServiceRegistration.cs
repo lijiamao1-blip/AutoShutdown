@@ -8,6 +8,7 @@ using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
+using AutoShutdown.App.Infrastructure.Remote;
 using AutoShutdown.App.Infrastructure.Rtc;
 using AutoShutdown.App.Infrastructure.TaskScheduler;
 using AutoShutdown.App.Infrastructure.WakeOnLan;
@@ -21,6 +22,7 @@ using AutoShutdown.Core.Office;
 using AutoShutdown.Core.Power;
 using AutoShutdown.Core.PrePipeline;
 using AutoShutdown.Core.Recovery;
+using AutoShutdown.Core.Remote;
 using AutoShutdown.Core.Rtc;
 using AutoShutdown.Core.RunCommands;
 using AutoShutdown.Core.Scheduling;
@@ -178,6 +180,37 @@ public static class ServiceRegistration
         services.AddSingleton<TasksDocumentStore>(provider =>
             new TasksDocumentStore(provider.GetRequiredService<IStorage>()));
         services.AddSingleton<ExternalTaskTriggerService>();
+
+        // S23：局域网远程控制。所有远程命令经本地调度引擎唯一接入/仲裁路径；RemoteServer 绝不
+        // 成为第二个电源出口。远程请求对本地配置/无人值守策略/任何白名单只读不写；敏感材料
+        // （sharedSecret/证书私钥/PIN）经 DPAPI（ISecretProtector）保护后落盘，绝不明文。
+        services.AddSingleton<ISecretProtector>(_ => new DpapiSecretProtector());
+        services.AddSingleton<IRemoteAuditLog>(provider =>
+            new FileRemoteAuditLog(Path.Combine(dataRoot, "remote-audit")));
+        services.AddSingleton<RemoteSettingsStore>(provider =>
+            new RemoteSettingsStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<RemoteDevicesStore>(provider =>
+            new RemoteDevicesStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<RemotePairingLockStore>(provider =>
+            new RemotePairingLockStore(provider.GetRequiredService<IStorage>()));
+        services.AddSingleton<PairingService>();
+        services.AddSingleton<RemoteAuthenticator>();
+        services.AddSingleton<RemoteCertificateService>(provider =>
+            new RemoteCertificateService(
+                provider.GetRequiredService<ISecretProtector>(),
+                provider.GetRequiredService<IClock>(),
+                Path.Combine(dataRoot, "remote-server-cert.dpapi"),
+                Path.Combine(dataRoot, "remote-imported-cert-password.dpapi")));
+        services.AddSingleton<RemoteRequestHandler>(provider =>
+            new RemoteRequestHandler(
+                provider.GetRequiredService<PairingService>(),
+                provider.GetRequiredService<RemoteAuthenticator>(),
+                provider.GetRequiredService<ISchedulerEngine>(),
+                provider.GetRequiredService<ITaskService>(),
+                provider.GetRequiredService<IClock>(),
+                provider.GetRequiredService<IRemoteAuditLog>(),
+                serverNameProvider: () => Environment.MachineName));
+        services.AddSingleton<RemoteServer>();
 
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(

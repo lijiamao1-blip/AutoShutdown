@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.App.Infrastructure.Remote;
 using AutoShutdown.App.Notifications;
 using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
@@ -22,6 +23,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private readonly NotificationCoordinator _notificationCoordinator;
     private readonly RecoveryNoticeService _recoveryNotice;
     private readonly TaskSyncCoordinator _taskSyncCoordinator;
+    private readonly RemoteServer _remoteServer;
     private readonly IApplicationLogger _logger;
     private readonly LogRetentionService _logRetention;
     private readonly CancellationTokenSource _appCts = new();
@@ -43,6 +45,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         NotificationCoordinator notificationCoordinator,
         RecoveryNoticeService recoveryNotice,
         TaskSyncCoordinator taskSyncCoordinator,
+        RemoteServer remoteServer,
         IApplicationLogger logger,
         LogRetentionService logRetention)
     {
@@ -56,6 +59,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(notificationCoordinator);
         ArgumentNullException.ThrowIfNull(recoveryNotice);
         ArgumentNullException.ThrowIfNull(taskSyncCoordinator);
+        ArgumentNullException.ThrowIfNull(remoteServer);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(logRetention);
 
@@ -71,6 +75,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         // 在调度引擎启动（RunAsync 加载任务）前解析，保证 ctor 中订阅本地事实源事件不遗漏
         // 初始加载；Dispose 时解除订阅并取消在途防抖。
         _taskSyncCoordinator = taskSyncCoordinator;
+        _remoteServer = remoteServer;
         _logger = logger;
         _logRetention = logRetention;
     }
@@ -85,6 +90,8 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _engineTask = _schedulerEngine.RunAsync(_appCts.Token);
         _logger.Info("SchedulerRunning", "调度引擎已启动。");
         _ = ObserveEngineAsync(_engineTask);
+        // S23：调度引擎就绪后再按 remote-settings.json 启动远程控制（默认关闭，绝不静默启用）。
+        _remoteServer.StartAsync(_appCts.Token).GetAwaiter().GetResult();
         _trayIcon.ExitRequested = RequestExit;
         _trayIcon.Start();
         _dashboardRefreshService.Start();
@@ -148,6 +155,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _logger.Info("SchedulerStopping", "调度引擎正在停止。");
         _windowActivation.MarkExiting();
         _trayIcon.Dispose();
+        _remoteServer.Dispose();
         _appCts.Cancel();
         _exitTask = CompleteExitAsync();
     }
@@ -175,6 +183,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _dashboardRefreshService.Dispose();
         _notificationCoordinator.Dispose();
         _taskSyncCoordinator.Dispose();
+        _remoteServer.Dispose();
         _singleInstance.Dispose();
     }
 
