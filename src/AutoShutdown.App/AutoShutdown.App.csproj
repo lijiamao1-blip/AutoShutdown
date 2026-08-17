@@ -12,6 +12,10 @@
     <!-- 引用辅助进程项目：构建时将其 EXE 复制到 App 输出目录，供唯一启动网关按安装目录固定解析 -->
     <ProjectReference Include="..\AutoShutdown.OfficeSaveHelper\AutoShutdown.OfficeSaveHelper.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <!-- S22：Windows 任务计划程序单向同步。TaskScheduler（dahall，MIT）固定 2.12.2：
+         纯托管程序集（COM interop 走系统自带组件，无原生依赖），net8.0-windows 兼容，
+         单文件发布内嵌，无独立运行时依赖。许可证与发布影响已在 S22 结果记录登记。 -->
+    <PackageReference Include="TaskScheduler" Version="2.12.2" />
     <!-- 进程树枚举：托管 WMI（Win32_Process ParentProcessId）读取父子关系，无 P/Invoke。 -->
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
