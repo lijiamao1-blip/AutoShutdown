@@ -27,7 +27,16 @@ public sealed class TaskService : ITaskService
         _nextExecutionCalculator = nextExecutionCalculator;
         _stateMachine = stateMachine;
         _identifierGenerator = identifierGenerator;
+        _tasks.Changed += OnTaskCollectionChanged;
     }
+
+    /// <summary>
+    /// 任务定义集合变更事件（S22 CP3）：透传 TaskCollection.Changed，供 outbound 同步协调器消费。
+    /// </summary>
+    public event EventHandler<TaskCollectionChangedEventArgs>? CollectionChanged;
+
+    private void OnTaskCollectionChanged(object? sender, TaskCollectionChangedEventArgs args)
+        => CollectionChanged?.Invoke(this, args);
 
     // ===== 任务定义领域模型集合化 CRUD（S13-T02A，内存领域模型，无持久化） =====
 

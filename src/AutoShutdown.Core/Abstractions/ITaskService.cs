@@ -5,6 +5,12 @@ namespace AutoShutdown.Core.Abstractions;
 
 public interface ITaskService
 {
+    /// <summary>
+    /// 任务定义集合变更事件（S22 CP3）：本地事实源增删改/分别启停后触发。
+    /// 供 outbound 同步协调器消费；事件绝不携带外部状态，无 inbound 回写通道。
+    /// </summary>
+    event EventHandler<TaskCollectionChangedEventArgs>? CollectionChanged;
+
     TaskCommandResult Create(
         TaskDefinition definition,
         DateTimeOffset now,

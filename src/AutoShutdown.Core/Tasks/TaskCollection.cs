@@ -10,6 +10,12 @@ public sealed class TaskCollection
 {
     private readonly Dictionary<Guid, TaskDefinition> _items = new();
 
+    /// <summary>
+    /// 集合变更事件（S22 CP3）：仅在实际提交成功后于变更线程同步触发，供 outbound 同步协调器
+    /// 消费（创建/更新/删除/分别启停）。本集合不产生任何「外部状态」事件，杜绝 inbound 回写通道。
+    /// </summary>
+    public event EventHandler<TaskCollectionChangedEventArgs>? Changed;
+
     /// <summary>集合中任务数量。</summary>
     public int Count => _items.Count;
 
@@ -35,6 +41,7 @@ public sealed class TaskCollection
         }
 
         _items.Add(definition.Id, definition);
+        RaiseChanged(TaskCollectionChangeKind.Added, definition.Id, definition);
         return Success(definition, "The task definition was added.");
     }
 
@@ -57,6 +64,7 @@ public sealed class TaskCollection
         }
 
         _items[definition.Id] = definition;
+        RaiseChanged(TaskCollectionChangeKind.Updated, definition.Id, definition);
         return Success(definition, "The task definition was updated.");
     }
 
@@ -77,6 +85,7 @@ public sealed class TaskCollection
                 $"A task with id {taskId} does not exist.");
         }
 
+        RaiseChanged(TaskCollectionChangeKind.Removed, taskId, null);
         return Success(null, "The task definition was removed.");
     }
 
@@ -99,6 +108,10 @@ public sealed class TaskCollection
 
         var updated = existing with { IsEnabled = isEnabled };
         _items[taskId] = updated;
+        RaiseChanged(
+            isEnabled ? TaskCollectionChangeKind.Enabled : TaskCollectionChangeKind.Disabled,
+            taskId,
+            updated);
         return Success(updated, isEnabled ? "The task was enabled." : "The task was disabled.");
     }
 
@@ -122,6 +135,19 @@ public sealed class TaskCollection
         }
 
         return Success(definition, "The task definition is valid.");
+    }
+
+    private void RaiseChanged(
+        TaskCollectionChangeKind kind,
+        Guid taskId,
+        TaskDefinition? definition)
+    {
+        Changed?.Invoke(this, new TaskCollectionChangedEventArgs
+        {
+            Kind = kind,
+            TaskId = taskId,
+            Definition = definition
+        });
     }
 
     private static TaskCollectionResult Success(TaskDefinition? definition, string message) => new()
