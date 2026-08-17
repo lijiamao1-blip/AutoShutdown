@@ -367,6 +367,21 @@
                             </Border>
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
                                 <StackPanel>
+                                    <TextBlock Text="无人值守（高级）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding UnattendedRiskText}" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding UnattendedStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding UnattendedDetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding UnattendedErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasUnattendedError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="启用无人值守（双重确认）" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding EnableUnattendedCommand}" Padding="22,10" Margin="0,0,15,0"/>
+                                        <Button Content="撤销授权" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RevokeUnattendedCommand}" Padding="20,10"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
                                     <TextBlock Text="关闭应用（关机前）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">

@@ -11,6 +11,7 @@ using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
+using AutoShutdown.Core.Unattended;
 
 namespace AutoShutdown.App.Presentation;
 
@@ -72,6 +73,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _cancelConfirmation;
     private readonly Func<bool>? _realPowerConfirmation;
     private readonly Func<bool>? _closeAppsForceKillConfirmation;
+    private readonly IUnattendedPolicyService? _unattendedPolicy;
+    private readonly Func<bool>? _unattendedEnableConfirmation;
+    private readonly Func<bool>? _unattendedEnableSecondConfirmation;
     private readonly RecoveryNoticeService? _recoveryNoticeService;
 
     private TaskInstance? _currentInstance;
@@ -98,6 +102,9 @@ public sealed class MainWindowViewModel : ObservableObject
         Func<bool>? cancelConfirmation = null,
         Func<bool>? realPowerConfirmation = null,
         Func<bool>? closeAppsForceKillConfirmation = null,
+        IUnattendedPolicyService? unattendedPolicy = null,
+        Func<bool>? unattendedEnableConfirmation = null,
+        Func<bool>? unattendedEnableSecondConfirmation = null,
         RecoveryNoticeService? recoveryNotice = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -115,6 +122,9 @@ public sealed class MainWindowViewModel : ObservableObject
         _cancelConfirmation = cancelConfirmation;
         _realPowerConfirmation = realPowerConfirmation;
         _closeAppsForceKillConfirmation = closeAppsForceKillConfirmation;
+        _unattendedPolicy = unattendedPolicy;
+        _unattendedEnableConfirmation = unattendedEnableConfirmation;
+        _unattendedEnableSecondConfirmation = unattendedEnableSecondConfirmation;
         _recoveryNoticeService = recoveryNotice;
 
         NavItems =
@@ -165,6 +175,12 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         });
         SaveCloseAppsCommand = new AsyncRelayCommand(ExecuteSaveCloseAppsAsync);
+        EnableUnattendedCommand = new AsyncRelayCommand(
+            ExecuteEnableUnattendedAsync,
+            () => !IsUnattendedBusy && !_unattendedAuthorized && _unattendedPolicy is not null);
+        RevokeUnattendedCommand = new AsyncRelayCommand(
+            ExecuteRevokeUnattendedAsync,
+            () => !IsUnattendedBusy && _unattendedAuthorized && _unattendedPolicy is not null);
         RowSnoozeCommand = new RelayCommand(RowSnooze);
         RowStopCommand = new RelayCommand(RowStop);
         RowClearCommand = new RelayCommand(RowClear);
@@ -1191,6 +1207,288 @@ public sealed class MainWindowViewModel : ObservableObject
         _ => "未知状态"
     };
 
+    // ---- 无人值守（S20） ----
+
+    public const string UnattendedRiskText =
+        "无人值守默认关闭。启用后，任务到期将不再等待人工确认，自动执行所选动作的电源操作（关机/重启/睡眠/休眠）。\n"
+        + "这会绕过人工确认闸门（仍受配置 RealPowerEnabled 与 Pre-Pipeline 双重闸门约束），存在未保存工作丢失风险，请谨慎启用。";
+
+    private bool _unattendedAuthorized;
+    private bool _isUnattendedBusy;
+
+    private string _unattendedStatusText = "默认关闭（未启用）";
+
+    private string _unattendedDetailText = "未找到无人值守授权记录，默认不执行真实电源（fail-closed）。";
+
+    private string _unattendedErrorText = string.Empty;
+
+    public bool IsUnattendedBusy
+    {
+        get => _isUnattendedBusy;
+        private set
+        {
+            if (SetProperty(ref _isUnattendedBusy, value))
+            {
+                EnableUnattendedCommand.RaiseCanExecuteChanged();
+                RevokeUnattendedCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string UnattendedStatusText
+    {
+        get => _unattendedStatusText;
+        private set => SetProperty(ref _unattendedStatusText, value);
+    }
+
+    public string UnattendedDetailText
+    {
+        get => _unattendedDetailText;
+        private set => SetProperty(ref _unattendedDetailText, value);
+    }
+
+    public string UnattendedErrorText
+    {
+        get => _unattendedErrorText;
+        private set
+        {
+            if (SetProperty(ref _unattendedErrorText, value))
+            {
+                OnPropertyChanged(nameof(HasUnattendedError));
+            }
+        }
+    }
+
+    public bool HasUnattendedError => !string.IsNullOrEmpty(_unattendedErrorText);
+
+    public bool IsUnattendedEnabled => _unattendedAuthorized;
+
+    public AsyncRelayCommand EnableUnattendedCommand { get; }
+
+    public AsyncRelayCommand RevokeUnattendedCommand { get; }
+
+    public async Task RefreshUnattendedAsync()
+    {
+        if (_unattendedPolicy is null)
+        {
+            SetUnattended(false, "不可用", "无人值守策略服务未注册（当前为安全环境）。");
+            return;
+        }
+
+        UnattendedAuthorizationDecision decision;
+        try
+        {
+            decision = await _unattendedPolicy.EvaluateAsync(PowerAction.Shutdown, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            SetUnattended(false, "不可用", "无人值守策略评估失败（fail-closed）：" + exception.Message);
+            return;
+        }
+
+        SetUnattended(
+            decision.IsAuthorized,
+            MapUnattendedStatus(decision.Status),
+            BuildUnattendedDetail(decision));
+    }
+
+    private void SetUnattended(bool authorized, string status, string detail)
+    {
+        _unattendedAuthorized = authorized;
+        UnattendedStatusText = status;
+        UnattendedDetailText = detail;
+        OnPropertyChanged(nameof(IsUnattendedEnabled));
+        EnableUnattendedCommand.RaiseCanExecuteChanged();
+        RevokeUnattendedCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task ExecuteEnableUnattendedAsync()
+    {
+        if (IsUnattendedBusy || _unattendedPolicy is null)
+        {
+            return;
+        }
+
+        // 本地双重确认：第一次说明风险，第二次为强制二次确认（S20 硬性要求）。
+        if (!ConfirmUnattendedEnable(_unattendedEnableConfirmation, "第一次确认"))
+        {
+            AppendActivity("已取消启用无人值守");
+            return;
+        }
+
+        if (!ConfirmUnattendedEnable(_unattendedEnableSecondConfirmation, "第二次确认"))
+        {
+            AppendActivity("已取消启用无人值守（未完成二次确认）");
+            return;
+        }
+
+        IsUnattendedBusy = true;
+        UnattendedErrorText = string.Empty;
+
+        try
+        {
+            var result = await _unattendedPolicy.EnableAsync(
+                new UnattendedEnableRequest
+                {
+                    Action = PowerAction.Shutdown,
+                    TriggerReason = "本地控制面板启用无人值守",
+                    SecondConfirmationCompleted = true
+                },
+                CancellationToken.None);
+
+            if (result.Succeeded)
+            {
+                TryLog(logger => logger.Info("UnattendedEnabled", "无人值守已启用。"));
+                StatusMessage = "无人值守已启用";
+                AppendActivity("已启用无人值守（版本 V" + result.Policy!.AuthorizationVersion + "）");
+            }
+            else
+            {
+                UnattendedErrorText = MapUnattendedEnableError(result.Status, result.Error);
+                StatusMessage = "无人值守启用失败：" + UnattendedErrorText;
+                AppendActivity("无人值守启用失败：" + UnattendedErrorText);
+            }
+        }
+        catch (Exception exception)
+        {
+            UnattendedErrorText = "无人值守启用异常：" + exception.Message;
+            StatusMessage = UnattendedErrorText;
+            AppendActivity(UnattendedErrorText);
+        }
+        finally
+        {
+            await RefreshUnattendedAsync();
+            IsUnattendedBusy = false;
+        }
+    }
+
+    private async Task ExecuteRevokeUnattendedAsync()
+    {
+        if (IsUnattendedBusy || _unattendedPolicy is null)
+        {
+            return;
+        }
+
+        IsUnattendedBusy = true;
+        UnattendedErrorText = string.Empty;
+
+        try
+        {
+            var result = await _unattendedPolicy.RevokeAsync(CancellationToken.None);
+            if (result.Succeeded)
+            {
+                TryLog(logger => logger.Info("UnattendedRevoked", "无人值守已撤销。"));
+                StatusMessage = "无人值守已撤销";
+                AppendActivity("已撤销无人值守授权");
+            }
+            else
+            {
+                UnattendedErrorText = "撤销失败：" + result.Error;
+                StatusMessage = UnattendedErrorText;
+                AppendActivity(UnattendedErrorText);
+            }
+        }
+        catch (Exception exception)
+        {
+            UnattendedErrorText = "无人值守撤销异常：" + exception.Message;
+            StatusMessage = UnattendedErrorText;
+            AppendActivity(UnattendedErrorText);
+        }
+        finally
+        {
+            await RefreshUnattendedAsync();
+            IsUnattendedBusy = false;
+        }
+    }
+
+    private bool ConfirmUnattendedEnable(Func<bool>? confirmation, string step)
+    {
+        if (confirmation is not null)
+        {
+            return confirmation();
+        }
+
+        return System.Windows.MessageBox.Show(
+            UnattendedRiskText + "\n\n（" + step + "）确认启用无人值守？",
+            "启用无人值守",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning) == MessageBoxResult.OK;
+    }
+
+    private static string MapUnattendedStatus(UnattendedPolicyStatus status) => status switch
+    {
+        UnattendedPolicyStatus.NotFound => "默认关闭（未启用）",
+        UnattendedPolicyStatus.Disabled => "已禁用",
+        UnattendedPolicyStatus.Revoked => "已撤销",
+        UnattendedPolicyStatus.Expired => "已过期",
+        UnattendedPolicyStatus.Authorized => "已授权（无人值守生效）",
+        UnattendedPolicyStatus.ActionMismatch => "已授权但动作不匹配",
+        UnattendedPolicyStatus.Corrupt => "授权记录损坏（拒绝执行）",
+        UnattendedPolicyStatus.Invalid => "授权记录非法（拒绝执行）",
+        UnattendedPolicyStatus.UnsupportedVersion => "授权版本不受支持（拒绝执行）",
+        UnattendedPolicyStatus.Unavailable => "授权记录不可用（拒绝执行）",
+        _ => "未知状态（拒绝执行）"
+    };
+
+    private static string BuildUnattendedDetail(UnattendedAuthorizationDecision decision)
+    {
+        var policy = decision.Policy;
+        if (policy is null)
+        {
+            return decision.Status switch
+            {
+                UnattendedPolicyStatus.NotFound => "未找到授权记录，默认不执行真实电源（fail-closed）。",
+                UnattendedPolicyStatus.Corrupt => "授权记录损坏，拒绝执行真实电源，请检查 unattended.json。",
+                UnattendedPolicyStatus.Invalid => "授权记录非法，拒绝执行真实电源。",
+                UnattendedPolicyStatus.UnsupportedVersion => "授权记录版本不受支持，拒绝执行真实电源。",
+                UnattendedPolicyStatus.Unavailable => "授权记录不可用，拒绝执行真实电源。",
+                _ => string.IsNullOrEmpty(decision.Reason) ? "无人值守未获授权。" : decision.Reason
+            };
+        }
+
+        var parts = new List<string>();
+        if (policy.AuthorizationVersion > 0)
+        {
+            parts.Add("授权版本 V" + policy.AuthorizationVersion);
+        }
+
+        if (policy.AuthorizedAction != PowerAction.Unknown)
+        {
+            parts.Add("授权动作 " + UiTextMapper.Map(policy.AuthorizedAction));
+        }
+
+        if (policy.AuthorizedAtUtc != default)
+        {
+            parts.Add("授权时间 " + policy.AuthorizedAtUtc.ToString("yyyy-MM-dd HH:mm") + " UTC");
+        }
+
+        if (!string.IsNullOrEmpty(policy.TriggerReason))
+        {
+            parts.Add("触发原因 " + policy.TriggerReason);
+        }
+
+        if (policy.ExpiresAtUtc is { } expires)
+        {
+            parts.Add("有效期至 " + expires.ToString("yyyy-MM-dd HH:mm") + " UTC");
+        }
+
+        if (policy.RevokedAtUtc is { } revoked)
+        {
+            parts.Add("撤销时间 " + revoked.ToString("yyyy-MM-dd HH:mm") + " UTC");
+        }
+
+        return parts.Count == 0 ? decision.Reason : string.Join(" · ", parts);
+    }
+
+    private static string MapUnattendedEnableError(UnattendedEnableStatus status, string? error) => status switch
+    {
+        UnattendedEnableStatus.MissingSecondConfirmation => "缺少本地二次确认",
+        UnattendedEnableStatus.InvalidAction => "授权动作无效",
+        UnattendedEnableStatus.InvalidRequest => "授权请求无效",
+        UnattendedEnableStatus.IoFailure => string.IsNullOrEmpty(error) ? "授权写入失败" : error,
+        _ => string.IsNullOrEmpty(error) ? "启用失败" : error
+    };
+
     // ---- 关闭应用设置（S18-D1） ----
 
     public ObservableCollection<CloseAppsTargetRow> CloseAppsTargets { get; } = [];
@@ -1405,6 +1703,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Refresh(GetSnapshot(), _clock.UtcNow);
         await RefreshConfigurationAsync();
         RefreshAutoStart();
+        await RefreshUnattendedAsync();
         RefreshRecoveryNotice();
     }
 

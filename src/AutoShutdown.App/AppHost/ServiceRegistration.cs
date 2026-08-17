@@ -177,7 +177,14 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IRegistryRunKeyStore>(),
                 () => Environment.ProcessPath));
 
-        services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<MainWindowViewModel>(provider =>
+            new MainWindowViewModel(
+                provider.GetRequiredService<ISchedulerEngine>(),
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<IClock>(),
+                provider.GetRequiredService<IApplicationLogger>(),
+                provider.GetRequiredService<IAutoStartService>(),
+                unattendedPolicy: provider.GetRequiredService<IUnattendedPolicyService>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();
