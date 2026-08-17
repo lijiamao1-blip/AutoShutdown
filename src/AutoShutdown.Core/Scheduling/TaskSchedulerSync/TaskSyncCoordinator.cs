@@ -25,6 +25,13 @@ public sealed class TaskSyncCoordinator : IDisposable
     /// <summary>默认防抖窗口：本地连续变更合并为一次同步。</summary>
     public static TimeSpan DefaultDebounceDelay { get; } = TimeSpan.FromMilliseconds(800);
 
+    /// <summary>
+    /// 同步开关（默认开启，向后兼容独立使用）。关闭后本地变更的防抖同步一律跳过（绝不创建/
+    /// 更新外部任务），从而维持「同步关闭 = 外部无本应用任务，绝不残留」不变量：关闭前由 UI
+    /// 先清理外部任务，此门保证清理之后任何本地变更都不会再把外部任务带回来。
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>每次同步完成后触发（UI 可据此刷新状态；测试可据此等待）。</summary>
     public event EventHandler<TaskSyncReport>? SyncCompleted;
 
@@ -57,12 +64,19 @@ public sealed class TaskSyncCoordinator : IDisposable
 
     /// <summary>
     /// 手动触发一次同步（绕过防抖；UI「立即同步」按钮用）。返回本次报告。
+    /// 同步已关闭（<see cref="Enabled"/> == false）时跳过：不触碰外部、不触发事件——
+    /// 防抖与排空都经此门，保证关闭后外部任务绝不被带回来。
     /// </summary>
     public async Task<TaskSyncReport> SyncNowAsync(CancellationToken cancellationToken)
     {
         await _syncGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (!Enabled)
+            {
+                return new TaskSyncReport { Succeeded = true };
+            }
+
             var report = await _syncService.SyncAsync(
                 _taskService.GetAll(),
                 _appExePath,

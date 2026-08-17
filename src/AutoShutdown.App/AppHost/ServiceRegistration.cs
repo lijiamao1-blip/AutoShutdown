@@ -154,12 +154,24 @@ public static class ServiceRegistration
         services.AddSingleton<TaskSchedulerMapper>();
         services.AddSingleton<TaskSyncService>();
         services.AddSingleton<TaskSyncCoordinator>(provider =>
-            new TaskSyncCoordinator(
+        {
+            var coordinator = new TaskSyncCoordinator(
                 provider.GetRequiredService<ITaskService>(),
                 provider.GetRequiredService<TaskSyncService>(),
                 provider.GetRequiredService<IClock>(),
                 Environment.ProcessPath
-                    ?? throw new InvalidOperationException("No process path is available.")));
+                    ?? throw new InvalidOperationException("No process path is available."));
+
+            // 启动即按存储恢复开关（fail-closed：缺失/损坏/非法一律关闭）。协调器在调度引擎
+            // 加载任务前解析，保证初始加载触发的防抖同步在「同步关闭」时绝不创建外部任务。
+            // FileStorage 内部全程 ConfigureAwait(false)，此处同步等待不会死锁。
+            var load = provider.GetRequiredService<TaskSyncSettingsStore>()
+                .LoadAsync(CancellationToken.None)
+                .GetAwaiter().GetResult();
+            coordinator.Enabled = load.Status == TaskSyncSettingsLoadStatus.Success
+                && load.Document?.Enabled == true;
+            return coordinator;
+        });
         services.AddSingleton<ExternalTriggerScheduleGate>();
         // tasks.json 的独立文档存储：SchedulerEngine 内部自建实例（不可注入），此处单独注册，
         // 供外部触发服务严格读取本地事实源（区分 NotFound/Corrupt/Invalid/UnsupportedVersion）。

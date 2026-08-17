@@ -153,6 +153,8 @@ public sealed class TaskSyncSectionViewModel : ObservableObject
 
             OnPropertyChanged(nameof(Enabled));
             OnPropertyChanged(nameof(CanOperate));
+            // 同步门与存储一致：启动时若存储为关闭，初始加载的防抖同步立即失效（不建外部任务）。
+            _coordinator.Enabled = _enabled;
             StatusText = _enabled ? "已启用" : "已关闭";
 
             if (load.Status == TaskSyncSettingsLoadStatus.Success
@@ -221,11 +223,17 @@ public sealed class TaskSyncSectionViewModel : ObservableObject
                     return;
                 }
 
+                _coordinator.Enabled = true;
                 StatusText = "已启用（正在同步…）";
                 await _coordinator.SyncNowAsync(CancellationToken.None).ConfigureAwait(true);
             }
             else
             {
+                // 先关同步门：此后任何防抖/排空同步一律跳过，外部任务绝不被带回来。
+                _coordinator.Enabled = false;
+                // 排空在途同步：信号量保证等它结束后外部状态稳定，再清理。
+                await _coordinator.SyncNowAsync(CancellationToken.None).ConfigureAwait(true);
+
                 if (!await ClearExternalAsync().ConfigureAwait(true))
                 {
                     ErrorText = "无法清除已有计划任务，未关闭同步（fail-closed）。请以管理员身份运行后重试。";

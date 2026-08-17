@@ -136,6 +136,67 @@ public sealed class S22_TaskSyncCoordinatorTests
         Assert.Single(adapter.Operations);
     }
 
+    // ---- 同步门：关闭后绝不创建/更新外部任务（维持「关闭 = 外部无本应用任务」）----
+
+    [Fact]
+    public async Task DisabledSync_ManualSyncSkips_WithoutTouchingExternal_OrFiringEvent()
+    {
+        var service = CreateTaskService();
+        var adapter = new FakeTaskSchedulerAdapter();
+        // 用永不完成的等待器，避免 Add 触发的自动同步；仅验证手动同步路径。
+        var coordinator = CreateCoordinator(service, adapter, waiter: (_, _) => NeverCompletingTask());
+        coordinator.Enabled = false;
+        var eventFired = false;
+        coordinator.SyncCompleted += (_, _) => eventFired = true;
+
+        service.Add(DailyTask());
+        var report = await coordinator.SyncNowAsync(CancellationToken.None);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal(0, report.Created);
+        Assert.Empty(adapter.Operations);
+        Assert.False(eventFired, "Disabled sync must not fire SyncCompleted.");
+        coordinator.Dispose();
+    }
+
+    [Fact]
+    public async Task DisabledSync_LocalChangeDebounce_Skips_NoExternalTaskRecreated()
+    {
+        var service = CreateTaskService();
+        var adapter = new FakeTaskSchedulerAdapter();
+        var coordinator = CreateCoordinator(service, adapter, debounceDelay: TimeSpan.Zero);
+        coordinator.Enabled = false;
+        var eventFired = false;
+        coordinator.SyncCompleted += (_, _) => eventFired = true;
+
+        service.Add(DailyTask()); // 防抖立即触发 → 因关闭而跳过
+
+        await Task.Delay(200); // 若未跳过，防抖早已创建外部任务
+        Assert.Empty(adapter.Operations);
+        Assert.False(eventFired);
+        coordinator.Dispose();
+    }
+
+    [Fact]
+    public async Task DisabledThenEnabled_TurnsSyncBackOn()
+    {
+        var service = CreateTaskService();
+        var adapter = new FakeTaskSchedulerAdapter();
+        var coordinator = CreateCoordinator(service, adapter, debounceDelay: TimeSpan.Zero);
+        coordinator.Enabled = false;
+
+        var completed = new TaskCompletionSource<TaskSyncReport>(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.SyncCompleted += (_, report) => completed.TrySetResult(report);
+
+        coordinator.Enabled = true;
+        service.Add(DailyTask());
+
+        var report = await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, report.Created);
+        Assert.Single(adapter.Operations);
+        coordinator.Dispose();
+    }
+
     // ---- Dispose 解绑 ----
 
     [Fact]
