@@ -6,8 +6,8 @@ namespace AutoShutdown.Tests;
 /// <summary>
 /// S22 源码契约测试。验证 Windows 任务计划程序单向同步的安全不变量：
 /// 1) Core 同步层（TaskSchedulerSync）绝不新增电源出口：无 IPowerService（注释除外）、
-///    无 P/Invoke、无 shutdown.exe、无进程启动；外部触发只经 IScheduledTaskHandler 回交
-///    本地唯一 Workflow。
+///    无 P/Invoke、无 shutdown.exe、无进程启动；外部触发经本地调度引擎的唯一接入/仲裁路径
+///    执行（ExternalTriggerTaskCommand + SubmitAsync），绝不直接调用 handler 或 Workflow。
 /// 2) 绝不 inbound：同步层只读本地事实源（GetAll/LoadAsync），绝无写入本地 tasks.json 的
 ///    路径；外部任务永不反向覆盖本地。
 /// 3) 外部动作只回调本地应用（--trigger-task &lt;id&gt;），适配器只清理「专属目录 + 应用标识 +
@@ -64,7 +64,7 @@ public sealed class S22_TaskSchedulerSyncSourceContractTests
     }
 
     [Fact]
-    public void ExternalTrigger_EncodesStrictTaxonomyAndRoutesViaHandler()
+    public void ExternalTrigger_EncodesStrictTaxonomyAndRoutesViaEngine()
     {
         var service = File.ReadAllText(Path.Combine(SyncRoot(), "ExternalTaskTriggerService.cs"));
 
@@ -74,15 +74,20 @@ public sealed class S22_TaskSchedulerSyncSourceContractTests
         Assert.Contains("GateRejected", service);
         Assert.Contains("ConfigLoadFailed", service);
         Assert.Contains("ExecutionFailed", service);
+        Assert.Contains("Deduped", service);
 
         // 严格读取本地事实源：经 TasksDocumentStore.LoadAsync（区分 NotFound/Corrupt/Invalid/
         // UnsupportedVersion），绝不直接读文件。
         Assert.Contains("TasksDocumentStore", service);
         Assert.Contains("LoadAsync", service);
 
-        // 回交本地唯一 Workflow：只经 IScheduledTaskHandler.HandleDueAsync，绝无电源调用。
-        Assert.Contains("IScheduledTaskHandler", service);
-        Assert.Contains("HandleDueAsync", service);
+        // S22-D2：外部触发经本地调度引擎唯一接入/仲裁路径（ExternalTriggerTaskCommand +
+        // SubmitAsync），绝不直接调用 handler 或 Workflow，也绝不直接执行电源。
+        Assert.Contains("ISchedulerEngine", service);
+        Assert.Contains("ExternalTriggerTaskCommand", service);
+        Assert.Contains("SubmitAsync", service);
+        Assert.DoesNotContain("IScheduledTaskHandler", service);
+        Assert.DoesNotContain("HandleDueAsync", service);
     }
 
     [Fact]

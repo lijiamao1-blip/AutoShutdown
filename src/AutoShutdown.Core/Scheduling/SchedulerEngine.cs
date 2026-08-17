@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Idle;
+using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
@@ -708,6 +709,143 @@ public sealed class SchedulerEngine : ISchedulerEngine
         return Success("The arbitration decision was applied.");
     }
 
+    /// <summary>
+    /// 外部触发唯一接入路径（S22-D2）：Windows 外部任务回调只携带稳定本地 task id，经命令
+    /// 通道进入本引擎唯一执行路径，绝不直接调用 handler 或 Workflow。按以下冻结裁决执行：
+    /// <list type="number">
+    /// <item>并发去重：同一任务已有活实例（Waiting/Confirming/Running/Executing）或本触发
+    /// 窗口内已由本地调度器消费（终态且 fire time 落在容差窗口内）→ 拒绝（ActiveTaskExists），
+    /// 本地调度器为唯一事实源，绝不重复进入 Pipeline/电源。</item>
+    /// <item>倒计时边界裁决 <see cref="ResolveCountdownConfirmationAsync"/>：S20-D1 无人值守
+    /// 授权失效/异常/未选 → fail-closed 取消；S20-D2 Idle 输入恢复/未知/监视器缺失 → 取消；
+    /// 人工确认经 RealPowerConfirmed 与 Workflow 双闸门之二裁决。</item>
+    /// <item>唯一 handler 调用 + 冻结状态机终结 + 周期改期，与本地调度到期路径同源。</item>
+    /// </list>
+    /// 不引入第二电源出口；返回引擎命令结果，由触发服务映射为外部触发结果。
+    /// </summary>
+    private async Task<SchedulerCommandResult> HandleExternalTriggerAsync(
+        ExternalTriggerTaskCommand command,
+        CancellationToken cancellationToken)
+    {
+        var definition = _taskService.Get(command.TaskId);
+        if (definition is null)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.NoCurrentTask,
+                "Local task " + command.TaskId.ToString("D")
+                + " no longer exists; stale external task ignored.");
+        }
+
+        if (!definition.IsEnabled)
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.InvalidCommand,
+                "Local task is disabled; no power action.");
+        }
+
+        // 并发去重（唯一执行）：本地调度器已拥有该任务触发窗口 → 外部触发冗余。
+        var now = _clock.UtcNow.ToUniversalTime();
+        if (IsExternalTriggerRedundant(definition, command.TaskId, now))
+        {
+            return Rejected(
+                GetSnapshot(),
+                SchedulerCommandStatus.ActiveTaskExists,
+                "External trigger is redundant: the local scheduler already owns this firing window; no duplicate pipeline or power call.");
+        }
+
+        var instance = BuildExternalTriggerInstance(definition, now);
+        await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+
+        var snapshot = GetSnapshot();
+        if (snapshot.EngineStatus == SchedulerEngineStatus.Faulted)
+        {
+            return Rejected(
+                snapshot,
+                SchedulerCommandStatus.Faulted,
+                "The scheduler engine faulted while executing the external trigger: "
+                + (snapshot.FaultMessage ?? "unknown failure."));
+        }
+
+        // 周期任务执行后改期为下一次 Waiting；一次性/倒计时任务保持 Executed 终态。
+        var after = snapshot.Instances.TryGetValue(command.TaskId, out var current)
+            ? current
+            : null;
+        if (after is { State: TaskInstanceState.Executed or TaskInstanceState.Waiting })
+        {
+            return Success("The external trigger was routed through the local scheduler engine and executed.");
+        }
+
+        return Rejected(
+            snapshot,
+            SchedulerCommandStatus.TransitionRejected,
+            "The external trigger was rejected by the countdown boundary adjudication; no power action. (state="
+            + (after?.State.ToString() ?? "not-found") + ")");
+    }
+
+    /// <summary>
+    /// 并发去重裁决：同一任务是否已有本触发窗口的有效执行载体。
+    /// 非 Idle：任何活实例（本地调度器已接管，且因循环到期优先必然先于命令触发）→ 冗余；
+    /// 终态实例仅当 fire time 落在当前触发容差窗口内（本窗口刚被本地消费）→ 冗余。
+    /// Idle：Waiting 占位不代表本地已接管（本地需先确认空闲再武装），仅 Confirming+IsIdleTriggered
+    /// （已武装）/Running/Executing/本窗口终态才冗余，否则外部 Idle 触发经边界裁决重新检测输入。
+    /// </summary>
+    private bool IsExternalTriggerRedundant(
+        TaskDefinition definition,
+        Guid taskId,
+        DateTimeOffset now)
+    {
+        if (!GetSnapshot().Instances.TryGetValue(taskId, out var existing))
+        {
+            return false;
+        }
+
+        if (definition.Kind == TaskKind.Idle)
+        {
+            return existing.State is TaskInstanceState.Running or TaskInstanceState.Executing
+                || (existing.State == TaskInstanceState.Confirming && existing.IsIdleTriggered)
+                || (IsTerminal(existing.State) && SameFiringWindow(existing.ScheduledFireTime, now));
+        }
+
+        return !IsTerminal(existing.State)
+            || SameFiringWindow(existing.ScheduledFireTime, now);
+    }
+
+    /// <summary>fire time 是否落在外部触发容差窗口内（与时间闸门同一容差，单一定义源）。</summary>
+    private static bool SameFiringWindow(DateTimeOffset fireTime, DateTimeOffset now)
+        => (fireTime.ToUniversalTime() - now).Duration() <= ExternalTriggerScheduleGate.DefaultTolerance;
+
+    /// <summary>
+    /// 构造外部触发的“到期实例”：State=Confirming（已越过倒计时边界，立即交边界裁决），
+    /// Idle 任务标记 IsIdleTriggered 以便 S20-D2 在边界重新检测输入。HasExecuted=false，
+    /// 由 <see cref="EnterExecutingAsync"/> 走完整 Confirming→Running→Executing 冻结状态机，
+    /// 确保 ResolveCountdownConfirmationAsync（S20-D1/D2/人工确认）、唯一 handler 调用与
+    /// 周期改期全部生效。
+    /// </summary>
+    private TaskInstance BuildExternalTriggerInstance(TaskDefinition definition, DateTimeOffset now)
+    {
+        var instanceId = _identifierGenerator.NewId();
+        var stageToken = _identifierGenerator.NewId();
+        return new TaskInstance
+        {
+            InstanceId = instanceId,
+            SourceTaskId = definition.Id,
+            ActionSnapshot = definition.Action,
+            State = TaskInstanceState.Confirming,
+            ScheduledFireTime = now,
+            WarningStartTime = null,
+            StageToken = stageToken,
+            HasExecuted = false,
+            CreatedAt = now,
+            RealPowerConfirmed = definition.RealPowerConfirmed,
+            UseUnattended = definition.UseUnattended,
+            TargetMachineId = definition.TargetMachineId,
+            RtcWakeTimeUtc = definition.RtcWakeTimeUtc,
+            IsIdleTriggered = definition.Kind == TaskKind.Idle
+        };
+    }
+
     private void SetPendingArbitration(
         TaskArbitrationResult arbitration,
         IReadOnlyList<TaskInstance> due)
@@ -1076,6 +1214,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
             ClearTerminalTaskCommand clear => await HandleClearTerminalAsync(clear, cancellationToken).ConfigureAwait(false),
             SetTaskEnabledCommand setEnabled => HandleSetEnabledAsync(setEnabled),
             ResolveArbitrationCommand resolve => await HandleResolveArbitrationAsync(resolve, cancellationToken).ConfigureAwait(false),
+            ExternalTriggerTaskCommand external => await HandleExternalTriggerAsync(external, cancellationToken).ConfigureAwait(false),
             _ => Rejected(GetSnapshot(), SchedulerCommandStatus.InvalidCommand, "Unknown command type.")
         };
     }

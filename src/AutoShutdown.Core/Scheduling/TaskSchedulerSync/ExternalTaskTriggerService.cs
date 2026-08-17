@@ -1,5 +1,4 @@
 using AutoShutdown.Core.Abstractions;
-using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
 using AutoShutdown.Core.Tasks;
 
@@ -9,7 +8,7 @@ public enum ExternalTriggerOutcomeStatus
 {
     Unknown = 0,
 
-    /// <summary>已回交本地唯一 Workflow 并成功执行。</summary>
+    /// <summary>已经本地调度引擎唯一接入/仲裁路径执行成功。</summary>
     Success = 1,
 
     /// <summary>本地任务 id 已不存在（外部任务陈旧）：不执行任何电源。</summary>
@@ -24,8 +23,11 @@ public enum ExternalTriggerOutcomeStatus
     /// <summary>tasks.json 缺失/损坏/非法/版本过高：fail-closed，绝不执行电源。</summary>
     ConfigLoadFailed = 5,
 
-    /// <summary>本地 Workflow/handler 拒绝执行或抛异常：不执行电源。</summary>
-    ExecutionFailed = 6
+    /// <summary>本地调度引擎/倒计时边界裁决拒绝执行或抛异常：不执行电源。</summary>
+    ExecutionFailed = 6,
+
+    /// <summary>并发去重：本地调度器已拥有同一任务同一触发窗口，外部触发冗余，不重复执行。</summary>
+    Deduped = 7
 }
 
 public sealed record ExternalTriggerOutcome
@@ -36,38 +38,36 @@ public sealed record ExternalTriggerOutcome
 }
 
 /// <summary>
-/// 外部触发回调服务（S22 CP4）：外部任务只回调本地应用（--trigger-task &lt;id&gt;），本服务把
-/// 回调翻译回本地唯一调度/Workflow。绝不直接执行电源命令——只构造 Executing 实例并交给
-/// <see cref="IScheduledTaskHandler"/>（WakeOnLan→执行器，其余→ShutdownWorkflow），
-/// ShutdownWorkflow 仍是唯一调用 IPowerService 的模块，双闸门与 Pre-Pipeline 原样生效。
+/// 外部触发回调服务（S22 CP4 + D2）：外部任务只回调本地应用（--trigger-task &lt;id&gt;），本服务
+/// 只读本地事实源做 fail-closed 前置校验（配置分类/任务存在/启用/时间闸门），随后把触发经
+/// <see cref="ExternalTriggerTaskCommand"/> 提交进 <see cref="ISchedulerEngine"/> 的唯一接入/
+/// 仲裁路径。引擎按同一任务单实例（并发去重）+ 倒计时边界裁决（S20-D1 无人值守授权、
+/// S20-D2 Idle 输入恢复/未知/监视器缺失、人工确认）决定是否执行，并只经唯一 handler/
+/// ShutdownWorkflow 调用电源；本服务绝不直接调用 handler 或 Workflow，也绝不直接执行电源命令。
 /// 读取 tasks.json 严格区分 NotFound/Corrupt/Invalid/UnsupportedVersion，任何失败 fail-closed。
 /// </summary>
 public sealed class ExternalTaskTriggerService
 {
     private readonly TasksDocumentStore _documentStore;
-    private readonly IScheduledTaskHandler _handler;
+    private readonly ISchedulerEngine _engine;
     private readonly IClock _clock;
     private readonly ExternalTriggerScheduleGate _gate;
-    private readonly IIdentifierGenerator _idGenerator;
 
     public ExternalTaskTriggerService(
         TasksDocumentStore documentStore,
-        IScheduledTaskHandler handler,
+        ISchedulerEngine engine,
         IClock clock,
-        ExternalTriggerScheduleGate gate,
-        IIdentifierGenerator idGenerator)
+        ExternalTriggerScheduleGate gate)
     {
         ArgumentNullException.ThrowIfNull(documentStore);
-        ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(gate);
-        ArgumentNullException.ThrowIfNull(idGenerator);
 
         _documentStore = documentStore;
-        _handler = handler;
+        _engine = engine;
         _clock = clock;
         _gate = gate;
-        _idGenerator = idGenerator;
     }
 
     public async Task<ExternalTriggerOutcome> HandleExternalTriggerAsync(
@@ -123,48 +123,64 @@ public sealed class ExternalTaskTriggerService
                 + (string.IsNullOrEmpty(gate.Reason) ? string.Empty : " — " + gate.Reason));
         }
 
-        var instance = BuildExecutingInstance(definition, now);
+        // S22-D2：外部触发经本地调度引擎唯一接入/仲裁路径执行。引擎负责并发去重、
+        // S20-D1/S20-D2 倒计时边界裁决、唯一 handler 调用与唯一电源出口。
+        SchedulerCommandResult result;
         try
         {
-            await _handler.HandleDueAsync(instance, cancellationToken).ConfigureAwait(false);
-            return Outcome(
-                ExternalTriggerOutcomeStatus.Success,
-                "External trigger routed to the local workflow.");
+            result = await _engine.SubmitAsync(
+                new ExternalTriggerTaskCommand(taskId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
             return Outcome(
                 ExternalTriggerOutcomeStatus.ExecutionFailed,
-                "The local workflow rejected execution: " + exception.Message);
+                "The scheduler engine rejected the external trigger: " + exception.Message);
         }
+
+        return MapEngineResult(result);
     }
 
-    /// <summary>
-    /// 构造 Executing 实例：直接以 Executing + HasExecuted 进入，满足 ShutdownWorkflow 的
-    /// 前置校验；双闸门（RealPowerEnabled + RealPowerConfirmed/无人值守等效确认）在 Workflow
-    /// 内裁决，本服务不做任何电源决策。
-    /// </summary>
-    private TaskInstance BuildExecutingInstance(TaskDefinition definition, DateTimeOffset now)
+    /// <summary>把引擎命令结果映射为外部触发结果（fail-closed：除 Success/Deduped 外一律不执行电源）。</summary>
+    private static ExternalTriggerOutcome MapEngineResult(SchedulerCommandResult result)
     {
-        var instanceId = _idGenerator.NewId();
-        var stageToken = _idGenerator.NewId();
-        var utcNow = now.ToUniversalTime();
-        return new TaskInstance
+        switch (result.Status)
         {
-            InstanceId = instanceId,
-            SourceTaskId = definition.Id,
-            ActionSnapshot = definition.Action,
-            State = TaskInstanceState.Executing,
-            ScheduledFireTime = utcNow,
-            WarningStartTime = null,
-            StageToken = stageToken,
-            HasExecuted = true,
-            CreatedAt = utcNow,
-            RealPowerConfirmed = definition.RealPowerConfirmed,
-            UseUnattended = definition.UseUnattended,
-            TargetMachineId = definition.TargetMachineId,
-            RtcWakeTimeUtc = definition.RtcWakeTimeUtc
-        };
+            case SchedulerCommandStatus.Success:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.Success,
+                    "External trigger routed through the local scheduler engine and executed.");
+
+            case SchedulerCommandStatus.ActiveTaskExists:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.Deduped,
+                    "External trigger deduplicated: the local scheduler already owns this firing window; no duplicate pipeline or power call.");
+
+            case SchedulerCommandStatus.NoCurrentTask:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.TaskNotFound,
+                    "Local task no longer exists; stale external task ignored.");
+
+            case SchedulerCommandStatus.InvalidCommand:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.Disabled,
+                    "Local task is disabled; no power action.");
+
+            case SchedulerCommandStatus.NotRunning:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.ExecutionFailed,
+                    "The scheduler engine is not running; no power action.");
+
+            default:
+                return Outcome(
+                    ExternalTriggerOutcomeStatus.ExecutionFailed,
+                    "The scheduler engine rejected the external trigger: " + result.Message);
+        }
     }
 
     private static ExternalTriggerOutcome Outcome(

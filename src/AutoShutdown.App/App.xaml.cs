@@ -1,8 +1,12 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using AutoShutdown.App.AppHost;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Recovery;
+using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -139,20 +143,50 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>
-    /// 无界面外部触发处理（S22 CP4）：只把触发交回本地唯一调度/Workflow 裁决。若闸门拒绝或
-    /// 本地任务缺失/禁用，服务 fail-closed 不执行电源；此处只负责把 outcome 记入日志并退出。
+    /// 无界面外部触发处理（S22 CP4 + D2）：headless 启动下引擎尚未运行，此处先执行崩溃恢复
+    /// 并启动调度引擎，再交付触发——触发必须经本地调度引擎唯一接入/仲裁路径执行（并发去重 +
+    /// S20-D1/S20-D2 倒计时边界裁决 + 唯一 handler），服务 fail-closed 不直接执行电源；完成后
+    /// 停止引擎并把 outcome 记入日志后退出。
     /// </summary>
     private void HandleExternalTriggerAndExit(Guid taskId, IApplicationLogger logger)
     {
         try
         {
+            var engine = _serviceProvider!.GetRequiredService<ISchedulerEngine>();
+            var crashRecovery = _serviceProvider!.GetRequiredService<CrashRecoveryManager>();
             var triggerService = _serviceProvider!.GetRequiredService<ExternalTaskTriggerService>();
-            var outcome = triggerService.HandleExternalTriggerAsync(taskId, CancellationToken.None)
-                .GetAwaiter().GetResult();
-            logger.Info(
-                "ExternalTriggerHandled",
-                "外部触发回调完成：" + outcome.Status
-                + (string.IsNullOrEmpty(outcome.Message) ? string.Empty : " — " + outcome.Message));
+
+            // 调度循环前执行崩溃恢复：中断未完成的瞬态实例，防止 headless 启动补执行电源。
+            RunHeadlessCrashRecovery(crashRecovery, logger);
+
+            using var engineCts = new CancellationTokenSource();
+            var engineTask = engine.RunAsync(engineCts.Token);
+            WaitUntilEngineRunning(engine);
+
+            try
+            {
+                var outcome = triggerService.HandleExternalTriggerAsync(taskId, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                logger.Info(
+                    "ExternalTriggerHandled",
+                    "外部触发回调完成：" + outcome.Status
+                    + (string.IsNullOrEmpty(outcome.Message) ? string.Empty : " — " + outcome.Message));
+            }
+            finally
+            {
+                engineCts.Cancel();
+                try
+                {
+                    engineTask.Wait(TimeSpan.FromSeconds(2));
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception)
+                {
+                    // 引擎停止是尽力而为；触发结果已交付。
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -181,6 +215,61 @@ public partial class App : System.Windows.Application
             _bootstrapLogger?.Dispose();
             Shutdown();
         }
+    }
+
+    /// <summary>
+    /// headless 崩溃恢复：与正常启动同序（调度循环前），把未完成的瞬态实例标记为 interrupted，
+    /// 绝不补执行。后台线程执行避免 UI 线程死锁（存储 await 使用 ConfigureAwait(false)）。
+    /// </summary>
+    private static void RunHeadlessCrashRecovery(CrashRecoveryManager crashRecovery, IApplicationLogger logger)
+    {
+        try
+        {
+            var result = Task.Run(() => crashRecovery.RecoverAsync(CancellationToken.None))
+                .GetAwaiter().GetResult();
+
+            foreach (var taskId in result.InterruptedTaskIds)
+            {
+                logger.Warning(
+                    "CrashRecovered",
+                    "崩溃恢复：任务 " + taskId + " 已标记为中断（interrupted），不补执行。");
+            }
+
+            if (result.Status is CrashRecoveryStatus.Recovered
+                or CrashRecoveryStatus.NoRecoveryNeeded
+                or CrashRecoveryStatus.NotFound)
+            {
+                return;
+            }
+
+            logger.Error(
+                "CrashRecoveryFailed",
+                "崩溃恢复失败：" + string.Join(" ", result.Errors));
+        }
+        catch (Exception exception)
+        {
+            logger.Error("CrashRecoveryFailed", "崩溃恢复异常：" + exception.Message, exception);
+        }
+    }
+
+    /// <summary>
+    /// 等待引擎进入 Running：外部触发命令需经引擎唯一命令通道处理，必须先等调度循环就绪
+    /// （RunAsync 恢复完成后才置 Running）。超时视为失败（fail-closed，不执行电源）。
+    /// </summary>
+    private static void WaitUntilEngineRunning(ISchedulerEngine engine)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.ElapsedMilliseconds < 5000)
+        {
+            if (engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Running)
+            {
+                return;
+            }
+
+            Thread.Sleep(20);
+        }
+
+        throw new TimeoutException("The scheduler engine did not become ready in time; no power action.");
     }
 
     /// <summary>解析命令行中的 --trigger-task &lt;稳定本地 task id&gt;；无则返回 null。</summary>

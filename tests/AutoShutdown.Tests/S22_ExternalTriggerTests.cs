@@ -10,9 +10,11 @@ using Xunit;
 namespace AutoShutdown.Tests;
 
 /// <summary>
-/// S22 CP4 测试：外部触发只回调本地调度/Workflow（绝不直接执行电源命令）。
-/// 时间闸门以本地调度器为事实源裁决外部回调；触发服务 fail-closed（缺配置/损坏/禁用/
-/// 偏离窗口一律不执行电源），成功时把 Executing 实例交给唯一 handler。
+/// S22 CP4 + D2 外部触发测试。时间闸门以本地调度器为事实源裁决外部回调；触发服务
+/// fail-closed（缺配置/损坏/禁用/偏离窗口一律不执行电源）；成功路径把触发经
+/// ExternalTriggerTaskCommand 提交进本地调度引擎唯一接入/仲裁路径执行，绝不直接调用
+/// handler 或 Workflow（D2）。引擎内并发去重与 S20-D1/D2 边界裁决由
+/// S22_D2_ExternalTriggerIntegrationTests 覆盖。
 /// </summary>
 public sealed class S22_ExternalTriggerTests
 {
@@ -125,27 +127,7 @@ public sealed class S22_ExternalTriggerTests
         Assert.Equal(ExternalTriggerGateVerdict.Allowed, verdict.Verdict);
     }
 
-    // ---- 外部触发服务（ExternalTaskTriggerService） ----
-
-    [Fact]
-    public async Task Trigger_EnabledOnSchedule_RoutesExecutingInstanceToHandler()
-    {
-        var taskId = Guid.NewGuid();
-        var handler = new FakeScheduledTaskHandler();
-        var service = CreateTriggerService(handler, tasks: [DailyAtTask(taskId)]);
-
-        var outcome = await service.HandleExternalTriggerAsync(taskId, CancellationToken.None);
-
-        Assert.Equal(ExternalTriggerOutcomeStatus.Success, outcome.Status);
-        Assert.Equal(1, handler.CallCount);
-        var instance = handler.LastInstance;
-        Assert.NotNull(instance);
-        Assert.Equal(TaskInstanceState.Executing, instance!.State);
-        Assert.True(instance.HasExecuted);
-        Assert.Equal(taskId, instance.SourceTaskId);
-        Assert.Equal(PowerAction.Shutdown, instance.ActionSnapshot);
-        Assert.True(instance.RealPowerConfirmed);
-    }
+    // ---- 外部触发服务（ExternalTaskTriggerService）：fail-closed 前置校验（不经引擎） ----
 
     [Fact]
     public async Task Trigger_UnknownLocalTask_TaskNotFoundAndNoPower()
@@ -228,20 +210,50 @@ public sealed class S22_ExternalTriggerTests
         Assert.Equal(0, handler.CallCount);
     }
 
+    // ---- 外部触发服务：唯一接入路径（经运行中的本地调度引擎） ----
+
     [Fact]
-    public async Task Trigger_HandlerThrows_ExecutionFailedNoPower()
+    public async Task Trigger_EnabledOnSchedule_RoutesThroughEngineToHandler()
+    {
+        var taskId = Guid.NewGuid();
+        var handler = new FakeScheduledTaskHandler();
+        // 触发时刻 = 到期前 3 分钟：落在闸门容差内（本地允许），但本地引擎尚未接管该窗口
+        // （到期优先循环不会误判冗余），外部触发经唯一接入路径执行。
+        using var harness = CreateRunningHarness(
+            handler,
+            tasks: [DailyAtTask(taskId)],
+            nowUtc: DailyFireUtc.AddMinutes(-3));
+
+        var outcome = await harness.Service.HandleExternalTriggerAsync(taskId, CancellationToken.None);
+
+        Assert.Equal(ExternalTriggerOutcomeStatus.Success, outcome.Status);
+        Assert.Equal(1, handler.CallCount);
+        var instance = handler.LastInstance;
+        Assert.NotNull(instance);
+        Assert.Equal(TaskInstanceState.Executing, instance!.State);
+        Assert.True(instance.HasExecuted);
+        Assert.Equal(taskId, instance.SourceTaskId);
+        Assert.Equal(PowerAction.Shutdown, instance.ActionSnapshot);
+        Assert.True(instance.RealPowerConfirmed);
+    }
+
+    [Fact]
+    public async Task Trigger_EngineFaultsDuringExecution_ExecutionFailedNoPower()
     {
         var taskId = Guid.NewGuid();
         var handler = new FakeScheduledTaskHandler
         {
             ThrowOnHandle = new InvalidOperationException("workflow rejected")
         };
-        var service = CreateTriggerService(handler, tasks: [DailyAtTask(taskId)]);
+        using var harness = CreateRunningHarness(
+            handler,
+            tasks: [DailyAtTask(taskId)],
+            nowUtc: DailyFireUtc.AddMinutes(-3));
 
-        var outcome = await service.HandleExternalTriggerAsync(taskId, CancellationToken.None);
+        var outcome = await harness.Service.HandleExternalTriggerAsync(taskId, CancellationToken.None);
 
         Assert.Equal(ExternalTriggerOutcomeStatus.ExecutionFailed, outcome.Status);
-        Assert.Equal(1, handler.CallCount); // handler 被调用但拒绝执行。
+        Assert.Equal(1, handler.CallCount); // 引擎唯一路径已调用 handler，但执行被拒。
     }
 
     // ---- 辅助 ----
@@ -249,11 +261,35 @@ public sealed class S22_ExternalTriggerTests
     private static ExternalTriggerScheduleGate CreateGate()
         => new(new NextExecutionCalculator());
 
+    /// <summary>前置校验用服务：构造引擎但不启动（fail-closed 校验不经引擎命令路径）。</summary>
     private static ExternalTaskTriggerService CreateTriggerService(
         FakeScheduledTaskHandler handler,
         IReadOnlyList<TaskDefinition>? tasks = null,
         InMemoryStorage? storage = null,
         DateTimeOffset? nowUtc = null)
+    {
+        var harness = BuildHarness(handler, tasks, storage, nowUtc, startEngine: false);
+        return harness.Service;
+    }
+
+    /// <summary>唯一接入路径用：启动引擎并等待 Running，再返回服务。</summary>
+    private static TriggerHarness CreateRunningHarness(
+        FakeScheduledTaskHandler handler,
+        IReadOnlyList<TaskDefinition>? tasks = null,
+        InMemoryStorage? storage = null,
+        DateTimeOffset? nowUtc = null)
+    {
+        var harness = BuildHarness(handler, tasks, storage, nowUtc, startEngine: true);
+        WaitUntilRunning(harness.Engine);
+        return harness;
+    }
+
+    private static TriggerHarness BuildHarness(
+        FakeScheduledTaskHandler handler,
+        IReadOnlyList<TaskDefinition>? tasks,
+        InMemoryStorage? storage,
+        DateTimeOffset? nowUtc,
+        bool startEngine)
     {
         storage ??= new InMemoryStorage();
         if (tasks is { Count: > 0 })
@@ -263,14 +299,43 @@ public sealed class S22_ExternalTriggerTests
         }
 
         var clock = new FixedClock(nowUtc ?? DailyFireUtc, FixedUtc8);
-        var gate = CreateGate();
-        var documentStore = new TasksDocumentStore(storage);
-        return new ExternalTaskTriggerService(
-            documentStore,
-            handler,
+        var engine = new SchedulerEngine(
+            storage,
             clock,
-            gate,
-            new GuidIdentifierGenerator());
+            new SystemAsyncDeadline(clock),
+            new TaskService(
+                new NextExecutionCalculator(),
+                new TaskInstanceStateMachine(),
+                new GuidIdentifierGenerator()),
+            new TaskInstanceStateMachine(),
+            new GuidIdentifierGenerator(),
+            handler,
+            new NoOpTaskArbitrator());
+        var documentStore = new TasksDocumentStore(storage);
+        var service = new ExternalTaskTriggerService(
+            documentStore,
+            engine,
+            clock,
+            CreateGate());
+
+        var scope = startEngine ? new EngineScope(engine) : null;
+        return new TriggerHarness(service, engine, scope);
+    }
+
+    private static void WaitUntilRunning(SchedulerEngine engine)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (stopwatch.ElapsedMilliseconds < 2000)
+        {
+            if (engine.GetSnapshot().EngineStatus == SchedulerEngineStatus.Running)
+            {
+                return;
+            }
+
+            Thread.Sleep(10);
+        }
+
+        throw new TimeoutException("The scheduler engine did not become ready.");
     }
 
     private static TaskDefinition DailyAtTask(Guid? id = null) => new()
@@ -282,6 +347,38 @@ public sealed class S22_ExternalTriggerTests
         CreatedAt = new DateTimeOffset(2026, 8, 17, 0, 0, 0, TimeSpan.Zero),
         RealPowerConfirmed = true
     };
+
+    private sealed record TriggerHarness(
+        ExternalTaskTriggerService Service,
+        SchedulerEngine Engine,
+        EngineScope? Scope) : IDisposable
+    {
+        public void Dispose() => Scope?.Dispose();
+    }
+
+    private sealed class EngineScope : IDisposable
+    {
+        private readonly CancellationTokenSource _cts = new();
+
+        public EngineScope(SchedulerEngine engine)
+        {
+            RunTask = engine.RunAsync(_cts.Token);
+        }
+
+        public Task RunTask { get; }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            try
+            {
+                RunTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
 
     private sealed class FakeScheduledTaskHandler : IScheduledTaskHandler
     {

@@ -373,7 +373,7 @@ public sealed class S11UiSourceContractTests
     // ---- 19. RunAsync 唯一调用位置 ----
 
     [Fact]
-    public void SchedulerEngineRunAsync_HasSingleCallSite()
+    public void SchedulerEngineRunAsync_HasTwoCallSitesOnly()
     {
         var matches = 0;
         foreach (var file in EnumerateAppFiles("*.cs"))
@@ -382,7 +382,11 @@ public sealed class S11UiSourceContractTests
             matches += System.Text.RegularExpressions.Regex.Matches(content, @"RunAsync\s*\(").Count;
         }
 
-        Assert.Equal(1, matches);
+        // 恰好两个合法调用点：UI 启动路径（协调器）与 headless 外部触发路径（App.xaml.cs，
+        // S22-D2：外部触发须先启动本地调度引擎，再经唯一接入/仲裁路径执行）。不允许第三处。
+        Assert.Equal(2, matches);
+        Assert.Contains("RunAsync", ReadAppFile("AppHost", "ApplicationLifetimeCoordinator.cs"));
+        Assert.Contains("RunAsync", ReadAppFile("App.xaml.cs"));
     }
 
     // ---- 20. 资源字典存在（XAML 编译由 GPT build 验收） ----
