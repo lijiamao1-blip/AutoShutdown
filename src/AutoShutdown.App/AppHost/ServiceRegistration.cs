@@ -211,6 +211,8 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IRemoteAuditLog>(),
                 serverNameProvider: () => Environment.MachineName));
         services.AddSingleton<RemoteServer>();
+        // CP5：设置页分区只依赖控制面接口（启动/停止/状态），具体 TCP 实现可隔离替换（测试注入假实现）。
+        services.AddSingleton<IRemoteServerControl>(provider => provider.GetRequiredService<RemoteServer>());
 
         services.AddSingleton<IPrePipelineRunner>(provider =>
             new PrePipelineRunner(
@@ -285,6 +287,17 @@ public static class ServiceRegistration
                     .GetRequiredService<IApplicationLogger>()
                     .Info("TaskSync", message)));
 
+        // S23 CP5：远程控制分区。启用=保存并应用（显式按钮），绝不静默启用；损坏配置 fail-closed。
+        services.AddSingleton<RemoteSectionViewModel>(provider =>
+            new RemoteSectionViewModel(
+                provider.GetRequiredService<RemoteSettingsStore>(),
+                provider.GetRequiredService<PairingService>(),
+                provider.GetRequiredService<IRemoteServerControl>(),
+                provider.GetRequiredService<IClock>(),
+                log: message => provider
+                    .GetRequiredService<IApplicationLogger>()
+                    .Info("RemoteSection", message)));
+
         services.AddSingleton<IWindowActivationService, WindowActivationService>();
         services.AddSingleton<TrayIconService>();
         services.AddSingleton<ActivationPipeServer>();
@@ -311,7 +324,8 @@ public static class ServiceRegistration
                 unattendedPolicy: provider.GetRequiredService<IUnattendedPolicyService>(),
                 wolTargetsSection: provider.GetRequiredService<WolTargetsSectionViewModel>(),
                 rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>(),
-                taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>()));
+                taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>(),
+                remoteSection: provider.GetRequiredService<RemoteSectionViewModel>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

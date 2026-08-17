@@ -65,6 +65,46 @@ public sealed class TrayIconService : IDisposable
     }
 
     /// <summary>
+    /// 托盘气泡提示（S23 CP5 高危提示）。Start 前调用或图标不可用则静默跳过；
+    /// 调用方可从任意线程触发，内部经 Dispatcher 回 UI 线程再展示。
+    /// </summary>
+    public void ShowBalloon(string title, string message, ToolTipIcon icon = ToolTipIcon.Info)
+    {
+        if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        var notifyIcon = _notifyIcon;
+        if (notifyIcon is null)
+        {
+            return;
+        }
+
+        Action show = () =>
+        {
+            try
+            {
+                notifyIcon.ShowBalloonTip(5000, title, message, icon);
+            }
+            catch (Exception exception)
+            {
+                _logger.Warning("TrayBalloonFailed", "托盘气泡提示失败：" + exception.Message);
+            }
+        };
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            show();
+        }
+        else
+        {
+            dispatcher.InvokeAsync(show);
+        }
+    }
+
+    /// <summary>
     /// 从嵌入资源加载多尺寸 ICO。Icon 构造时会完整读取数据流，
     /// 流可以安全释放；本服务持有 Icon 实例直到退出，避免空白图标。
     /// </summary>

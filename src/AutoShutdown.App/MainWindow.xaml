@@ -502,6 +502,80 @@
                                     <Button Content="立即同步" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding TaskSyncSection.SyncNowCommand}" IsEnabled="{Binding TaskSyncSection.CanOperate}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                                 </StackPanel>
                             </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="局域网远程控制" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="允许局域网内已配对设备查询状态/任务，并在你显式启用后受控触发/取消关机。远程触发永远走本地调度引擎的唯一仲裁路径，本应用不会成为第二个电源出口；远程请求对本地配置、无人值守策略与白名单只读不写。默认仅授权只读查询。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="远程控制开关" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,2"/>
+                                    <TextBlock Text="勾选后点击下方「保存并应用」才生效；未保存前不改变监听状态。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    <CheckBox Content="启用远程控制" IsChecked="{Binding RemoteSection.Enabled, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}"
+                                              FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+                                    <TextBlock Text="监听设置" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="地址" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding RemoteSection.ListenAddress, UpdateSourceTrigger=PropertyChanged}" Width="160" ToolTip="监听 IP。默认仅本机 127.0.0.1；局域网需改为本机局域网地址或 0.0.0.0"/>
+                                        <TextBlock Text="端口" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="14,0,8,0"/>
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding RemoteSection.ListenPortText, UpdateSourceTrigger=PropertyChanged}" Width="80" ToolTip="监听端口，1~65535"/>
+                                    </StackPanel>
+                                    <TextBlock Text="安全要求" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,8,0,4"/>
+                                    <CheckBox Content="强制 TLS（明文连接一律拒绝；配对与无人值守等效确认始终要求 TLS）" IsChecked="{Binding RemoteSection.RequireTls, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}"
+                                              FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                    <CheckBox Content="要求客户端出示 TLS 客户端证书（可选项；应用层 HMAC 为主鉴权）" IsChecked="{Binding RemoteSection.RequireClientCertificate, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}"
+                                              FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                    <CheckBox Content="使用导入的 PFX 证书（不勾选则自动生成自签名证书，私钥经 DPAPI 加密落盘）" IsChecked="{Binding RemoteSection.UseImportedCertificate, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}"
+                                              FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                    <StackPanel Orientation="Horizontal" Margin="20,2,0,8" Visibility="{Binding RemoteSection.UseImportedCertificate, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding RemoteSection.ImportedCertPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="320" ToolTip="导入证书 PFX 完整路径；带密码时密码经 DPAPI 保护的密码文件提供"/>
+                                        <TextBlock Text="PFX 路径" FontSize="12" Foreground="#536985" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Text="远程命令白名单（独立于本地关机前命令白名单，默认仅只读）" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,8,0,4"/>
+                                    <CheckBox Content="允许查询状态（queryStatus，只读）" IsChecked="{Binding RemoteSection.WhitelistQueryStatus, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,2"/>
+                                    <CheckBox Content="允许任务清单（listTasks，只读）" IsChecked="{Binding RemoteSection.WhitelistListTasks, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,2"/>
+                                    <CheckBox Content="允许远程触发关机（triggerShutdown，高危）" IsChecked="{Binding RemoteSection.WhitelistTriggerShutdown, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}" FontSize="13" Foreground="#C62828" Margin="0,0,0,2"/>
+                                    <CheckBox Content="允许远程取消关机（cancelShutdown，高危）" IsChecked="{Binding RemoteSection.WhitelistCancelShutdown, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}" FontSize="13" Foreground="#C62828" Margin="0,0,0,4"/>
+                                    <TextBlock Text="配对与设备" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,10,0,4"/>
+                                    <TextBlock Text="当前 PIN：" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}">
+                                        <Run Text="{Binding RemoteSection.PinDisplay, Mode=OneWay}" FontFamily="Consolas" FontWeight="Bold" Foreground="#B26A00"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding RemoteSection.PinExpiryText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,6"/>
+                                    <TextBlock Text="PIN 每次有效 10 分钟、只可配对一台设备（成功即失效）。配对必须在 TLS 连接上完成。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Content="轮换 PIN" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RemoteSection.RotatePinCommand}" IsEnabled="{Binding RemoteSection.CanOperate}" Padding="18,8"/>
+                                        <TextBlock Text="{Binding RemoteSection.LockStatusText}" FontSize="13" Foreground="#C62828" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                                        <Button Content="解除配对锁定" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RemoteSection.UnlockCommand}" Padding="16,8" Margin="14,0,0,0"
+                                                Visibility="{Binding RemoteSection.IsLocked, Converter={StaticResource BoolToVisibility}}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding RemoteSection.DeviceCountText}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                    <ItemsControl ItemsSource="{Binding RemoteSection.Devices}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding DeviceName}" FontSize="14" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,10,0"/>
+                                                                <TextBlock Text="{Binding DeviceId}" FontSize="11" Foreground="#536985" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding PairedAtText}" FontSize="11" Foreground="#536985" Margin="0,3,0,0"/>
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1" Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
+                                                                Command="{Binding DataContext.RemoteSection.RemoveDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,6,0,0">
+                                        <Run Text="{Binding RemoteSection.ServerStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                        <Run Text="  " /><Run Text="{Binding RemoteSection.StatusText, Mode=OneWay}" FontWeight="SemiBold" Foreground="#1B7F4B"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding RemoteSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding RemoteSection.DetailText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding RemoteSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding RemoteSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="保存并应用" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RemoteSection.SaveCommand}" IsEnabled="{Binding RemoteSection.CanOperate}" Padding="22,10" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                 </Grid>

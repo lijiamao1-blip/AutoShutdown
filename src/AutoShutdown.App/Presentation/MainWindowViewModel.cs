@@ -80,6 +80,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly WolTargetsSectionViewModel? _wolTargetsSection;
     private readonly RtcStatusSectionViewModel? _rtcStatusSection;
     private readonly TaskSyncSectionViewModel? _taskSyncSection;
+    private readonly RemoteSectionViewModel? _remoteSection;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -111,7 +112,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RecoveryNoticeService? recoveryNotice = null,
         WolTargetsSectionViewModel? wolTargetsSection = null,
         RtcStatusSectionViewModel? rtcStatusSection = null,
-        TaskSyncSectionViewModel? taskSyncSection = null)
+        TaskSyncSectionViewModel? taskSyncSection = null,
+        RemoteSectionViewModel? remoteSection = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -135,6 +137,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _wolTargetsSection = wolTargetsSection;
         _rtcStatusSection = rtcStatusSection;
         _taskSyncSection = taskSyncSection;
+        _remoteSection = remoteSection;
 
         NavItems =
         [
@@ -792,6 +795,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Windows 任务计划程序单向同步分区（设置页；S22）。</summary>
     public TaskSyncSectionViewModel? TaskSyncSection => _taskSyncSection;
+
+    /// <summary>局域网远程控制分区（设置页；S23）。</summary>
+    public RemoteSectionViewModel? RemoteSection => _remoteSection;
 
     public IReadOnlyList<string> ReminderOptions { get; } = ["不提醒", "提前 1 分钟", "提前 5 分钟", "提前 10 分钟", "提前 30 分钟"];
 
@@ -1855,7 +1861,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshWolAndRtcSections();
     }
 
-    /// <summary>启动时刷新 WoL 目标机器与 RTC 能力状态分区（分区内部捕获错误，绝不抛出）。</summary>
+    /// <summary>启动时刷新设置页分区（WoL/RTC/任务同步/远程控制；分区内部捕获错误，绝不抛出）。</summary>
     private void RefreshWolAndRtcSections()
     {
         if (_wolTargetsSection is not null)
@@ -1871,6 +1877,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_taskSyncSection is not null)
         {
             _ = _taskSyncSection.RefreshAsync(CancellationToken.None);
+        }
+
+        if (_remoteSection is not null)
+        {
+            _ = _remoteSection.RefreshAsync(CancellationToken.None);
         }
     }
 

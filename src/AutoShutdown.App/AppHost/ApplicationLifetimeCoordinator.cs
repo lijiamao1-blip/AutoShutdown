@@ -78,6 +78,33 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _remoteServer = remoteServer;
         _logger = logger;
         _logRetention = logRetention;
+        // S23 CP5：远程活动 → 托盘气泡（连接低危 / 触发·取消高危）。订阅在启动前建立，
+        // 通知经 ShowBalloon 内部 Dispatcher 回 UI 线程；敏感材料绝不进提示。
+        _remoteServer.Notification += OnRemoteNotification;
+    }
+
+    private void OnRemoteNotification(object? sender, RemoteServerNotification notification)
+    {
+        var (title, message, icon) = notification.Kind switch
+        {
+            RemoteServerNotificationKind.TriggerShutdown => (
+                "高危：远程触发关机",
+                "来自 " + notification.SourceIp + " 的远程设备已成功请求触发关机。",
+                System.Windows.Forms.ToolTipIcon.Warning),
+            RemoteServerNotificationKind.CancelShutdown => (
+                "高危：远程取消关机",
+                "来自 " + notification.SourceIp + " 的远程设备已成功请求取消待决关机。",
+                System.Windows.Forms.ToolTipIcon.Warning),
+            _ => (
+                "远程控制活动",
+                "来自 " + notification.SourceIp + " 的远程设备发起了一次连接。",
+                System.Windows.Forms.ToolTipIcon.Info)
+        };
+
+        _logger.Info(
+            "RemoteNotification",
+            "远程活动提示（" + notification.Kind + "）：来源 " + notification.SourceIp + "。");
+        _trayIcon.ShowBalloon(title, message, icon);
     }
 
     public void Start()
@@ -183,6 +210,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         _dashboardRefreshService.Dispose();
         _notificationCoordinator.Dispose();
         _taskSyncCoordinator.Dispose();
+        _remoteServer.Notification -= OnRemoteNotification;
         _remoteServer.Dispose();
         _singleInstance.Dispose();
     }

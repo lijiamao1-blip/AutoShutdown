@@ -26,7 +26,7 @@ namespace AutoShutdown.App.Infrastructure.Remote;
 /// </list>
 /// 帧协议：客户端发送一行（以 '\n' 结尾）信封 JSON，服务端回一行 JSON-RPC 响应。请求/响应都不含换行。
 /// </summary>
-public sealed class RemoteServer : IDisposable
+public sealed class RemoteServer : IRemoteServerControl, IDisposable
 {
     /// <summary>TLS handshake record 的首字节（0x16），用于区分 TLS 与明文。</summary>
     private const byte SslHandshakeRecordByte = 0x16;
@@ -65,6 +65,12 @@ public sealed class RemoteServer : IDisposable
         _auditLog = auditLog;
         _logger = logger;
     }
+
+    /// <summary>
+    /// 本地活动提示事件（CP5 高危提示）：连接（低危）与 triggerShutdown/cancelShutdown
+    /// 成功派发（高危）时触发。绝不携带 PIN/secret/HMAC/私钥。
+    /// </summary>
+    public event EventHandler<RemoteServerNotification>? Notification;
 
     /// <summary>当前是否监听。</summary>
     public bool IsRunning
@@ -376,7 +382,43 @@ public sealed class RemoteServer : IDisposable
             Payload = payload
         };
 
-        return await _requestHandler.HandleAsync(context, cancellationToken).ConfigureAwait(false);
+        var response = await _requestHandler.HandleAsync(context, cancellationToken).ConfigureAwait(false);
+        RaiseNotification(payload.Method, sourceIp, response);
+        return response;
+    }
+
+    /// <summary>
+    /// 本地活动提示：任何成功处理到响应层的请求记为低危连接；triggerShutdown/cancelShutdown
+    /// 仅在「被接受并派发」（响应无错误）时记高危提示。被拒绝/鉴权失败/白名单拦截不产生任何
+    /// 电源动作，不作高危提示（避免把失败当成功提示）。通知绝不含任何敏感材料。
+    /// </summary>
+    private void RaiseNotification(string method, string sourceIp, RemoteResponse? response)
+    {
+        var handler = Notification;
+        if (handler is null)
+        {
+            return;
+        }
+
+        var kind = method switch
+        {
+            RemoteProtocol.MethodTriggerShutdown => RemoteServerNotificationKind.TriggerShutdown,
+            RemoteProtocol.MethodCancelShutdown => RemoteServerNotificationKind.CancelShutdown,
+            _ => RemoteServerNotificationKind.Connection
+        };
+
+        // 高危方法只有成功派发才提示；成功与否以处理器实际响应为准（fail-closed：失败不误报）。
+        if (kind is not RemoteServerNotificationKind.Connection && response?.Error is not null)
+        {
+            return;
+        }
+
+        handler(this, new RemoteServerNotification
+        {
+            Kind = kind,
+            SourceIp = sourceIp,
+            TimestampUtc = _clock.UtcNow
+        });
     }
 
     private async Task<RemoteSettingsDocument?> LoadCurrentSettingsAsync(CancellationToken cancellationToken)
