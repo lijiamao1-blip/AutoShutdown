@@ -503,6 +503,35 @@ public sealed class S_UI1_DiagnosticsCenterTests
     }
 
     [Fact]
+    public void DiagnosticsVm_CopyCommands_ClipboardFailure_ReportsStatus_DoesNotThrow()
+    {
+        // S-UI1：剪贴板被占用（CLIPBRD_E_CANT_OPEN 等）时复制命令只报告失败，
+        // 绝不把未处理异常抛回 WPF 命令通道导致应用崩溃（自动化/多进程环境下常见）。
+        using var temp = TempDir.Create();
+        var logDirectory = Path.Combine(temp.Path, "logs");
+        Directory.CreateDirectory(logDirectory);
+        File.WriteAllText(
+            Path.Combine(logDirectory, "autoshutdown-2024-01-15.log"),
+            LogLineError);
+
+        var vm = CreateDiagnosticsViewModel(
+            temp.Path,
+            logDirectory,
+            clipboardWriter: _ => throw new System.Runtime.InteropServices.COMException(
+                "OpenClipboard 失败 (0x800401D0 (CLIPBRD_E_CANT_OPEN))"));
+        vm.RefreshLogFiles();
+        vm.SelectedLogEntry = vm.LogEntries[0];
+
+        var copyLogException = Record.Exception(() => vm.CopySelectedLogCommand.Execute(null));
+        Assert.Null(copyLogException);
+        Assert.Contains("复制失败", vm.DiagnosticsStatusText);
+
+        var copySummaryException = Record.Exception(() => vm.CopyDiagnosticSummaryCommand.Execute(null));
+        Assert.Null(copySummaryException);
+        Assert.Contains("复制失败", vm.DiagnosticsStatusText);
+    }
+
+    [Fact]
     public async Task DiagnosticsVm_RunSelfCheckCommand_PopulatesItems()
     {
         using var temp = TempDir.Create();

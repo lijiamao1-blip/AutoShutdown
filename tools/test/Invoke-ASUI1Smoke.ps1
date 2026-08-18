@@ -619,34 +619,49 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
         $copySel = Wait-UiElementLike $win '复制选中记录' 6 'Button'
         Assert-True 'P5: 功能按钮 复制选中记录 可见' ($null -ne $copySel -and -not $copySel.Current.IsOffscreen)
         Assert-True 'P5: 复制选中记录 初始禁用(未选中日志)' ($null -ne $copySel -and -not $copySel.Current.IsEnabled)
-        # 两个下拉（日志文件 / 级别筛选）：自定义样式致 ComboBox 的 UIA Name 为空，不能按名称断言；
-        # 改为验证 ①可展开/收起（可操作）②选中值文本可见（文件下拉=日志文件名，级别筛选=全部）。
+        # 两个下拉（日志文件 / 级别筛选）：自定义样式致 ComboBox 的 UIA Name 为空，折叠时选中值文本也不暴露。
+        # 展开后弹窗项会进入窗口树（ListItem，Name=选项文本），据此验证内容已加载且可操作。
         $comboCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
-        $operableCombos = 0
-        foreach ($cb in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $comboCond)) {
+        $liAllCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)
+        $combos = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $comboCond)
+        Assert-True 'P5: 日志/级别 两个下拉存在' ($combos.Count -ge 2)
+        $fileItems = 0; $filterItems = 0; $comboIdx = 0
+        foreach ($cb in $combos) {
+            $comboIdx++
+            if ($comboIdx -gt 2) { break }
             try {
                 $ecp = $cb.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-                $ecp.Expand(); Start-Sleep -Milliseconds 400
-                $ecp.Collapse(); Start-Sleep -Milliseconds 200
-                $operableCombos++
+                $ecp.Expand(); Start-Sleep -Milliseconds 500
+                if ($comboIdx -eq 1) {
+                    # 日志文件下拉（文档序第一个）：弹窗项 = autoshutdown-*.log
+                    foreach ($li in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $liAllCond)) {
+                        if ($li.Current.Name -match '^autoshutdown-\d{4}-\d{2}-\d{2}\.log$') { $fileItems++ }
+                    }
+                } else {
+                    # 级别筛选下拉：固定 5 项（全部/错误/警告/信息/调试）
+                    $filterNames = @('全部', '错误', '警告', '信息', '调试')
+                    foreach ($li in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $liAllCond)) {
+                        if ($filterNames -contains $li.Current.Name) { $filterItems++ }
+                    }
+                }
+                try { $ecp.Collapse(); Start-Sleep -Milliseconds 200 } catch { }
             } catch { }
         }
-        Assert-True 'P5: 日志/级别 两个下拉可展开收起' ($operableCombos -ge 2)
-        # 日志文件下拉：进入日志页时已自动刷新并选中最新日志文件 → 选中值显示 autoshutdown-*.log
-        Assert-True 'P5: 日志文件下拉已加载(自动刷新)' ($null -ne (Wait-UiElementLike $win 'autoshutdown-' 6))
-        # 级别筛选下拉：默认选中「全部」
-        Assert-True 'P5: 级别筛选下拉显示 全部' ($null -ne (Wait-UiElementLike $win '全部' 4))
+        Assert-True 'P5: 日志文件下拉已加载(自动刷新)' ($fileItems -ge 1)
+        Assert-True 'P5: 级别筛选下拉显示 全部/错误/警告/信息/调试' ($filterItems -ge 5)
         Assert-True 'P5: 仅错误/警告 勾选' ($null -ne (Find-DescendantLike $win '仅错误/警告' 'CheckBox'))
         Assert-True 'P5: 包含隐私信息(默认脱敏说明)' ($null -ne (Find-DescendantLike $win '包含隐私信息'))
         Assert-True 'P5: 诊断状态文本' ($null -ne (Find-DescendantLike $win '就绪'))
         # 选中一条日志记录 → 复制选中记录 由禁用转可用并执行复制（RelayCommand 经 CommandManager 在空闲时重询）。
-        # 日志条目 UIA Name 以 yyyy-MM-ddTHH:mm 开头（含 'T'），与最近活动(HH:mm:ss) 及导航项可区分。
+        # 日志条目 ListBoxItem 的 UIA Name 是 LogEntryRow 记录的 ToString（"LogEntryRow { Time = yyyy-MM-ddTHH:... }"），
+        # 与最近活动(RecentActivityItem)及导航项(NavItem) 可区分。
         $logItem = $null
         $liCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)
         foreach ($li in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $liCond)) {
-            if ($li.Current.Name -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}') { $logItem = $li; break }
+            if ($li.Current.Name -match '^LogEntryRow \{ Time = \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}') { $logItem = $li; break }
         }
         Assert-True 'P5: 日志记录已加载' ($null -ne $logItem)
         if ($logItem) {
@@ -661,6 +676,10 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
             Assert-True 'P5: 选中日志后 复制选中记录 可用' $copyEnabled
             if ($copyEnabled -and $copySel) {
                 Assert-True 'P5: 复制选中记录 可点击' (Invoke-Click $copySel)
+                # 剪贴板可能被其他进程占用（自动化环境常见 CLIPBRD_E_CANT_OPEN）：
+                # 复制失败只应显示状态文本，绝不能把未处理异常抛回导致应用崩溃。应用存活即回归通过。
+                Start-Sleep -Milliseconds 600
+                Assert-True 'P5: 复制后应用仍存活(剪贴板失败不崩溃)' (-not $launch.Proc.HasExited)
             } else { Note-Skip 'P5 复制选中记录' '选中日志后按钮仍未启用' }
         }
         # 运行安全自检 → 6 项自检结果出现（只读、不修复）

@@ -416,15 +416,31 @@ public sealed class DiagnosticsCenterViewModel : ObservableObject
             return;
         }
 
-        _clipboardWriter(SelectedLogEntry.FullText);
-        DiagnosticsStatusText = "已复制选中日志记录";
+        // 剪贴板被其他进程占用（CLIPBRD_E_CANT_OPEN 等）时只报告失败，绝不把未处理异常
+        // 抛回 WPF 命令通道导致整个应用崩溃（S-UI1 可用性：复制功能失败不应拖垮应用）。
+        try
+        {
+            _clipboardWriter(SelectedLogEntry.FullText);
+            DiagnosticsStatusText = "已复制选中日志记录";
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText = "复制失败：剪贴板被占用或不可用（" + exception.Message + "）";
+        }
     }
 
     private void CopyDiagnosticSummary()
     {
-        var content = BuildExportContent();
-        _clipboardWriter(_exporter.BuildSummaryText(content));
-        DiagnosticsStatusText = "已复制诊断摘要";
+        try
+        {
+            var content = BuildExportContent();
+            _clipboardWriter(_exporter.BuildSummaryText(content));
+            DiagnosticsStatusText = "已复制诊断摘要";
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText = "复制失败：剪贴板被占用或不可用（" + exception.Message + "）";
+        }
     }
 
     // ---- 安全自检 ----
