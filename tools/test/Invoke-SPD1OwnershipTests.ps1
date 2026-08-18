@@ -32,7 +32,14 @@ function Assert-True([string]$Name, [bool]$Cond, [string]$Detail = '') {
 Write-Host "== A. forbidden path guards =="
 $fsRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($env:SystemDrive + '\'))
 Assert-True 'filesystem root forbidden' (Test-ASForbiddenPath $fsRoot)
-Assert-True 'user home forbidden' (Test-ASForbiddenPath ([Environment]::GetFolderPath('UserProfile')))
+# UserProfile 为空的非交互环境：安全跳过该断言（不因 GetFullPath('') 异常中断）；
+# 真实桌面环境保持原断言，不降低覆盖。
+$userProfile = [Environment]::GetFolderPath('UserProfile')
+if ([string]::IsNullOrWhiteSpace($userProfile)) {
+    Write-Host '  SKIP  user home forbidden (UserProfile empty in non-interactive environment)'
+} else {
+    Assert-True 'user home forbidden' (Test-ASForbiddenPath $userProfile)
+}
 Assert-True 'SystemRoot forbidden' (Test-ASForbiddenPath $env:SystemRoot)
 Assert-True 'repo root forbidden' (Test-ASForbiddenPath $root)
 Assert-True 'artifacts forbidden' (Test-ASForbiddenPath (Join-Path $root 'artifacts'))
