@@ -223,6 +223,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsLogsPageVisible));
                 OnPropertyChanged(nameof(IsSettingsPageVisible));
                 OnPropertyChanged(nameof(IsAboutPageVisible));
+                // 进入日志与诊断页时自动加载日志文件列表，避免首次进入为空、须手动刷新。
+                if (value.PageKey == "logs" && DiagnosticsCenter is not null)
+                {
+                    DiagnosticsCenter.RefreshLogFiles();
+                }
             }
         }
     }

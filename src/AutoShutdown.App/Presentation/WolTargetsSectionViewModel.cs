@@ -21,8 +21,11 @@ public sealed record WolTargetRow(
 /// </summary>
 public sealed class WolTargetsSectionViewModel : ObservableObject
 {
-    /// <summary>MAC 格式提示（UI 直接展示）。</summary>
+    /// <summary>MAC 格式提示（UI 直接展示；测试与外部静态引用）。</summary>
     public const string MacFormatHint = "MAC 格式：AA:BB:CC:DD:EE:FF（必填，大写十六进制）。广播地址与端口可选；默认向 255.255.255.255:9 发送。";
+
+    /// <summary>可绑定提示文本。WPF 数据绑定只能解析实例属性，不能解析 const 字段（S-UI1 修正）。</summary>
+    public string MacFormatHintText => MacFormatHint;
 
     private readonly TargetMachineManager _manager;
     private readonly IWakeOnLanService _wolService;

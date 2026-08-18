@@ -56,6 +56,29 @@ public sealed class S_UI1_DiagnosticsCenterTests
             titles);
     }
 
+    [Fact]
+    public void Navigation_SelectLogs_AutoRefreshesLogFilesAndEntries()
+    {
+        // S-UI1 修正：进入日志与诊断页时自动加载日志文件列表，避免首次进入为空、须手动刷新。
+        using var temp = TempDir.Create();
+        var logDirectory = Path.Combine(temp.Path, "logs");
+        Directory.CreateDirectory(logDirectory);
+        File.WriteAllText(
+            Path.Combine(logDirectory, "autoshutdown-2024-01-15.log"),
+            string.Join("\n", LogLineInfo, LogLineError));
+
+        var diagnostics = CreateDiagnosticsViewModel(temp.Path, logDirectory);
+        var viewModel = CreateMainViewModel(CreateRunningEngine(), diagnosticsCenter: diagnostics);
+
+        var logsNav = viewModel.NavItems.Single(item => item.PageKey == "logs");
+        viewModel.SelectedNav = logsNav;
+
+        // 导航即触发 RefreshLogFiles()：文件下拉选中最新文件，条目即时加载（无需手动点刷新）。
+        Assert.Single(diagnostics.LogFileNames);
+        Assert.Equal("autoshutdown-2024-01-15.log", diagnostics.SelectedLogFileName);
+        Assert.Equal(2, diagnostics.LogEntries.Count);
+    }
+
     // ==================== 2. BuildDiagnosticsLiveSummary：只读快照映射 ====================
 
     [Fact]
@@ -574,13 +597,15 @@ public sealed class S_UI1_DiagnosticsCenterTests
 
     private static MainWindowViewModel CreateMainViewModel(
         FakeSchedulerEngine engine,
-        FakeConfigurationService? configurationService = null)
+        FakeConfigurationService? configurationService = null,
+        DiagnosticsCenterViewModel? diagnosticsCenter = null)
         => new(
             engine,
             configurationService ?? new FakeConfigurationService(SuccessResult()),
             new FakeClock(Now),
             new NullLogger(Path.Combine(Path.GetTempPath(), "ui1-test-logs")),
-            new FakeAutoStartService());
+            new FakeAutoStartService(),
+            diagnosticsCenter: diagnosticsCenter);
 
     private static DiagnosticsCenterViewModel CreateDiagnosticsViewModel(
         string dataRoot,

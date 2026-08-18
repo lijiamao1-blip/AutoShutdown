@@ -138,6 +138,18 @@ public sealed class S21_WolTargetsSectionViewModelTests
         Assert.Contains("默认向 255.255.255.255:9 发送", WolTargetsSectionViewModel.MacFormatHint);
     }
 
+    [Fact]
+    public void MacFormatHintText_BindableInstanceProperty_EqualsConst()
+    {
+        // S-UI1 修正：WPF 数据绑定只能解析实例属性，不能解析 const 字段。
+        // XAML 使用 {Binding WolTargetsSection.MacFormatHintText}，因此该属性必须可绑定且与提示一致。
+        var storage = new S21_TargetMachineStoreTests.InMemoryStorage();
+        var viewModel = CreateViewModel(storage);
+
+        Assert.Equal(WolTargetsSectionViewModel.MacFormatHint, viewModel.MacFormatHintText);
+        Assert.Contains("AA:BB:CC:DD:EE:FF", viewModel.MacFormatHintText);
+    }
+
     // ---- 添加目标 ----
 
     [Fact]

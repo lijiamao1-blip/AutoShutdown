@@ -447,7 +447,7 @@
                                             <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
                                         </StackPanel>
                                     </WrapPanel>
-                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHint, Mode=OneTime}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHintText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
                                     <TextBlock Text="{Binding WolTargetsSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding WolTargetsSection.StatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.StatusText, Converter={StaticResource BoolToVisibility}}"/>
                                     <ItemsControl ItemsSource="{Binding WolTargetsSection.Targets}">
@@ -708,7 +708,7 @@
                                             <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
                                         </StackPanel>
                                     </WrapPanel>
-                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHint, Mode=OneTime}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHintText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
                                     <TextBlock Text="{Binding WolTargetsSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding WolTargetsSection.StatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.StatusText, Converter={StaticResource BoolToVisibility}}"/>
                                     <ItemsControl ItemsSource="{Binding WolTargetsSection.Targets}">

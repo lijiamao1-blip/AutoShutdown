@@ -53,6 +53,18 @@ if (-not $ReleaseExe) {
         if ($exe) { $ReleaseExe = $exe.FullName }
     }
 }
+
+# 出错即回收本次冒烟启动的候选进程（按候选 EXE 名精确匹配，绝不波及生产 AutoShutdown.exe）。
+$script:smokeExeBase = [IO.Path]::GetFileNameWithoutExtension($ReleaseExe)
+trap {
+    if ($script:smokeExeBase) {
+        Get-Process -Name $script:smokeExeBase -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+    Write-Host ("TRAP {0} @ {1}: {2}" -f $_.Exception.GetType().Name, $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+    throw
+}
 if (-not $ReleaseExe -or -not (Test-Path -LiteralPath $ReleaseExe)) {
     Write-Host 'FAIL  S-UI1 候选 EXE 未找到（需先运行 tools/Publish-ReleaseCandidate.ps1 -Step S-UI1）。'
     exit 1
@@ -175,6 +187,14 @@ public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int 
 '@
 function Set-WindowSizePhysical($win, [int]$width, [int]$height) {
     $hwnd = [IntPtr]$win.Current.NativeWindowHandle
+    # 若窗口处于最大化，先还原为普通窗口（SetWindowPos 对最大化窗口的尺寸调整无效）。
+    try {
+        $wp = $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        if ($wp.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Maximized) {
+            $wp.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
+            Start-Sleep -Milliseconds 400
+        }
+    } catch { }
     # SWP_NOZORDER=0x0004, SWP_NOACTIVATE=0x0010（移动到 0,0 便于取证）
     [ASUi1.Win32]::SetWindowPos($hwnd, [IntPtr]::Zero, 0, 0, $width, $height, 0x0004 -bor 0x0010) | Out-Null
 }
@@ -199,25 +219,76 @@ function Get-PageScrollViewer($win) {
     return $best
 }
 function Save-WindowScreenshot($win, [string]$path) {
+    $dir = Split-Path -Parent $path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    # 若窗口被最小化，BoundingRectangle 会退化为 0×0；先还原再截图，否则截到空图。
+    try {
+        $wp = $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        if ($wp.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Minimized) {
+            $wp.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
+            Start-Sleep -Milliseconds 400
+        }
+    } catch { }
     $rect = $win.Current.BoundingRectangle
-    $bmp = New-Object System.Drawing.Bitmap([int]::Ceiling($rect.Width), [int]::Ceiling($rect.Height))
+    if ($rect.Width -le 0 -or $rect.Height -le 0) {
+        Write-Host ("WARN Save-WindowScreenshot：窗口矩形无效 (w={0} h={1} x={2} y={3})，跳过 {4}" -f $rect.Width, $rect.Height, $rect.X, $rect.Y, (Split-Path -Leaf $path))
+        return $false
+    }
+    $w = [Math]::Max(1, [int][Math]::Ceiling($rect.Width))
+    $h = [Math]::Max(1, [int][Math]::Ceiling($rect.Height))
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen([int]$rect.X, [int]$rect.Y, 0, 0, $bmp.Size)
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
     return (Test-Path -LiteralPath $path)
 }
-function Invoke-Click($el) {
-    # RadioButton/CheckBox 用 TogglePattern，Button 用 InvokePattern，ListBox 项用 SelectionItemPattern
-    foreach ($pt in @([System.Windows.Automation.TogglePattern]::Pattern,
-                       [System.Windows.Automation.InvokePattern]::Pattern,
-                       [System.Windows.Automation.SelectionItemPattern]::Pattern)) {
-        try {
-            $p = $el.GetCurrentPattern($pt)
-            if ($pt -eq [System.Windows.Automation.SelectionItemPattern]::Pattern) { $p.Select(); return $true }
-            else { $p.Toggle(); return $true }
-        } catch { }
+# 像素级「文字不裁切」判定（真实渲染底稿，不依赖字体度量）。
+# 在按钮内容区（去除 12DIP 内边距与边框）扫描文字墨迹的左右最远列；
+# 文本若被裁切或溢出，墨迹最右列会越过内容右缘；内容区外的边框/内边距不参与扫描。
+function Get-TextInkExtent($bitmap, [System.Windows.Rect]$screenRect, [System.Windows.Rect]$winRect, [double]$scale) {
+    $padPx = [int][Math]::Round(12 * $scale / 100.0)
+    $ox = [int]$winRect.X; $oy = [int]$winRect.Y
+    $bx0 = [int][Math]::Max(0, [int][Math]::Ceiling($screenRect.Left - $ox))
+    $bx1 = [int][Math]::Min($bitmap.Width - 1, [int][Math]::Floor($screenRect.Right - $ox) - 1)
+    $by0 = [int][Math]::Max(0, [int][Math]::Ceiling($screenRect.Top - $oy))
+    $by1 = [int][Math]::Min($bitmap.Height - 1, [int][Math]::Floor($screenRect.Bottom - $oy) - 1)
+    $contentLeft = $bx0 + $padPx
+    $contentRight = $bx1 - $padPx
+    # 垂直取按钮中间 70% 行带（文字垂直居中）
+    $bandH = [int][Math]::Max(3, [int][Math]::Round(($by1 - $by0) * 0.7))
+    $bandTop = $by0 + [int][Math]::Max(0, [int][Math]::Round((($by1 - $by0) - $bandH) / 2.0))
+    $bandBot = [int][Math]::Min($by1, $bandTop + $bandH)
+    $rightmost = -1; $leftmost = -1; $inkCount = 0
+    for ($x = $contentLeft; $x -le $contentRight; $x++) {
+        $minL = 999.0; $maxL = -1.0
+        for ($y = $bandTop; $y -le $bandBot; $y++) {
+            $px = $bitmap.GetPixel($x, $y)
+            $lum = 0.299 * $px.R + 0.587 * $px.G + 0.114 * $px.B
+            if ($lum -lt $minL) { $minL = $lum }
+            if ($lum -gt $maxL) { $maxL = $lum }
+        }
+        if (($maxL - $minL) -ge 28) {
+            $inkCount++
+            if ($rightmost -lt 0) { $leftmost = $x }
+            $rightmost = $x
+        }
     }
+    return @{
+        InkCount = $inkCount; Leftmost = $leftmost; Rightmost = $rightmost
+        ContentLeft = $contentLeft; ContentRight = $contentRight
+        Fits = ($inkCount -ge 1 -and $rightmost -le $contentRight + 4 -and $leftmost -ge $contentLeft - 4)
+    }
+}
+function Invoke-Click($el) {
+    # RadioButton/CheckBox 用 TogglePattern.Toggle()，Button 用 InvokePattern.Invoke()，
+    # ListBox 项用 SelectionItemPattern.Select()——每个模式用各自正确的方法。
+    if (-not $el) { return $false }
+    try { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); return $true } catch { }
+    try { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return $true } catch { }
+    try { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); return $true } catch { }
     return $false
 }
 function Get-SelectedText($el) {
@@ -327,10 +398,9 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
     if (-not $launch.Win) { Stop-SmokeApp $launch.Proc; return }
     $win = $launch.Win
 
-    # ---- 缩放自校准：物理高度 ÷ 640 DIP ----
+    # ---- 缩放档位（已由注册表 AppliedDPI 判定；窗口初始尺寸仅作记录） ----
     $initRect = $win.Current.BoundingRectangle
-    $actualScale = [int][Math]::Round(100 * $initRect.Height / 640)
-    Write-Host "  自校准缩放：$actualScale% （初始窗口物理 {0}x{1}）" -f $initRect.Width, $initRect.Height
+    Write-Host ("  档位 scale={0}% （初始窗口物理 {1}x{2}）" -f $scale, [int]$initRect.Width, [int]$initRect.Height)
 
     # ---- P1：窗口缩放后置为 900×580（DIP） ----
     $physW = [int][Math]::Round(900 * $scale / 100.0)
@@ -380,7 +450,6 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
     $viewport = if ($pageScroll) { $pageScroll.Viewport } else { $win.Current.BoundingRectangle }
 
     $modes = @('倒计时', '今天指定时间', '每天固定时间', '每周工作日', '下个工作日', '每月第N个工作日', '一次性指定', '空闲触发')
-    $modeFontSize = 13.0   # SegmentRadioStyle FontSize=13
     $modeRects = New-Object System.Collections.Generic.List[System.Windows.Rect]
     $modeOverlap = $false
     foreach ($m in $modes) {
@@ -389,9 +458,7 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
         $name = $el.Current.Name
         Assert-True ("P2: 时间模式 '{0}' 可见" -f $m) (-not $el.Current.IsOffscreen)
         $br = $el.Current.BoundingRectangle
-        # 文字不裁切：按钮宽度 ≥ 文本宽度 + 允许量（内边距12×2 + 圆形指示器~16 + 边框2）
-        $need = (Measure-TextWidth $m $modeFontSize) + 34
-        Assert-True ("P2: 时间模式 '{0}' 文字不裁切" -f $m) ($br.Width -ge $need) ("w={0} need={1}" -f [int]$br.Width, [int]$need)
+        # 文字不裁切：由 home-top 截图后的像素墨迹判定（Get-TextInkExtent）负责
         # 视口内（不横向溢出）
         Assert-True ("P2: 时间模式 '{0}' 在视口内(不溢出)" -f $m) ($br.Right -le $viewport.Right + 2) ("right={0} vpRight={1}" -f [int]$br.Right, [int]$viewport.Right)
         # 可点击（Toggle 选中）
@@ -418,7 +485,6 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
     if ($cb) { [void](Invoke-Click $cb); Start-Sleep -Milliseconds 400; Assert-True 'P2: 每月第几个工作日 选择器' ($null -ne (Find-Descendant $win '每月第几个工作日')) }
 
     $actions = @('关机', '重启', '睡眠', '休眠', '唤醒他机')
-    $actionFontSize = 14.0   # ActionRadioStyle FontSize=14
     $actRects = New-Object System.Collections.Generic.List[System.Windows.Rect]
     $actOverlap = $false
     foreach ($a in $actions) {
@@ -426,8 +492,7 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
         if (-not $el) { Assert-True ("P2: 动作 '{0}' 存在" -f $a) $false 'not found'; continue }
         Assert-True ("P2: 动作 '{0}' 可见" -f $a) (-not $el.Current.IsOffscreen)
         $br = $el.Current.BoundingRectangle
-        $need = (Measure-TextWidth $a $actionFontSize) + 34
-        Assert-True ("P2: 动作 '{0}' 文字不裁切" -f $a) ($br.Width -ge $need) ("w={0} need={1}" -f [int]$br.Width, [int]$need)
+        # 文字不裁切：由 home-top 截图后的像素墨迹判定（Get-TextInkExtent）负责
         Assert-True ("P2: 动作 '{0}' 在视口内(不溢出)" -f $a) ($br.Right -le $viewport.Right + 2) ("right={0} vpRight={1}" -f [int]$br.Right, [int]$viewport.Right)
         [void](Invoke-Click $el)
         $isSel = Get-SelectedText $el
@@ -448,6 +513,25 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
     $shotTop = Join-Path $EvidenceDir ('home-top-{0}percent.png' -f $scale)
     [void](Save-WindowScreenshot $win $shotTop)
     Assert-True 'P7: 截图 首页顶部 已保存' (Test-Path -LiteralPath $shotTop)
+
+    # P2 文字不裁切（像素级）：在 home-top 截图上按按钮矩形扫描墨迹，验证文本在内容区(去内边距)内
+    if (Test-Path -LiteralPath $shotTop) {
+        $bmp = New-Object System.Drawing.Bitmap($shotTop)
+        $winRectNow = $win.Current.BoundingRectangle
+        foreach ($m in $modes) {
+            $el = Find-DescendantLike $win $m 'RadioButton'
+            if (-not $el) { continue }
+            $ink = Get-TextInkExtent $bmp $el.Current.BoundingRectangle $winRectNow $scale
+            Assert-True ("P2: 时间模式 '{0}' 文字不裁切" -f $m) $ink.Fits ("inkR={0} cR={1} inkL={2} cL={3} n={4}" -f $ink.Rightmost, $ink.ContentRight, $ink.Leftmost, $ink.ContentLeft, $ink.InkCount)
+        }
+        foreach ($a in $actions) {
+            $el = Find-DescendantLike $win $a 'RadioButton'
+            if (-not $el) { continue }
+            $ink = Get-TextInkExtent $bmp $el.Current.BoundingRectangle $winRectNow $scale
+            Assert-True ("P2: 动作 '{0}' 文字不裁切" -f $a) $ink.Fits ("inkR={0} cR={1} inkL={2} cL={3} n={4}" -f $ink.Rightmost, $ink.ContentRight, $ink.Leftmost, $ink.ContentLeft, $ink.InkCount)
+        }
+        $bmp.Dispose()
+    }
 
     # P2 滚动可达：创建任务按钮 / 当前任务区 / 最近活动 需滚动后可见
     Assert-Reachable $win $pageScroll '创建任务' '创建任务 button'
@@ -504,7 +588,7 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
         $keyEl = Find-DescendantLike $win $pg.Key
         Assert-True ("P3: {0} 关键控件可见 {1}" -f $pg.WaitFor, $pg.Key) ($null -ne $keyEl -and -not $keyEl.Current.IsOffscreen)
         if ($keyEl) { Assert-True ("P3: {0} 关键控件可用" -f $pg.WaitFor) ($keyEl.Current.IsEnabled) ("enabled={0}" -f $keyEl.Current.IsEnabled) }
-        $allNames.AddRange((Get-AllNames $win))
+        foreach ($n in (Get-AllNames $win)) { $allNames.Add([string]$n) }
     }
 
     # ---- P4：网络唤醒页 WoL 字段标签 ----
@@ -527,15 +611,58 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
     $okLogs = Select-NavPage $win 'PageKey = logs' '日志与诊断'
     Assert-True 'P5: 导航到 日志与诊断' $okLogs
     if ($okLogs) {
-        foreach ($b in @('刷新日志', '复制日志路径', '打开日志目录', '复制选中记录', '复制诊断摘要', '运行安全自检', '导出脱敏诊断包', '保存当前窗口截图')) {
+        foreach ($b in @('刷新日志', '复制日志路径', '打开日志目录', '复制诊断摘要', '运行安全自检', '导出脱敏诊断包', '保存当前窗口截图')) {
             $be = Wait-UiElementLike $win $b 6 'Button'
             Assert-True ("P5: 功能按钮 '{0}' 可见可用" -f $b) ($null -ne $be -and -not $be.Current.IsOffscreen -and $be.Current.IsEnabled)
         }
-        Assert-True 'P5: 日志文件下拉' ($null -ne (Find-DescendantLike $win '日志文件' 'ComboBox') -or $null -ne (Find-DescendantLike $win 'autoshutdown-'))
-        Assert-True 'P5: 级别筛选下拉' ($null -ne (Find-DescendantLike $win '级别筛选' 'ComboBox') -or $null -ne (Find-DescendantLike $win '全部' 'ComboBox'))
+        # 复制选中记录：无选中时禁用，选中一条日志后启用——可用性须通过交互验证（不是无条件可用）。
+        $copySel = Wait-UiElementLike $win '复制选中记录' 6 'Button'
+        Assert-True 'P5: 功能按钮 复制选中记录 可见' ($null -ne $copySel -and -not $copySel.Current.IsOffscreen)
+        Assert-True 'P5: 复制选中记录 初始禁用(未选中日志)' ($null -ne $copySel -and -not $copySel.Current.IsEnabled)
+        # 两个下拉（日志文件 / 级别筛选）：自定义样式致 ComboBox 的 UIA Name 为空，不能按名称断言；
+        # 改为验证 ①可展开/收起（可操作）②选中值文本可见（文件下拉=日志文件名，级别筛选=全部）。
+        $comboCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
+        $operableCombos = 0
+        foreach ($cb in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $comboCond)) {
+            try {
+                $ecp = $cb.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+                $ecp.Expand(); Start-Sleep -Milliseconds 400
+                $ecp.Collapse(); Start-Sleep -Milliseconds 200
+                $operableCombos++
+            } catch { }
+        }
+        Assert-True 'P5: 日志/级别 两个下拉可展开收起' ($operableCombos -ge 2)
+        # 日志文件下拉：进入日志页时已自动刷新并选中最新日志文件 → 选中值显示 autoshutdown-*.log
+        Assert-True 'P5: 日志文件下拉已加载(自动刷新)' ($null -ne (Wait-UiElementLike $win 'autoshutdown-' 6))
+        # 级别筛选下拉：默认选中「全部」
+        Assert-True 'P5: 级别筛选下拉显示 全部' ($null -ne (Wait-UiElementLike $win '全部' 4))
         Assert-True 'P5: 仅错误/警告 勾选' ($null -ne (Find-DescendantLike $win '仅错误/警告' 'CheckBox'))
         Assert-True 'P5: 包含隐私信息(默认脱敏说明)' ($null -ne (Find-DescendantLike $win '包含隐私信息'))
         Assert-True 'P5: 诊断状态文本' ($null -ne (Find-DescendantLike $win '就绪'))
+        # 选中一条日志记录 → 复制选中记录 由禁用转可用并执行复制（RelayCommand 经 CommandManager 在空闲时重询）。
+        # 日志条目 UIA Name 以 yyyy-MM-ddTHH:mm 开头（含 'T'），与最近活动(HH:mm:ss) 及导航项可区分。
+        $logItem = $null
+        $liCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)
+        foreach ($li in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $liCond)) {
+            if ($li.Current.Name -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}') { $logItem = $li; break }
+        }
+        Assert-True 'P5: 日志记录已加载' ($null -ne $logItem)
+        if ($logItem) {
+            try { $logItem.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() } catch { }
+            $copyEnabled = $false
+            $copyDeadline = (Get-Date).AddSeconds(6)
+            while ((Get-Date) -lt $copyDeadline) {
+                $copySel = Find-DescendantLike $win '复制选中记录' 'Button'
+                if ($copySel -and $copySel.Current.IsEnabled) { $copyEnabled = $true; break }
+                Start-Sleep -Milliseconds 300
+            }
+            Assert-True 'P5: 选中日志后 复制选中记录 可用' $copyEnabled
+            if ($copyEnabled -and $copySel) {
+                Assert-True 'P5: 复制选中记录 可点击' (Invoke-Click $copySel)
+            } else { Note-Skip 'P5 复制选中记录' '选中日志后按钮仍未启用' }
+        }
         # 运行安全自检 → 6 项自检结果出现（只读、不修复）
         $scBtn = Find-DescendantLike $win '运行安全自检' 'Button'
         if ($scBtn -and (Invoke-Click $scBtn)) {
@@ -561,7 +688,7 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
         foreach ($label in @('数据目录', '日志目录', '运行模式', '配置状态', '隐私与安全边界', '帮助与反馈')) {
             Assert-True ("P6: 关于页 '{0}' 可见" -f $label) ($null -ne (Find-DescendantLike $win $label))
         }
-        $allNames.AddRange((Get-AllNames $win))
+        foreach ($n in (Get-AllNames $win)) { $allNames.Add([string]$n) }
         $shotAbout = Join-Path $EvidenceDir ('about-{0}percent.png' -f $scale)
         [void](Save-WindowScreenshot $win $shotAbout)
         Assert-True 'P7: 截图 关于软件 已保存' (Test-Path -LiteralPath $shotAbout)
@@ -578,15 +705,21 @@ function Invoke-UI1Battery([int]$scale, [string]$tag) {
 # ======================================================================
 # 按 DPI 档位执行：仅当前系统缩放运行完整电池；其余档位如实 SKIP
 # ======================================================================
-# 先启动一次只读自校准（最小会话）确定实际缩放。
+# 先启动一次只读自校准（最小会话）交叉校验。缩放档位判定以系统已应用的 DPI 为准
+# （HKCU\Control Panel\Desktop\WindowMetrics\AppliedDPI：96=100%, 120=125%, 144=150%），
+# 不依赖启动瞬间的窗口尺寸——窗口可能被系统最大化/还原，按高度推断会不稳定（B-4 已见 150%/100%/242% 抖动）。
 $probeSb = New-SmokeSandbox 'probe'
 $probeData = Join-Path $probeSb 'data'
 $probe = Start-SmokeApp $probeData
+$appliedDpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
 $detectedScale = 100
+if ($appliedDpi) { $detectedScale = [int][Math]::Round(100 * $appliedDpi / 96.0) }
 if ($probe.Win) {
     $pr = $probe.Win.Current.BoundingRectangle
-    $detectedScale = [int][Math]::Round(100 * $pr.Height / 640)
-    Write-Host "`n系统当前缩放（自校准）：$detectedScale%"
+    $crossCheck = [int][Math]::Round(100 * $pr.Height / 640)
+    Write-Host ("`n系统缩放：AppliedDPI={0} → {1}%（窗口高度交叉校验 {2}%）" -f $appliedDpi, $detectedScale, $crossCheck)
+} else {
+    Write-Host ("`n系统缩放：AppliedDPI={0} → {1}%（自校准窗口不可用：{2}）" -f $appliedDpi, $detectedScale, $probe.Reason)
 }
 Stop-SmokeApp $probe.Proc
 
