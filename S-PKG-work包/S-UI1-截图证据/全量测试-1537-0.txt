@@ -1,0 +1,10 @@
+  AutoShutdown.Core -> D:\电脑定时关机重建完整版\src\AutoShutdown.Core\bin\Release\net8.0\AutoShutdown.Core.dll
+  AutoShutdown.TestTreeHelper -> D:\电脑定时关机重建完整版\tests\AutoShutdown.TestTreeHelper\bin\Release\net8.0-windows\AutoShutdown.TestTreeHelper.dll
+  AutoShutdown.OfficeSaveHelper -> D:\电脑定时关机重建完整版\src\AutoShutdown.OfficeSaveHelper\bin\Release\net8.0-windows\AutoShutdown.OfficeSaveHelper.dll
+  AutoShutdown.App -> D:\电脑定时关机重建完整版\src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.dll
+  AutoShutdown.Tests -> D:\电脑定时关机重建完整版\tests\AutoShutdown.Tests\bin\Release\net8.0-windows\AutoShutdown.Tests.dll
+Test run for D:\电脑定时关机重建完整版\tests\AutoShutdown.Tests\bin\Release\net8.0-windows\AutoShutdown.Tests.dll (.NETCoreApp,Version=v8.0)
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:  1537, Skipped:     0, Total:  1537, Duration: 25 s - AutoShutdown.Tests.dll (net8.0)

@@ -1,0 +1,170 @@
+== S-UI1 UI smoke (v2.0.0-S-UI1.eae7b5a) ==
+EXE: D:\电脑定时关机重建完整版\artifacts\release\v2.0.0\S-UI1-eae7b5a\AutoShutdown-v2.0.0-S-UI1.eae7b5a.exe
+
+系统缩放：AppliedDPI=144 → 150%（窗口高度交叉校验 150%）
+  SKIP  DPI 100% 完整电池  (当前机器实际缩放为 150%（单显示器）；100% 需在对应缩放的机器上运行（列入人工待验）)
+  SKIP  DPI 125% 完整电池  (当前机器实际缩放为 150%（单显示器）；125% 需在对应缩放的机器上运行（列入人工待验）)
+
+-- 启动（DPI 150% 档） --
+  PASS  process alive
+  PASS  window found
+  档位 scale=150% （初始窗口物理 1620x958）
+  PASS  P1: 窗口物理宽 ≈ 900×scale
+  PASS  P1: 窗口物理高 ≈ 580×scale
+  PASS  P1: 版本文本正确
+  PASS  P1: fresh 配置不可用 header
+  PASS  P1: fresh NOT 安全测试模式
+  PASS  P1: 首页 button(恢复导航) 存在
+  PASS  P1: 初始化安全配置 button(首页, 可恢复)
+  PASS  P1: init 后 安全测试模式 header
+  PASS  P1: init 后 config.json 写入
+  PASS  P1: config.TestMode=true
+  PASS  P1: config 未开启真实电源
+  PASS  P2: 首页 时间模式 区可见
+  PASS  P2: 页面纵向滚动条可用
+  PASS  P2: 时间模式 '倒计时' 可见
+  PASS  P2: 时间模式 '倒计时' 在视口内(不溢出)
+  PASS  P2: 时间模式 '倒计时' 可点击
+  PASS  P2: 时间模式 '今天指定时间' 可见
+  PASS  P2: 时间模式 '今天指定时间' 在视口内(不溢出)
+  PASS  P2: 时间模式 '今天指定时间' 可点击
+  PASS  P2: 时间模式 '每天固定时间' 可见
+  PASS  P2: 时间模式 '每天固定时间' 在视口内(不溢出)
+  PASS  P2: 时间模式 '每天固定时间' 可点击
+  PASS  P2: 时间模式 '每周工作日' 可见
+  PASS  P2: 时间模式 '每周工作日' 在视口内(不溢出)
+  PASS  P2: 时间模式 '每周工作日' 可点击
+  PASS  P2: 时间模式 '下个工作日' 可见
+  PASS  P2: 时间模式 '下个工作日' 在视口内(不溢出)
+  PASS  P2: 时间模式 '下个工作日' 可点击
+  PASS  P2: 时间模式 '每月第N个工作日' 可见
+  PASS  P2: 时间模式 '每月第N个工作日' 在视口内(不溢出)
+  PASS  P2: 时间模式 '每月第N个工作日' 可点击
+  PASS  P2: 时间模式 '一次性指定' 可见
+  PASS  P2: 时间模式 '一次性指定' 在视口内(不溢出)
+  PASS  P2: 时间模式 '一次性指定' 可点击
+  PASS  P2: 时间模式 '空闲触发' 可见
+  PASS  P2: 时间模式 '空闲触发' 在视口内(不溢出)
+  PASS  P2: 时间模式 '空闲触发' 可点击
+  PASS  P2: 8 种时间模式彼此不重叠
+  PASS  P2: 倒计时面板(小时/分钟/秒)
+  PASS  P2: 空闲阈值面板
+  PASS  P2: 每月第几个工作日 选择器
+  PASS  P2: 动作 '关机' 可见
+  PASS  P2: 动作 '关机' 在视口内(不溢出)
+  PASS  P2: 动作 '关机' 可点击
+  PASS  P2: 动作 '重启' 可见
+  PASS  P2: 动作 '重启' 在视口内(不溢出)
+  PASS  P2: 动作 '重启' 可点击
+  PASS  P2: 动作 '睡眠' 可见
+  PASS  P2: 动作 '睡眠' 在视口内(不溢出)
+  PASS  P2: 动作 '睡眠' 可点击
+  PASS  P2: 动作 '休眠' 可见
+  PASS  P2: 动作 '休眠' 在视口内(不溢出)
+  PASS  P2: 动作 '休眠' 可点击
+  PASS  P2: 动作 '唤醒他机' 可见
+  PASS  P2: 动作 '唤醒他机' 在视口内(不溢出)
+  PASS  P2: 动作 '唤醒他机' 可点击
+  PASS  P2: 5 种动作彼此不重叠
+  PASS  P2: 唤醒他机 → WoL 目标选择器
+  PASS  P7: 截图 首页顶部 已保存
+  PASS  P2: 时间模式 '倒计时' 文字不裁切
+  PASS  P2: 时间模式 '今天指定时间' 文字不裁切
+  PASS  P2: 时间模式 '每天固定时间' 文字不裁切
+  PASS  P2: 时间模式 '每周工作日' 文字不裁切
+  PASS  P2: 时间模式 '下个工作日' 文字不裁切
+  PASS  P2: 时间模式 '每月第N个工作日' 文字不裁切
+  PASS  P2: 时间模式 '一次性指定' 文字不裁切
+  PASS  P2: 时间模式 '空闲触发' 文字不裁切
+  PASS  P2: 动作 '关机' 文字不裁切
+  PASS  P2: 动作 '重启' 文字不裁切
+  PASS  P2: 动作 '睡眠' 文字不裁切
+  PASS  P2: 动作 '休眠' 文字不裁切
+  PASS  P2: 动作 '唤醒他机' 文字不裁切
+  PASS  reachable: 创建任务 button
+  PASS  reachable: 当前任务 区
+  PASS  reachable: 最近活动 区
+  PASS  P7: 截图 首页滚动后 已保存
+  PASS  P3: 导航可达 任务管理
+  PASS  P3: 任务管理 纵向滚动条可用
+  PASS  P3: 任务管理 无水平溢出
+  PASS  P3: 任务管理 关键控件可见 新建任务
+  PASS  P3: 任务管理 关键控件可用
+  PASS  P3: 导航可达 高级功能
+  PASS  P3: 高级功能 纵向滚动条可用
+  PASS  P3: 高级功能 无水平溢出
+  PASS  P3: 高级功能 关键控件可见 无人值守
+  PASS  P3: 高级功能 关键控件可用
+  PASS  P3: 导航可达 网络唤醒
+  PASS  P3: 网络唤醒 纵向滚动条可用
+  PASS  P3: 网络唤醒 无水平溢出
+  PASS  P3: 网络唤醒 关键控件可见 目标机器配置
+  PASS  P3: 网络唤醒 关键控件可用
+  PASS  P3: 导航可达 日志与诊断
+  PASS  P3: 日志与诊断 纵向滚动条可用
+  PASS  P3: 日志与诊断 无水平溢出
+  PASS  P3: 日志与诊断 关键控件可见 日志目录
+  PASS  P3: 日志与诊断 关键控件可用
+  PASS  P3: 导航可达 软件设置
+  PASS  P3: 软件设置 纵向滚动条可用
+  PASS  P3: 软件设置 无水平溢出
+  PASS  P3: 软件设置 关键控件可见 开机自启动
+  PASS  P3: 软件设置 关键控件可用
+  PASS  P3: 导航可达 关于软件
+  PASS  P3: 关于软件 纵向滚动条可用
+  PASS  P3: 关于软件 无水平溢出
+  PASS  P3: 关于软件 关键控件可见 隐私与安全边界
+  PASS  P3: 关于软件 关键控件可用
+  PASS  P4: 导航到 网络唤醒
+  PASS  P4: WoL 标签 '机器名称' 可见
+  PASS  P4: WoL 标签 'MAC 地址' 可见
+  PASS  P4: WoL 标签 '广播地址（可选）' 可见
+  PASS  P4: WoL 标签 'UDP 端口（可选）' 可见
+  PASS  P4: MAC 格式提示
+  PASS  P4: 仅局域网说明
+  PASS  P4: 局域网远程控制入口
+  PASS  P7: 截图 网络唤醒 已保存
+  PASS  P5: 导航到 日志与诊断
+  PASS  P5: 功能按钮 '刷新日志' 可见可用
+  PASS  P5: 功能按钮 '复制日志路径' 可见可用
+  PASS  P5: 功能按钮 '打开日志目录' 可见可用
+  PASS  P5: 功能按钮 '复制诊断摘要' 可见可用
+  PASS  P5: 功能按钮 '运行安全自检' 可见可用
+  PASS  P5: 功能按钮 '导出脱敏诊断包' 可见可用
+  PASS  P5: 功能按钮 '保存当前窗口截图' 可见可用
+  PASS  P5: 功能按钮 复制选中记录 可见
+  PASS  P5: 复制选中记录 初始禁用(未选中日志)
+  PASS  P5: 日志/级别 两个下拉存在
+  PASS  P5: 日志文件下拉已加载(自动刷新)
+  PASS  P5: 级别筛选下拉显示 全部/错误/警告/信息/调试
+  PASS  P5: 仅错误/警告 勾选
+  PASS  P5: 包含隐私信息(默认脱敏说明)
+  PASS  P5: 诊断状态文本
+  PASS  P5: 日志记录已加载
+  PASS  P5: 选中日志后 复制选中记录 可用
+  PASS  P5: 复制选中记录 可点击
+  PASS  P5: 复制后应用仍存活(剪贴板失败不崩溃)
+  PASS  P5: 安全自检完成(只读全部通过)
+  PASS  P5: 自检项 '配置健康' 出现
+  PASS  P5: 自检项 '数据目录可写性' 出现
+  PASS  P5: 自检项 '本地任务' 出现
+  PASS  P5: 自检项 '任务计划同步' 出现
+  PASS  P5: 自检项 'WoL 目标合法性' 出现
+  PASS  P5: 自检项 '远程监听/TLS' 出现
+  PASS  P7: 截图 日志与诊断 已保存
+  PASS  P6: 导航到 关于软件
+  PASS  P6: 产品名
+  PASS  P6: 真实版本
+  PASS  P6: 构建提交 标签
+  PASS  P6: unsigned-candidate 如实标示
+  PASS  P6: 关于页 '数据目录' 可见
+  PASS  P6: 关于页 '日志目录' 可见
+  PASS  P6: 关于页 '运行模式' 可见
+  PASS  P6: 关于页 '配置状态' 可见
+  PASS  P6: 关于页 '隐私与安全边界' 可见
+  PASS  P6: 关于页 '帮助与反馈' 可见
+  PASS  P7: 截图 关于软件 已保存
+  PASS  P6b: 不再出现 "v1.0.0 测试版"
+  PASS  P6b: 不再出现 "后续开放" 占位
+
+S-UI1 UI SMOKE: pass=159 fail=0 skip=2
