@@ -458,7 +458,9 @@ public sealed class S17_OfficeSaveHelperLauncherTests
         foreach (var file in EnumerateProjectSources("AutoShutdown.App"))
         {
             var content = File.ReadAllText(file);
-            if (Path.GetFileName(file) == "OfficeSaveHelperLauncher.cs")
+            // Process.Start 仅允许两个受控点：OfficeSaveHelperLauncher（辅助进程唯一启动网关）
+            // 与 ShellOpenService（S-UI1 打开日志目录/定位截图文件，用户显式操作，失败一律吞掉）。
+            if (Path.GetFileName(file) is "OfficeSaveHelperLauncher.cs" or "ShellOpenService.cs")
             {
                 Assert.Contains("Process.Start", content);
             }

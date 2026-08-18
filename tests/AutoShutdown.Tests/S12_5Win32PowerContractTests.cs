@@ -57,7 +57,7 @@ public sealed class S12_5Win32PowerContractTests
             var name = Path.GetFileName(file);
             var content = File.ReadAllText(file);
             Assert.DoesNotContain("shutdown.exe", content);
-            if (name == "OfficeSaveHelperLauncher.cs")
+            if (name is "OfficeSaveHelperLauncher.cs" or "ShellOpenService.cs")
             {
                 Assert.Contains("Process.Start", content);
             }

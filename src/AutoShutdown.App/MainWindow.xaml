@@ -8,6 +8,9 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <presentation:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <presentation:BoolToTextConverter x:Key="BoolToTextConverter" />
+        <presentation:HealthBrushConverter x:Key="HealthBrushConverter" />
+        <presentation:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibilityConverter" />
     </Window.Resources>
 
     <Grid>
@@ -52,13 +55,12 @@
             </Border>
 
             <Grid Grid.Row="1">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="0.204*"/><ColumnDefinition Width="0.796*"/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
-                <!-- 左侧导航 -->
+                <!-- 左侧导航（固定宽度，不随内容缩放） -->
                 <Border Grid.Column="0" Background="{StaticResource NavBackgroundBrush}" BorderBrush="#50FFFFFF" BorderThickness="0,0,1,0">
-                    <Viewbox Stretch="Uniform" StretchDirection="Both">
-                        <Grid Width="220" Height="560">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <Button Grid.Row="0" Content="首页" Style="{StaticResource NavHomeButtonStyle}" Command="{Binding HomeCommand}" Margin="14,18,14,10"/>
                         <ListBox Grid.Row="1" ItemsSource="{Binding NavItems}" SelectedItem="{Binding SelectedNav}" Background="Transparent" BorderThickness="0" Margin="6,-8,6,0">
                             <ListBox.ItemContainerStyle>
@@ -72,165 +74,159 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Icon}" FontSize="18" Foreground="#315A81" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="-3,0,0,0"
                                                    LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
                                         <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="17" Foreground="#29496F" VerticalAlignment="Center"
-                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"
-                                                   Visibility="{Binding DataContext.IsNavCollapsed, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource InverseBoolToVisibility}}"/>
-                                        <Border Grid.Column="2" Style="{StaticResource ComingSoonTagStyle}" Visibility="{Binding IsPlaceholder, Converter={StaticResource BoolToVisibility}}">
-                                            <TextBlock Text="后续开放" FontSize="9" Foreground="#536985"/>
-                                        </Border>
+                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
-                        <StackPanel Grid.Row="2" Margin="20,0,16,18" Visibility="{Binding IsNavCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                        <StackPanel Grid.Row="2" Margin="20,0,16,18">
                             <Border Height="1" Background="#35FFFFFF" Margin="0,0,0,14"/>
-                            <TextBlock Text="◈   v1.0.0 测试版" Foreground="#5B7392" FontSize="11" Margin="0,0,0,12"/>
-                            <TextBlock Text="◉   帮助与反馈" Foreground="#5B7392" FontSize="11"/>
+                            <TextBlock Text="{Binding VersionText}" Foreground="#5B7392" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                            <TextBlock Text="◉   版本与帮助详见「关于软件」页" Foreground="#5B7392" FontSize="11" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Grid>
-                    </Viewbox>
                 </Border>
 
-                <!-- 首页内容 -->
+                <!-- 内容区：各页均为可滚动布局（垂直滚动条自动出现），不裁切 -->
                 <Grid Grid.Column="1">
-                    <Viewbox Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}" Stretch="Uniform" StretchDirection="Both" Margin="12">
-                        <Grid Width="900" Height="620" Margin="4">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
-                            <Grid Grid.Row="0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.08*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="0.92*"/></Grid.ColumnDefinitions>
+                    <!-- 首页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
 
-                                <!-- 创建任务 -->
-                                <Border Grid.Column="0" Style="{StaticResource GlassCardStyle}" Padding="24,20">
-                                    <StackPanel>
-                                        <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,14"/>
-                                        <TextBlock Text="时间模式" Style="{StaticResource FieldLabelStyle}"/>
-                                        <UniformGrid Columns="4" Margin="0,7,0,12">
-                                            <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="每周工作日" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                            <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        </UniformGrid>
-                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
-                                            <Grid>
-                                                <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource BoolToVisibility}}">
-                                                    <UniformGrid Columns="3">
-                                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding CountdownHourOptions}" SelectedItem="{Binding CountdownHoursText}"/></StackPanel>
-                                                        <StackPanel Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding CountdownMinutesText}"/></StackPanel>
-                                                        <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}"/></StackPanel>
-                                                    </UniformGrid>
-                                                </StackPanel>
-                                                <StackPanel Visibility="{Binding IsTimeInputVisible, Converter={StaticResource BoolToVisibility}}">
-                                                    <DatePicker SelectedDate="{Binding OneTimeDate}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}"/>
-                                                    <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
-                                                    <UniformGrid Columns="3">
-                                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}"/></StackPanel>
-                                                        <StackPanel Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}"/></StackPanel>
-                                                        <StackPanel Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}"/></StackPanel>
-                                                    </UniformGrid>
-                                                    <StackPanel Margin="0,10,0,0" Visibility="{Binding IsWeekdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                                        <TextBlock Text="触发星期" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
-                                                        <UniformGrid Columns="5">
-                                                            <CheckBox Content="周一" IsChecked="{Binding WeekdayMonday}" VerticalAlignment="Center"/>
-                                                            <CheckBox Content="周二" IsChecked="{Binding WeekdayTuesday}" VerticalAlignment="Center"/>
-                                                            <CheckBox Content="周三" IsChecked="{Binding WeekdayWednesday}" VerticalAlignment="Center"/>
-                                                            <CheckBox Content="周四" IsChecked="{Binding WeekdayThursday}" VerticalAlignment="Center"/>
-                                                            <CheckBox Content="周五" IsChecked="{Binding WeekdayFriday}" VerticalAlignment="Center"/>
-                                                        </UniformGrid>
-                                                    </StackPanel>
-                                                    <StackPanel Margin="0,10,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                                        <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
-                                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
-                                                    </StackPanel>
-                                                </StackPanel>
-                                                <StackPanel Visibility="{Binding IsIdleSelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="空闲阈值" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
-                                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding IdleThresholdOptions}" SelectedIndex="{Binding IdleThresholdIndex}" HorizontalAlignment="Stretch"/>
-                                                    <TextBlock Text="鼠标/键盘持续无操作达到阈值即触发倒计时；倒计时期间输入恢复会自动取消。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
-                                            <StackPanel>
-                                                <TextBlock Text="例外日历（节假日）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
-                                                <TextBlock Text="每行一个日期（yyyy-MM-dd），这些日期不执行；留空表示无例外。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                                <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
+                            <!-- 创建定时任务 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="24,20">
+                                <StackPanel>
+                                    <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,14"/>
+                                    <TextBlock Text="时间模式（8 种）" Style="{StaticResource FieldLabelStyle}"/>
+                                    <WrapPanel Margin="0,7,0,12">
+                                        <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="每周工作日" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                        <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                    </WrapPanel>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
+                                        <Grid>
+                                            <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource BoolToVisibility}}">
+                                                <WrapPanel>
+                                                    <StackPanel MinWidth="150" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding CountdownHourOptions}" SelectedItem="{Binding CountdownHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="150" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding CountdownMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="150" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                </WrapPanel>
                                             </StackPanel>
-                                        </Border>
-                                        <UniformGrid Columns="5" Margin="0,0,0,12">
-                                            <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
-                                            <RadioButton Content="重启" IsChecked="{Binding ActionIsRestart}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
-                                            <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
-                                            <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
-                                            <RadioButton Content="唤醒他机" IsChecked="{Binding ActionIsWakeOnLan}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
-                                        </UniformGrid>
-                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsWolTargetSelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                            <StackPanel>
-                                                <TextBlock Text="目标机器" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
-                                                <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding WolTargetsSection.Targets}"
-                                                          SelectedValuePath="Id" SelectedValue="{Binding SelectedWolTargetId}"
-                                                          DisplayMemberPath="Name" HorizontalAlignment="Stretch"/>
-                                                <TextBlock Text="仅向已配置的局域网目标发送 Magic Packet（不扫描、不自动发现、不出公网）。目标机器请在「软件设置」中管理。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                            <StackPanel Visibility="{Binding IsTimeInputVisible, Converter={StaticResource BoolToVisibility}}">
+                                                <DatePicker SelectedDate="{Binding OneTimeDate}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                                <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                <WrapPanel>
+                                                    <StackPanel MinWidth="150" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="150" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="150" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                </WrapPanel>
+                                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsWeekdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="触发星期（可多选）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
+                                                    <WrapPanel>
+                                                        <CheckBox Content="周一" IsChecked="{Binding WeekdayMonday}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                        <CheckBox Content="周二" IsChecked="{Binding WeekdayTuesday}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                        <CheckBox Content="周三" IsChecked="{Binding WeekdayWednesday}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                        <CheckBox Content="周四" IsChecked="{Binding WeekdayThursday}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                        <CheckBox Content="周五" IsChecked="{Binding WeekdayFriday}" VerticalAlignment="Center"/>
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
+                                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
+                                                </StackPanel>
                                             </StackPanel>
-                                        </Border>
-                                        <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
-                                            <StackPanel>
-                                                <CheckBox Content="使用无人值守（到期不等待人工确认）" IsChecked="{Binding UseUnattended}" IsEnabled="{Binding IsUnattendedTaskOptionAvailable}" VerticalAlignment="Center"/>
-                                                <TextBlock Text="{Binding UnattendedTaskOptionHint}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="23,4,0,0"/>
+                                            <StackPanel Visibility="{Binding IsIdleSelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                <TextBlock Text="空闲阈值" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding IdleThresholdOptions}" SelectedIndex="{Binding IdleThresholdIndex}" HorizontalAlignment="Stretch"/>
+                                                <TextBlock Text="鼠标/键盘持续无操作达到阈值即触发倒计时；倒计时期间输入恢复会自动取消。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                             </StackPanel>
-                                        </Border>
-                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
-                                        <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
-                                        <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
-                                        <TextBlock Text="{Binding CreateDisabledReason}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="{Binding HasCreateError, Converter={StaticResource BoolToVisibility}}"/>
-                                        <Button Content="创建任务" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}" HorizontalAlignment="Stretch"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- 当前任务 -->
-                                <Border Grid.Column="2" Style="{StaticResource GlassCardPurpleStyle}" Padding="26,20">
-                                    <Grid>
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                        <TextBlock Text="当前任务" Style="{StaticResource CardTitleOnPurpleStyle}"/>
-                                        <StackPanel Grid.Row="1" Margin="0,15,0,0">
-                                            <TextBlock Text="{Binding CurrentStateText}" FontSize="15" FontWeight="SemiBold" Foreground="#294064"/>
-                                            <TextBlock Text="{Binding CountdownText}" FontSize="68" FontWeight="Bold" Foreground="White" Margin="0,4,0,8" CacheMode="BitmapCache">
-                                                <TextBlock.Effect><DropShadowEffect Color="#B681FF" BlurRadius="14" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect>
-                                            </TextBlock>
-                                        </StackPanel>
-                                        <Grid Grid.Row="2" Margin="0,0,0,10">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                                            <TextBlock Text="下次执行时间：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
-                                            <TextBlock Grid.Row="1" Text="任务类型：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
-                                            <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
-                                            <TextBlock Grid.Row="3" Text="触发方式：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CountdownSourceText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
                                         </Grid>
-                                        <StackPanel Grid.Row="3">
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                                <Button Content="延迟 10 分钟" Style="{StaticResource SolidBlueButtonStyle}" Command="{Binding SnoozeCommand}"/>
-                                                <Button Grid.Column="2" Content="取消任务" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding CancelCommand}"/>
-                                            </Grid>
-                                            <Button Content="清除当前记录" Style="{StaticResource ClearRecordButtonStyle}" Command="{Binding ClearCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                                    </Border>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel>
+                                            <TextBlock Text="例外日历（节假日）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
+                                            <TextBlock Text="每行一个日期（yyyy-MM-dd），这些日期不执行；留空表示无例外。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
                                         </StackPanel>
+                                    </Border>
+                                    <TextBlock Text="电源动作（5 种）" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                    <WrapPanel Margin="0,0,0,12">
+                                        <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                        <RadioButton Content="重启" IsChecked="{Binding ActionIsRestart}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                        <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                        <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                        <RadioButton Content="唤醒他机" IsChecked="{Binding ActionIsWakeOnLan}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
+                                    </WrapPanel>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsWolTargetSelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel>
+                                            <TextBlock Text="目标机器" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                            <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding WolTargetsSection.Targets}"
+                                                      SelectedValuePath="Id" SelectedValue="{Binding SelectedWolTargetId}"
+                                                      DisplayMemberPath="Name" HorizontalAlignment="Stretch"/>
+                                            <TextBlock Text="仅向已配置的局域网目标发送 Magic Packet（不扫描、不自动发现、不出公网）。目标机器请在「网络唤醒」或「软件设置」中管理。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel>
+                                            <CheckBox Content="使用无人值守（到期不等待人工确认）" IsChecked="{Binding UseUnattended}" IsEnabled="{Binding IsUnattendedTaskOptionAvailable}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding UnattendedTaskOptionHint}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="23,4,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
+                                    <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding CreateDisabledReason}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="{Binding HasCreateError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="创建任务" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}" HorizontalAlignment="Stretch"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 当前任务 -->
+                            <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="26,20" Margin="0,16,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <TextBlock Text="当前任务" Style="{StaticResource CardTitleOnPurpleStyle}"/>
+                                    <StackPanel Grid.Row="1" Margin="0,15,0,0">
+                                        <TextBlock Text="{Binding CurrentStateText}" FontSize="15" FontWeight="SemiBold" Foreground="#294064"/>
+                                        <TextBlock Text="{Binding CountdownText}" FontSize="68" FontWeight="Bold" Foreground="White" Margin="0,4,0,8" CacheMode="BitmapCache">
+                                            <TextBlock.Effect><DropShadowEffect Color="#B681FF" BlurRadius="14" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect>
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <Grid Grid.Row="2" Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                        <TextBlock Text="下次执行时间：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="1" Text="任务类型：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                        <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
+                                        <TextBlock Grid.Row="3" Text="触发方式：" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CountdownSourceText}" FontSize="16" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,5"/>
                                     </Grid>
-                                </Border>
-                            </Grid>
+                                    <StackPanel Grid.Row="3">
+                                        <WrapPanel>
+                                            <Button Content="延迟 10 分钟" Style="{StaticResource SolidBlueButtonStyle}" Command="{Binding SnoozeCommand}" Margin="0,0,12,0"/>
+                                            <Button Content="取消任务" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding CancelCommand}"/>
+                                            <Button Content="清除当前记录" Style="{StaticResource ClearRecordButtonStyle}" Command="{Binding ClearCommand}" Margin="14,0,0,0"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
 
                             <!-- 状态与最近活动 -->
-                            <Grid Grid.Row="2">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.18*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="0.82*"/></Grid.ColumnDefinitions>
+                            <Grid Margin="0,16,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.18*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="0.82*"/></Grid.ColumnDefinitions>
                                 <UniformGrid Grid.Column="0" Columns="3">
-                                    <Border Style="{StaticResource StatusCardCyanStyle}" Margin="0,0,7,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource CyanIconCircleStyle}"><TextBlock Text="✓" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="任务状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding CurrentStateText}" Style="{StaticResource StatusValueStyle}"/></StackPanel></Border>
-                                    <Border Style="{StaticResource StatusCardBlueStyle}" Margin="7,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource BlueIconCircleStyle}"><TextBlock Text="◴" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="调度服务" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding SchedulerStatusText}" Style="{StaticResource StatusValueStyle}"/></StackPanel></Border>
-                                    <Border Style="{StaticResource StatusCardGreenStyle}" Margin="7,0,0,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource GreenIconCircleStyle}"><TextBlock Text="▣" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="配置状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding ConfigStatusText}" Style="{StaticResource StatusValueStyle}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="120"/></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusCardCyanStyle}" Margin="0,0,6,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource CyanIconCircleStyle}"><TextBlock Text="✓" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="任务状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding CurrentStateText}" Style="{StaticResource StatusValueStyle}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="130"/></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusCardBlueStyle}" Margin="6,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource BlueIconCircleStyle}"><TextBlock Text="◴" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="调度服务" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding SchedulerStatusText}" Style="{StaticResource StatusValueStyle}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="130"/></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusCardGreenStyle}" Margin="6,0,0,0"><StackPanel HorizontalAlignment="Center"><Border Style="{StaticResource GreenIconCircleStyle}"><TextBlock Text="▣" Style="{StaticResource StatusIconTextStyle}"/></Border><TextBlock Text="配置状态" Style="{StaticResource StatusTitleStyle}"/><TextBlock Text="{Binding ConfigStatusText}" Style="{StaticResource StatusValueStyle}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="130"/></StackPanel></Border>
                                 </UniformGrid>
                                 <Border Grid.Column="2" Style="{StaticResource GlassCardStyle}" Padding="20,16">
                                     <StackPanel><TextBlock Text="最近活动" Style="{StaticResource CardTitleStyle}" FontSize="17" Margin="0,0,0,8"/>
@@ -240,22 +236,22 @@
                                     </StackPanel>
                                 </Border>
                             </Grid>
-                        </Grid>
-                    </Viewbox>
+                        </StackPanel>
+                    </ScrollViewer>
 
-                    <!-- 任务管理页（T08：真实任务列表 / 分别启停 / 8 态 / 空错态 / 恢复通知 / 强制冲突询问 / 仲裁结果） -->
-                    <Viewbox Visibility="{Binding IsTasksPageVisible, Converter={StaticResource BoolToVisibility}}" Stretch="Uniform" StretchDirection="Both" Margin="12">
-                        <Grid Width="900" Height="620" Margin="4">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="10"/><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <!-- 任务管理页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsTasksPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
 
-                            <Grid Grid.Row="0">
+                            <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="任务管理" FontSize="26" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Content="＋  新建任务" Style="{StaticResource PrimaryButtonStyle}" Padding="22,10" HorizontalAlignment="Right" Command="{Binding HomeCommand}"/>
                             </Grid>
 
                             <!-- 横幅区：恢复通知 / 仲裁结果 / 强制冲突询问 / 故障状态 -->
-                            <StackPanel Grid.Row="2">
+                            <StackPanel Margin="0,12,0,0">
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="16,10" Margin="0,0,0,8" Visibility="{Binding HasRecoveryNotice, Converter={StaticResource BoolToVisibility}}">
                                     <TextBlock Text="{Binding RecoveryNoticeText}" FontSize="13" Foreground="#C62828" TextWrapping="Wrap"/>
                                 </Border>
@@ -287,14 +283,14 @@
                             </StackPanel>
 
                             <!-- 空状态 -->
-                            <StackPanel Grid.Row="4" Visibility="{Binding HasNoTasks, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <StackPanel Visibility="{Binding HasNoTasks, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" Margin="0,40,0,0">
                                 <TextBlock Text="暂无任务" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,8"/>
                                 <TextBlock Text="点击右上角「新建任务」创建第一个定时任务。" FontSize="14" Foreground="{StaticResource TextOnDarkMutedBrush}"/>
                             </StackPanel>
 
                             <!-- 任务列表 -->
-                            <Border Grid.Row="4" Style="{StaticResource GlassCardStyle}" Padding="18,14" Visibility="{Binding HasTasks, Converter={StaticResource BoolToVisibility}}">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="18,14" Margin="0,12,0,0" Visibility="{Binding HasTasks, Converter={StaticResource BoolToVisibility}}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="520">
                                     <ItemsControl ItemsSource="{Binding TaskItems}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -306,7 +302,7 @@
                                                                 <TextBlock Text="{Binding ActionText}" FontSize="16" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,12,0"/>
                                                                 <TextBlock Text="{Binding StateText}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
                                                             </StackPanel>
-                                                            <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="#536985">
+                                                            <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="#536985" TextWrapping="Wrap">
                                                                 <Run Text="执行时间 "/><Run Text="{Binding FireTimeText, Mode=OneWay}"/>
                                                                 <Run Text="    提醒 "/><Run Text="{Binding WarningText, Mode=OneWay}"/>
                                                                 <Run Text="    倒计时 "/><Run Text="{Binding CountdownText, Mode=OneWay}"/>
@@ -331,80 +327,38 @@
                                     </ItemsControl>
                                 </ScrollViewer>
                             </Border>
-                        </Grid>
-                    </Viewbox>
-
-                    <StackPanel Visibility="{Binding IsPlaceholderAreaVisible, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <!-- 普通占位页（排除日志页与设置页） -->
-                        <StackPanel Visibility="{Binding IsGenericPlaceholderVisible, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="{Binding PlaceholderTitle}" FontSize="26" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"/>
-                            <TextBlock Text="该功能将在后台能力通过测试后开放" FontSize="14" Foreground="{StaticResource TextOnDarkMutedBrush}"/>
-                            <TextBlock Text="{Binding TaskSummaryText}" Foreground="White" HorizontalAlignment="Center" Margin="0,14,0,0" Visibility="{Binding IsTaskSummaryVisible, Converter={StaticResource BoolToVisibility}}"/>
                         </StackPanel>
+                    </ScrollViewer>
 
-                        <!-- 日志与诊断页 -->
-                        <StackPanel Visibility="{Binding IsLogsPageVisible, Converter={StaticResource BoolToVisibility}}" Width="640">
-                            <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                    <!-- 高级功能页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsAdvancedPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
+                            <TextBlock Text="高级功能" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+                            <TextBlock Text="以下高风险功能默认关闭；开启需二次确认，并始终受配置双闸门约束。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
                                 <StackPanel>
-                                    <TextBlock Text="正式日志目录" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
-                                    <TextBlock Text="{Binding LogDirectory}" Foreground="#29496F" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                                    <Button Content="复制日志路径" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CopyLogPathCommand}" HorizontalAlignment="Left"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
-                                <StackPanel>
-                                    <TextBlock Text="最近活动（最近 20 条）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
-                                    <ListBox ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MaxHeight="240">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock>
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-
-                        <!-- 软件设置页 -->
-                        <StackPanel Visibility="{Binding IsSettingsPageVisible, Converter={StaticResource BoolToVisibility}}" Width="640">
-                            <TextBlock Text="软件设置" FontSize="26" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center" Margin="0,0,0,12"/>
-                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
-                                <StackPanel>
-                                    <TextBlock Text="开机自启动" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
-                                    <TextBlock Text="仅对当前 Windows 用户生效，可随时关闭；默认不启用。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10"/>
-                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
-                                        <Run Text="{Binding AutoStartStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding AutoStartErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasAutoStartError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                        <Button Content="启用开机自启动" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding EnableAutoStartCommand}" Padding="26,10" Margin="0,0,15,0"/>
-                                        <Button Content="关闭开机自启动" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DisableAutoStartCommand}" Padding="24,10" Margin="0,0,15,0"/>
-                                        <Button Content="修复自启动" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RepairAutoStartCommand}" Visibility="{Binding IsAutoStartRepairVisible, Converter={StaticResource BoolToVisibility}}"/>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
-                                <StackPanel>
-                                    <TextBlock Text="无人值守（高级）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="无人值守" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="{Binding UnattendedRiskText}" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
                                         <Run Text="{Binding UnattendedStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
                                     </TextBlock>
                                     <TextBlock Text="{Binding UnattendedDetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                     <TextBlock Text="{Binding UnattendedErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasUnattendedError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <WrapPanel Margin="0,12,0,0">
                                         <Button Content="启用无人值守（双重确认）" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding EnableUnattendedCommand}" Padding="22,10" Margin="0,0,15,0"/>
                                         <Button Content="撤销授权" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RevokeUnattendedCommand}" Padding="20,10"/>
-                                    </StackPanel>
+                                    </WrapPanel>
                                 </StackPanel>
                             </Border>
+
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
                                 <StackPanel>
-                                    <TextBlock Text="关闭应用（关机前）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="关机前关闭应用" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="360" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="300" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
                                         <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
                                     </StackPanel>
                                     <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
@@ -427,29 +381,75 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                     <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding CloseAppsStatusText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsStatus, Converter={StaticResource BoolToVisibility}}"/>
                                     <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
                                 </StackPanel>
                             </Border>
+
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
                                 <StackPanel>
-                                    <TextBlock Text="Wake-on-LAN 目标机器" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
-                                    <TextBlock Text="向已配置的局域网目标发送 Magic Packet（仅局域网，不扫描、不自动发现、不出公网）。测试发送只在你逐目标点击时发生；默认清单为空。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="1.1*"/><ColumnDefinition Width="7"/>
-                                            <ColumnDefinition Width="1.6*"/><ColumnDefinition Width="7"/>
-                                            <ColumnDefinition Width="1.3*"/><ColumnDefinition Width="7"/>
-                                            <ColumnDefinition Width="0.6*"/><ColumnDefinition Width="7"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Grid.Column="0" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.NameInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="目标机器名称"/>
-                                        <TextBox Grid.Column="2" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.MacInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="MAC 地址，如 AA:BB:CC:DD:EE:FF"/>
-                                        <TextBox Grid.Column="4" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.BroadcastInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="可选：IPv4 广播地址（如 192.168.1.255）"/>
-                                        <TextBox Grid.Column="6" Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.PortInput, UpdateSourceTrigger=PropertyChanged}" ToolTip="可选：UDP 端口（默认 9）"/>
-                                        <Button Grid.Column="8" Content="＋ 添加" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
-                                    </Grid>
+                                    <TextBlock Text="一次性 RTC 唤醒" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="关机/睡眠/休眠等任务到期前可设置一次性本机唤醒（受控关机前步骤）。能力与失败原因如实显示；不支持或权限不足时不会尝试设置。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding RtcStatusSection.StatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding RtcStatusSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding RtcStatusSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding RtcStatusSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="重新查询能力" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RtcStatusSection.RefreshCommand}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Windows 任务计划程序同步" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="把本地任务单向同步到系统「任务计划程序」（AutoShutdown V2 目录），让关机/睡眠/唤醒能绕过本应用自动拉起。任务计划程序里的任务只会回调本应用（--trigger-task），绝不直接执行电源；开启期间自动跟随本地任务增删改。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <CheckBox Content="启用计划任务同步" IsChecked="{Binding TaskSyncSection.Enabled, Mode=TwoWay}" IsEnabled="{Binding TaskSyncSection.CanOperate}"
+                                              FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.StatusText}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,2" Visibility="{Binding TaskSyncSection.DetailText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.LastSyncText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,0" Visibility="{Binding TaskSyncSection.LastSyncText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding TaskSyncSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding TaskSyncSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="立即同步" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding TaskSyncSection.SyncNowCommand}" IsEnabled="{Binding TaskSyncSection.CanOperate}" Padding="20,8" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 网络唤醒页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsWolPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
+                            <TextBlock Text="网络唤醒" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+                            <TextBlock Text="Wake-on-LAN：向局域网内已配置的目标机器发送 Magic Packet，将目标从睡眠/关机状态唤醒。仅局域网、仅显式配置的目标；绝不扫描、不自动发现、不出公网。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                <StackPanel>
+                                    <TextBlock Text="目标机器配置" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="添加要唤醒的局域网目标机器。测试发送只在你逐目标点击时发生；默认清单为空。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="机器名称" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.NameInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="目标机器名称，用于识别"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="MAC 地址" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.MacInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" ToolTip="必填。格式：AA:BB:CC:DD:EE:FF（大写十六进制）"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="广播地址（可选）" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.BroadcastInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="可选：IPv4 广播地址（如 192.168.1.255）；留空使用默认有限广播 255.255.255.255。禁止填写公网 IP。"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="UDP 端口（可选）" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.PortInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="90" ToolTip="可选：UDP 端口；留空默认 9（WoL 标准端口）。"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8" VerticalAlignment="Bottom">
+                                            <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
+                                        </StackPanel>
+                                    </WrapPanel>
                                     <TextBlock Text="{Binding WolTargetsSection.MacFormatHint, Mode=OneTime}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                                    <TextBlock Text="{Binding WolTargetsSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding WolTargetsSection.StatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.StatusText, Converter={StaticResource BoolToVisibility}}"/>
                                     <ItemsControl ItemsSource="{Binding WolTargetsSection.Targets}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -461,7 +461,7 @@
                                                                 <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,10,0"/>
                                                                 <TextBlock Text="{Binding Mac}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
                                                             </StackPanel>
-                                                            <TextBlock Text="{Binding SummaryText}" FontSize="11" Foreground="#536985" Margin="0,3,0,0"/>
+                                                            <TextBlock Text="{Binding SummaryText}" FontSize="11" Foreground="#536985" Margin="0,3,0,0" TextWrapping="Wrap"/>
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                                             <Button Content="测试发送" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
@@ -476,8 +476,267 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="局域网远程控制入口" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="如要让局域网内其他设备远程查看/受控触发本机任务，请前往「软件设置 → 局域网远程控制」配置。默认关闭、默认只读；启用需保存并应用，且默认强制 TLS。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <WrapPanel>
+                                        <Button Content="前往软件设置" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding SettingsCommand}" Padding="20,10"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 日志与诊断页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsLogsPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
+                            <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+                            <TextBlock Text="查看日志、运行只读安全自检、导出脱敏诊断包或保存当前窗口截图。以下操作均不会修改配置，也不会执行任何电源操作。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                            <!-- 日志目录与摘要 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                <StackPanel>
+                                    <TextBlock Text="日志目录" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding LogDirectory}" Foreground="#29496F" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <WrapPanel>
+                                        <Button Content="刷新日志" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DiagnosticsCenter.RefreshCommand}" Padding="18,10" Margin="0,0,10,0"/>
+                                        <Button Content="复制日志路径" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding CopyLogPathCommand}" Padding="18,10" Margin="0,0,10,0"/>
+                                        <Button Content="打开日志目录" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.OpenLogDirectoryCommand}" Padding="18,10"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 日志查看 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="日志记录" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <WrapPanel Margin="0,4,0,8">
+                                        <TextBlock Text="日志文件" Style="{StaticResource MicroLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding DiagnosticsCenter.LogFileNames}" SelectedItem="{Binding DiagnosticsCenter.SelectedLogFileName}" MinWidth="260" Margin="0,0,16,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="级别筛选" Style="{StaticResource MicroLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding DiagnosticsCenter.LevelFilterOptions}" SelectedIndex="{Binding DiagnosticsCenter.LevelFilterIndex}" MinWidth="90" Margin="0,0,16,0" VerticalAlignment="Center"/>
+                                        <CheckBox Content="仅错误/警告" IsChecked="{Binding DiagnosticsCenter.ShowErrorsOnly}" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding DiagnosticsCenter.SearchText, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="按内容搜索日志记录" VerticalAlignment="Center"/>
+                                    </WrapPanel>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Padding="0">
+                                        <ListBox ItemsSource="{Binding DiagnosticsCenter.LogEntries}" SelectedItem="{Binding DiagnosticsCenter.SelectedLogEntry}" MinHeight="180" MaxHeight="300"
+                                                 Background="Transparent" BorderThickness="0">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Margin="6,3" TextWrapping="Wrap">
+                                                        <Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="  "/><Run Text="{Binding Level}" Foreground="#29496F" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Message}" Foreground="#273A5D"/>
+                                                    </TextBlock>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Border>
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Content="复制选中记录" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DiagnosticsCenter.CopySelectedLogCommand}" Padding="18,10" Margin="0,0,10,0"/>
+                                        <Button Content="复制诊断摘要" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.CopyDiagnosticSummaryCommand}" Padding="18,10"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 最近活动 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="最近活动（最近 20 条）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
+                                    <ListBox ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MaxHeight="240">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 安全自检 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="安全自检（只读）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="只读检查：配置健康、数据目录可写性、本地任务、任务计划同步、WoL 目标合法性、远程监听/TLS。不自动修复、不执行任何电源操作。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <Button Content="运行安全自检" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DiagnosticsCenter.RunSelfCheckCommand}" Padding="20,10" HorizontalAlignment="Left"/>
+                                    <TextBlock Text="{Binding DiagnosticsCenter.SelfCheckSummaryText}" FontSize="13" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,10,0,4"/>
+                                    <ItemsControl ItemsSource="{Binding DiagnosticsCenter.SelfCheckItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,6">
+                                                    <StackPanel>
+                                                        <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="#29496F">
+                                                            <Run Text="{Binding Name, Mode=OneWay}"/>
+                                                            <Run Text="  "/><Run Text="{Binding IsHealthy, Mode=OneWay, Converter={StaticResource BoolToTextConverter}}" Foreground="{Binding IsHealthy, Converter={StaticResource HealthBrushConverter}}"/>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 导出脱敏诊断包 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="导出脱敏诊断包" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="点击后选择保存路径生成 zip。默认排除：PIN、HMAC/配对 secret、证书私钥、PFX 密码。隐私信息（路径、IP、MAC、机器名）默认脱敏；勾选下方选项并经确认后才包含。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                    <CheckBox Content="包含隐私信息（路径/IP/MAC/机器名，导出前请确认）" IsChecked="{Binding DiagnosticsCenter.IncludePrivacyInfo}"
+                                              FontSize="13" FontWeight="SemiBold" Foreground="#B26A00" Margin="0,0,0,10"/>
+                                    <Button Content="导出脱敏诊断包" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DiagnosticsCenter.ExportDiagnosticsCommand}" Padding="22,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 截图当前窗口 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="截图当前窗口" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="仅在你主动点击后保存当前窗口截图到你选择的路径并打开所在目录。绝不自动上传、无远程桌面、无实时监控、无后台外传。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <Button Content="保存当前窗口截图" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.ScreenshotCommand}" Padding="22,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 配置状态与恢复入口 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel>
+                                    <TextBlock Text="配置状态" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding ConfigStatusText}" FontSize="13" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="初始化安全配置（恢复为安全测试模式）" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" Padding="22,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 状态信息 -->
+                            <TextBlock Text="{Binding DiagnosticsCenter.DiagnosticsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="{Binding DiagnosticsCenter.DiagnosticsStatusText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 软件设置页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsSettingsPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
+                            <TextBlock Text="软件设置" FontSize="26" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,12"/>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                                <StackPanel>
+                                    <TextBlock Text="开机自启动" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="仅对当前 Windows 用户生效，可随时关闭；默认不启用。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding AutoStartStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding AutoStartErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasAutoStartError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button Content="启用开机自启动" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding EnableAutoStartCommand}" Padding="26,10" Margin="0,0,15,0"/>
+                                        <Button Content="关闭开机自启动" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DisableAutoStartCommand}" Padding="24,10" Margin="0,0,15,0"/>
+                                        <Button Content="修复自启动" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RepairAutoStartCommand}" Visibility="{Binding IsAutoStartRepairVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="无人值守（高级）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding UnattendedRiskText}" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
+                                        <Run Text="{Binding UnattendedStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding UnattendedDetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding UnattendedErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding HasUnattendedError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button Content="启用无人值守（双重确认）" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding EnableUnattendedCommand}" Padding="22,10" Margin="0,0,15,0"/>
+                                        <Button Content="撤销授权" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RevokeUnattendedCommand}" Padding="20,10"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="关闭应用（关机前）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="300" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
+                                        <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
+                                    </StackPanel>
+                                    <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <CheckBox Content="{Binding Identifier}" IsChecked="{Binding ForceKillAllowed}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                            <TextBlock Text="已授权强杀：将立即终止该进程，未保存工作可能丢失。" FontSize="11" Foreground="#C62828" Margin="22,2,0,0"
+                                                                       Visibility="{Binding RiskVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1" Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
+                                                                Command="{Binding DataContext.RemoveCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsStatus, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Wake-on-LAN 目标机器" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock Text="向已配置的局域网目标发送 Magic Packet（仅局域网，不扫描、不自动发现、不出公网）。测试发送只在你逐目标点击时发生；默认清单为空。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="机器名称" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.NameInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="目标机器名称，用于识别"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="MAC 地址" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.MacInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" ToolTip="必填。格式：AA:BB:CC:DD:EE:FF（大写十六进制）"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="广播地址（可选）" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.BroadcastInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="可选：IPv4 广播地址（如 192.168.1.255）；留空使用默认有限广播 255.255.255.255。禁止填写公网 IP。"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,14,8">
+                                            <TextBlock Text="UDP 端口（可选）" Style="{StaticResource MicroLabelStyle}"/>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding WolTargetsSection.PortInput, UpdateSourceTrigger=PropertyChanged}" MinWidth="90" ToolTip="可选：UDP 端口；留空默认 9（WoL 标准端口）。"/>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,8" VerticalAlignment="Bottom">
+                                            <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding WolTargetsSection.AddTargetCommand}" Padding="18,10"/>
+                                        </StackPanel>
+                                    </WrapPanel>
+                                    <TextBlock Text="{Binding WolTargetsSection.MacFormatHint, Mode=OneTime}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,10"/>
                                     <TextBlock Text="{Binding WolTargetsSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding WolTargetsSection.StatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding WolTargetsSection.StatusText, Converter={StaticResource BoolToVisibility}}"/>
+                                    <ItemsControl ItemsSource="{Binding WolTargetsSection.Targets}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" Foreground="#29496F" Margin="0,0,10,0"/>
+                                                                <TextBlock Text="{Binding Mac}" FontSize="12" Foreground="#536985" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding SummaryText}" FontSize="11" Foreground="#536985" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Content="测试发送" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
+                                                                    Command="{Binding DataContext.WolTargetsSection.TestSendTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                            <Button Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6"
+                                                                    Command="{Binding DataContext.WolTargetsSection.RemoveTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
@@ -528,7 +787,7 @@
                                     <CheckBox Content="使用导入的 PFX 证书（不勾选则自动生成自签名证书，私钥经 DPAPI 加密落盘）" IsChecked="{Binding RemoteSection.UseImportedCertificate, Mode=TwoWay}" IsEnabled="{Binding RemoteSection.CanOperate}"
                                               FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
                                     <StackPanel Orientation="Horizontal" Margin="20,2,0,8" Visibility="{Binding RemoteSection.UseImportedCertificate, Converter={StaticResource BoolToVisibility}}">
-                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding RemoteSection.ImportedCertPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="320" ToolTip="导入证书 PFX 完整路径；带密码时密码经 DPAPI 保护的密码文件提供"/>
+                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding RemoteSection.ImportedCertPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="300" ToolTip="导入证书 PFX 完整路径；带密码时密码经 DPAPI 保护的密码文件提供"/>
                                         <TextBlock Text="PFX 路径" FontSize="12" Foreground="#536985" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                     </StackPanel>
                                     <TextBlock Text="远程命令白名单（独立于本地关机前命令白名单，默认仅只读）" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,8,0,4"/>
@@ -542,12 +801,12 @@
                                     </TextBlock>
                                     <TextBlock Text="{Binding RemoteSection.PinExpiryText}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,2,0,6"/>
                                     <TextBlock Text="PIN 每次有效 10 分钟、只可配对一台设备（成功即失效）。配对必须在 TLS 连接上完成。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <WrapPanel Margin="0,0,0,8">
                                         <Button Content="轮换 PIN" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RemoteSection.RotatePinCommand}" IsEnabled="{Binding RemoteSection.CanOperate}" Padding="18,8"/>
                                         <TextBlock Text="{Binding RemoteSection.LockStatusText}" FontSize="13" Foreground="#C62828" VerticalAlignment="Center" Margin="14,0,0,0"/>
                                         <Button Content="解除配对锁定" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding RemoteSection.UnlockCommand}" Padding="16,8" Margin="14,0,0,0"
                                                 Visibility="{Binding RemoteSection.IsLocked, Converter={StaticResource BoolToVisibility}}"/>
-                                    </StackPanel>
+                                    </WrapPanel>
                                     <TextBlock Text="{Binding RemoteSection.DeviceCountText}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
                                     <ItemsControl ItemsSource="{Binding RemoteSection.Devices}">
                                         <ItemsControl.ItemTemplate>
@@ -580,7 +839,52 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                    </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 关于软件页 -->
+                    <ScrollViewer Grid.Column="1" Visibility="{Binding IsAboutPageVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,16,20,24">
+                            <TextBlock Text="关于软件" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,12"/>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="24,20">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                        <Border Width="46" Height="46" CornerRadius="23" BorderBrush="#CCFFFFFF" BorderThickness="2" Background="#20FFFFFF" VerticalAlignment="Center" Margin="0,0,14,0">
+                                            <TextBlock Text="⏻" FontFamily="Segoe UI Symbol" FontSize="30" FontWeight="Bold" Foreground="#24436D" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding ProductNameText}" FontSize="22" FontWeight="Bold" Foreground="#20375E"/>
+                                            <TextBlock Text="定时关机 / 定时任务 / 局域网远程控制" FontSize="12" Foreground="#536985"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <Border Height="1" Background="#35FFFFFF" Margin="0,0,0,14"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                        <TextBlock Text="版本" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding VersionText}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="1" Text="构建提交" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding BuildCommitText}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="2" Text="签名状态" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SigningStatusText}" FontSize="13" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="3" Text="数据目录" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding DataDirectoryText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="4" Text="日志目录" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding LogDirectory}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="5" Text="运行模式" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding HeaderModeText}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,2"/>
+                                        <TextBlock Grid.Row="6" Text="配置状态" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center"/><TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding ConfigStatusText}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,2"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="隐私与安全边界" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,6"/>
+                                    <TextBlock Text="{Binding PrivacyBoundaryText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="帮助与反馈" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,6"/>
+                                    <TextBlock Text="{Binding HelpFeedbackText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </Grid>
         </Grid>

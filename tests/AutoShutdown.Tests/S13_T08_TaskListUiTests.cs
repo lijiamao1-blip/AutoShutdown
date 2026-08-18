@@ -337,13 +337,16 @@ public sealed class S13_T08_TaskListUiTests
 
         var tasksNav = viewModel.NavItems.Single(item => item.PageKey == "tasks");
         Assert.Equal("任务管理", tasksNav.Title);
-        Assert.False(tasksNav.IsPlaceholder);
+        Assert.Equal("tasks", tasksNav.PageKey);
 
         viewModel.SelectedNav = tasksNav;
         Assert.True(viewModel.IsTasksPageVisible);
-        Assert.False(viewModel.IsPlaceholderAreaVisible);
-        Assert.False(viewModel.IsGenericPlaceholderVisible);
         Assert.False(viewModel.IsHomeVisible);
+        Assert.False(viewModel.IsAdvancedPageVisible);
+        Assert.False(viewModel.IsWolPageVisible);
+        Assert.False(viewModel.IsLogsPageVisible);
+        Assert.False(viewModel.IsSettingsPageVisible);
+        Assert.False(viewModel.IsAboutPageVisible);
     }
 
     // ---- 夹具 ----

@@ -51,7 +51,9 @@ public sealed class S11UiSourceContractTests
             }
 
             Assert.DoesNotContain("shutdown.exe", content);
-            if (name == "OfficeSaveHelperLauncher.cs")
+            // Process.Start 仅允许出现在两个受控点：OfficeSaveHelperLauncher（辅助进程唯一启动网关）
+            // 与 ShellOpenService（S-UI1 打开日志目录/定位截图文件的用户显式操作，失败一律吞掉）。
+            if (name is "OfficeSaveHelperLauncher.cs" or "ShellOpenService.cs")
             {
                 Assert.Contains("Process.Start", content);
             }
@@ -89,19 +91,25 @@ public sealed class S11UiSourceContractTests
         Assert.DoesNotContain("Hibernate", source);
     }
 
-    // ---- 5. 导航 7 项 + 占位说明 ----
+    // ---- 5. 导航 7 项全部为真实页面（不再有占位） ----
 
     [Fact]
-    public void Navigation_HasSevenEntries_AndPlaceholderText()
+    public void Navigation_HasSevenEntries_AndNoPlaceholderText()
     {
         var viewModel = ReadAppFile("Presentation", "MainWindowViewModel.cs");
         foreach (var title in new[] { "首页", "任务管理", "高级功能", "网络唤醒", "日志与诊断", "软件设置", "关于软件" })
         {
-            Assert.Contains(title, viewModel);
+            Assert.Contains($"new NavItem(\"{title}\"", viewModel);
         }
 
         var window = ReadAppFile("MainWindow.xaml");
-        Assert.Contains("该功能将在后台能力通过测试后开放", window);
+        // 占位文案、硬编码旧版本号、占位可见性必须彻底移除
+        Assert.DoesNotContain("该功能将在后台能力通过测试后开放", window);
+        Assert.DoesNotContain("v1.0.0 测试版", window);
+        Assert.DoesNotContain("IsPlaceholderAreaVisible", window);
+        // 每个页面都由可滚动 ScrollViewer 承载；时间模式/电源动作为 WrapPanel（自适应换行，不裁切）
+        Assert.Contains("ScrollViewer VerticalScrollBarVisibility=\"Auto\"", window);
+        Assert.Contains("WrapPanel", window);
     }
 
     // ---- 6 / 15. 无立即执行 ----

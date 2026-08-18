@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Threading;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
+using AutoShutdown.App.Infrastructure.Diagnostics;
 using AutoShutdown.App.Infrastructure.CloseApps;
 using AutoShutdown.App.Infrastructure.Commands;
 using AutoShutdown.App.Infrastructure.Idle;
@@ -314,6 +315,24 @@ public static class ServiceRegistration
                 provider.GetRequiredService<IRegistryRunKeyStore>(),
                 () => Environment.ProcessPath));
 
+        services.AddSingleton<IShellOpenService, ShellOpenService>();
+        services.AddSingleton<IWindowScreenshotService>(provider => new WindowScreenshotService(
+            provider.GetRequiredService<IApplicationLogger>(),
+            provider.GetRequiredService<IShellOpenService>(),
+            () => System.Windows.Application.Current?.MainWindow));
+        services.AddSingleton<SafetySelfCheckRunner>();
+        services.AddSingleton<DiagnosticsPackageExporter>();
+        services.AddSingleton<DiagnosticsCenterViewModel>(provider => new DiagnosticsCenterViewModel(
+            provider.GetRequiredService<IApplicationLogger>(),
+            provider.GetRequiredService<IShellOpenService>(),
+            provider.GetRequiredService<SafetySelfCheckRunner>(),
+            provider.GetRequiredService<DiagnosticsPackageExporter>(),
+            provider.GetRequiredService<IWindowScreenshotService>(),
+            provider.GetRequiredService<IClock>(),
+            () => System.Windows.Application.Current?.MainWindow,
+            () => Infrastructure.DataRootResolver.Resolve(),
+            () => provider.GetRequiredService<MainWindowViewModel>().BuildDiagnosticsLiveSummary()));
+
         services.AddSingleton<MainWindowViewModel>(provider =>
             new MainWindowViewModel(
                 provider.GetRequiredService<ISchedulerEngine>(),
@@ -325,7 +344,8 @@ public static class ServiceRegistration
                 wolTargetsSection: provider.GetRequiredService<WolTargetsSectionViewModel>(),
                 rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>(),
                 taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>(),
-                remoteSection: provider.GetRequiredService<RemoteSectionViewModel>()));
+                remoteSection: provider.GetRequiredService<RemoteSectionViewModel>(),
+                diagnosticsCenter: provider.GetRequiredService<DiagnosticsCenterViewModel>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

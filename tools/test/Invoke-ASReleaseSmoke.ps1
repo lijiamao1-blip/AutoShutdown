@@ -110,6 +110,41 @@ function Get-NavListItem($win, [string]$needle) {
     return $null
 }
 
+# ---------- 有界 UI 就绪等待（B-4 稳定性修复：替换固定 Start-Sleep，超时带诊断，不无限等/不静默重试） ----------
+function Get-UiReadiness($win) {
+    $all = Get-AllNames $win
+    $details = @{
+        HeaderSettings = Find-DescendantLike $win '设置' 'Button'          # 顶栏「⚙ 设置」按钮（外壳恒定元素）
+        NavAbout       = Find-DescendantLike $win 'PageKey = about' 'ListItem'     # 左侧导航项（NavItem 记录 ToString 含 PageKey）
+        NavSettings    = Find-DescendantLike $win 'PageKey = settings' 'ListItem'
+        DescendantCount = $all.Count
+        SampleNames     = ($all | Select-Object -First 10) -join ' | '
+    }
+    return $details
+}
+function Wait-UiReady($win, [int]$timeoutSeconds = 40) {
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    $details = $null
+    while ((Get-Date) -lt $deadline) {
+        $details = Get-UiReadiness $win
+        if ($details.HeaderSettings -and $details.NavAbout -and $details.NavSettings) {
+            return @{ Ready = $true; Details = $details }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    return @{ Ready = $false; Details = $details }
+}
+function Wait-UiElement($win, [string]$name, [int]$timeoutSeconds = 10) {
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not $win) { return $null }
+        $el = Find-Descendant $win $name
+        if ($el) { return $el }
+        Start-Sleep -Milliseconds 300
+    }
+    return $null
+}
+
 # ---------- app launch / stop helpers ----------
 function Start-ReleaseApp([string]$dataRoot, [string]$exePath = $releaseExe) {
     New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
@@ -133,7 +168,15 @@ function Start-ReleaseApp([string]$dataRoot, [string]$exePath = $releaseExe) {
         $win = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
             [System.Windows.Automation.TreeScope]::Children, $tc)
     }
-    Start-Sleep -Seconds 3
+    # 有界、可诊断的 UI 就绪等待：轮询「外壳元素」（导航项 + 顶栏按钮，与配置状态无关）出现，
+    # 替代固定 Start-Sleep -Seconds 3；超时返回诊断（已发现元素数量/样本），不得无限等待或静默重试。
+    $ready = Wait-UiReady $win
+    if (-not $ready.Ready) {
+        $d = $ready.Details
+        $reason = ("UI-not-ready: descendants={0} header={1} navAbout={2} navSettings={3} sample=[{4}]" -f
+            $d.DescendantCount, $d.HeaderSettings, $d.NavAbout, $d.NavSettings, $d.SampleNames)
+        return @{ Proc = $proc; Win = $win; Reason = $reason }
+    }
     return @{ Proc = $proc; Win = $win; Reason = 'ok' }
 }
 function Stop-ReleaseApp($proc) {
@@ -201,12 +244,17 @@ if ($launch.Win) {
         try { $invoke = $initBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern) } catch { }
         if ($invoke) {
             $invoke.Invoke()
-            Start-Sleep -Seconds 3
-            Assert-True 'init: 安全测试模式 header' ($null -ne (Find-Descendant $win '安全测试模式'))
+            # 有界等待初始化完成（顶栏切到「安全测试模式」）；config.json 写入比 UI 更新稍晚，单独有界轮询。
+            $initHeader = Wait-UiElement $win '安全测试模式' 12
+            Assert-True 'init: 安全测试模式 header' ($null -ne $initHeader)
             Assert-True 'init: 服务运行中' ($null -ne (Find-Descendant $win '服务运行中'))
             Assert-True 'init: 配置状态卡' ($null -ne (Find-Descendant $win '配置状态'))
             Assert-True 'init: 安全有效' ($null -ne (Find-Descendant $win '安全有效'))
             $cfg = $null
+            $cfgDeadline = (Get-Date).AddSeconds(8)
+            while ((Get-Date) -lt $cfgDeadline -and -not (Test-Path -LiteralPath (Join-Path $dataA 'config.json'))) {
+                Start-Sleep -Milliseconds 300
+            }
             if (Test-Path -LiteralPath (Join-Path $dataA 'config.json')) {
                 $cfg = Get-Content -LiteralPath (Join-Path $dataA 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             }
@@ -233,8 +281,8 @@ if ($launch.Win) {
             Assert-True 'settings nav item present' ($null -ne $navSettings)
             if ($navSettings) {
                 try { $navSettings.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() } catch { }
-                Start-Sleep -Seconds 2
-                Assert-True 'remote: 局域网远程控制 card' ($null -ne (Find-Descendant $win '局域网远程控制'))
+                $remoteCard = Wait-UiElement $win '局域网远程控制' 10
+                Assert-True 'remote: 局域网远程控制 card' ($null -ne $remoteCard)
                 Assert-True 'remote: 启用远程控制(默认关)' ((Get-CheckBoxToggle $win '启用远程控制') -eq 'Off')
                 Assert-True 'remote: 强制 TLS(默认开)' ((Get-CheckBoxToggle $win '强制 TLS') -eq 'On')
                 Assert-True 'remote: 白名单-查询状态(只读默认开)' ((Get-CheckBoxToggle $win '允许查询状态') -eq 'On')

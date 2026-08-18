@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
+using AutoShutdown.App.Infrastructure.Diagnostics;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
@@ -37,7 +38,7 @@ public enum TimeMode
     Idle = 7
 }
 
-public sealed record NavItem(string Title, string Icon, string PageKey, bool IsPlaceholder);
+public sealed record NavItem(string Title, string Icon, string PageKey);
 
 public sealed record RecentActivityItem(string Time, string Text);
 
@@ -81,6 +82,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly RtcStatusSectionViewModel? _rtcStatusSection;
     private readonly TaskSyncSectionViewModel? _taskSyncSection;
     private readonly RemoteSectionViewModel? _remoteSection;
+    private readonly DiagnosticsCenterViewModel? _diagnosticsCenter;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -113,7 +115,8 @@ public sealed class MainWindowViewModel : ObservableObject
         WolTargetsSectionViewModel? wolTargetsSection = null,
         RtcStatusSectionViewModel? rtcStatusSection = null,
         TaskSyncSectionViewModel? taskSyncSection = null,
-        RemoteSectionViewModel? remoteSection = null)
+        RemoteSectionViewModel? remoteSection = null,
+        DiagnosticsCenterViewModel? diagnosticsCenter = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -138,16 +141,17 @@ public sealed class MainWindowViewModel : ObservableObject
         _rtcStatusSection = rtcStatusSection;
         _taskSyncSection = taskSyncSection;
         _remoteSection = remoteSection;
+        _diagnosticsCenter = diagnosticsCenter;
 
         NavItems =
         [
-            new NavItem("首页", "⌂", "home", false),
-            new NavItem("任务管理", "▤", "tasks", false),
-            new NavItem("高级功能", "◈", "advanced", true),
-            new NavItem("网络唤醒", "⇪", "wol", true),
-            new NavItem("日志与诊断", "▤", "logs", true),
-            new NavItem("软件设置", "⚙", "settings", false),
-            new NavItem("关于软件", "ℹ", "about", true)
+            new NavItem("首页", "⌂", "home"),
+            new NavItem("任务管理", "▤", "tasks"),
+            new NavItem("高级功能", "◈", "advanced"),
+            new NavItem("网络唤醒", "⇪", "wol"),
+            new NavItem("日志与诊断", "▤", "logs"),
+            new NavItem("软件设置", "⚙", "settings"),
+            new NavItem("关于软件", "ℹ", "about")
         ];
         _selectedNav = NavItems[0];
 
@@ -213,14 +217,12 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _selectedNav, value))
             {
                 OnPropertyChanged(nameof(IsHomeVisible));
-                OnPropertyChanged(nameof(IsPlaceholderVisible));
-                OnPropertyChanged(nameof(IsPlaceholderAreaVisible));
-                OnPropertyChanged(nameof(PlaceholderTitle));
-                OnPropertyChanged(nameof(IsTaskSummaryVisible));
+                OnPropertyChanged(nameof(IsTasksPageVisible));
+                OnPropertyChanged(nameof(IsAdvancedPageVisible));
+                OnPropertyChanged(nameof(IsWolPageVisible));
                 OnPropertyChanged(nameof(IsLogsPageVisible));
                 OnPropertyChanged(nameof(IsSettingsPageVisible));
-                OnPropertyChanged(nameof(IsTasksPageVisible));
-                OnPropertyChanged(nameof(IsGenericPlaceholderVisible));
+                OnPropertyChanged(nameof(IsAboutPageVisible));
             }
         }
     }
@@ -243,27 +245,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public bool IsHomeVisible => SelectedNav.PageKey == "home";
 
-    public bool IsPlaceholderVisible => !IsHomeVisible;
+    public bool IsTasksPageVisible => SelectedNav.PageKey == "tasks";
 
-    public string PlaceholderTitle => SelectedNav.Title;
+    public bool IsAdvancedPageVisible => SelectedNav.PageKey == "advanced";
 
-    public bool IsTaskSummaryVisible => SelectedNav.PageKey == "tasks";
+    public bool IsWolPageVisible => SelectedNav.PageKey == "wol";
 
     public bool IsLogsPageVisible => SelectedNav.PageKey == "logs";
 
     public bool IsSettingsPageVisible => SelectedNav.PageKey == "settings";
 
-    public bool IsTasksPageVisible => SelectedNav.PageKey == "tasks";
-
-    /// <summary>占位区（日志页/设置页/普通占位页）；任务管理页拥有真实页面，不进入占位区。</summary>
-    public bool IsPlaceholderAreaVisible => IsPlaceholderVisible && !IsTasksPageVisible;
-
-    /// <summary>普通占位页：非首页、非日志页、非设置页、非任务管理页时才显示。</summary>
-    public bool IsGenericPlaceholderVisible
-        => IsPlaceholderVisible
-            && !IsLogsPageVisible
-            && !IsSettingsPageVisible
-            && !IsTasksPageVisible;
+    public bool IsAboutPageVisible => SelectedNav.PageKey == "about";
 
     public string LogDirectory => _logger.LogDirectory;
 
@@ -799,6 +791,76 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>局域网远程控制分区（设置页；S23）。</summary>
     public RemoteSectionViewModel? RemoteSection => _remoteSection;
 
+    /// <summary>日志与诊断中心（S-UI1）。</summary>
+    public DiagnosticsCenterViewModel? DiagnosticsCenter => _diagnosticsCenter;
+
+    /// <summary>
+    /// 从当前 VM 状态汇总诊断快照（供诊断中心的自检/导出使用）。只读，不触发任何副作用；
+    /// 隐私字段是否包含由导出层依据 <see cref="DiagnosticsCenterViewModel.IncludePrivacyInfo"/> 决定，
+    /// 这里始终回传原始值，PIN 值永不进入快照。
+    /// </summary>
+    public DiagnosticsLiveSummary BuildDiagnosticsLiveSummary()
+    {
+        var tasks = TaskItems
+            .Select(t => new DiagnosticsTaskRow(
+                KindText: t.TriggerText,
+                ActionText: t.ActionText,
+                FireTimeText: t.FireTimeText,
+                StateText: t.StateText,
+                ExtraText: t.CountdownText))
+            .ToList();
+
+        var wolTargets = (_wolTargetsSection?.Targets ?? [])
+            .Select(t => new DiagnosticsWolTargetRow(
+                Name: t.Name,
+                Mac: t.Mac,
+                BroadcastText: t.BroadcastText ?? string.Empty,
+                PortText: t.Port?.ToString() ?? string.Empty))
+            .ToList();
+
+        var remoteDevices = (_remoteSection?.Devices ?? Array.Empty<RemoteDeviceRow>())
+            .Select(d => new DiagnosticsPairedDevice(
+                Name: d.DeviceName,
+                DeviceId: d.DeviceId,
+                PairedAtText: d.PairedAtText))
+            .ToList();
+
+        var pinPresence = _remoteSection is null
+            ? "无"
+            : _remoteSection.IsLocked
+                ? "锁定中"
+                : string.IsNullOrWhiteSpace(_remoteSection.PinDisplay)
+                    ? "无"
+                    : "已生成（值不导出）";
+
+        var listenPort = _remoteSection is not null
+            && int.TryParse(_remoteSection.ListenPortText, out var parsedPort)
+            ? parsedPort
+            : (int?)null;
+
+        return new DiagnosticsLiveSummary(
+            VersionText: VersionText,
+            BuildCommitText: AppInfo.BuildCommitText,
+            SigningStatusText: AppInfo.SigningStatusText,
+            HeaderModeText: HeaderModeText,
+            ConfigStatusText: ConfigStatusText,
+            ConfigUsable: !IsConfigInitVisible,
+            SchedulerStatusText: SchedulerStatusText,
+            DataRoot: Infrastructure.DataRootResolver.Resolve(),
+            LogDirectory: _logger.LogDirectory,
+            Tasks: tasks,
+            WolTargets: wolTargets,
+            TaskSyncHealthy: _taskSyncSection is null || !_taskSyncSection.HasError,
+            TaskSyncStatusText: _taskSyncSection?.StatusText ?? string.Empty,
+            TaskSyncDetailText: _taskSyncSection?.DetailText ?? string.Empty,
+            RemoteEnabled: _remoteSection?.Enabled ?? false,
+            RemoteListenAddress: _remoteSection?.ListenAddress ?? string.Empty,
+            RemoteListenPort: listenPort,
+            RemoteRequireTls: _remoteSection?.RequireTls ?? false,
+            RemotePinPresenceText: pinPresence,
+            RemoteDevices: remoteDevices);
+    }
+
     public IReadOnlyList<string> ReminderOptions { get; } = ["不提醒", "提前 1 分钟", "提前 5 分钟", "提前 10 分钟", "提前 30 分钟"];
 
     private int _reminderIndex = 3;
@@ -1054,6 +1116,34 @@ public sealed class MainWindowViewModel : ObservableObject
             return version.StartsWith('v') ? version : "v" + version;
         }
     }
+
+    // ---- 关于软件（S-UI1）----
+
+    /// <summary>产品名。</summary>
+    public string ProductNameText => AppInfo.ProductName;
+
+    /// <summary>构建提交（InformationalVersion 中 + 之后的部分）。</summary>
+    public string BuildCommitText => AppInfo.BuildCommitText;
+
+    /// <summary>候选包签名状态（运行时 Authenticode 探测，如实标示 unsigned-candidate）。</summary>
+    public string SigningStatusText => AppInfo.SigningStatusText;
+
+    /// <summary>数据目录（AUTOSHUTDOWN_DATA_ROOT 覆盖或默认 %LocalAppData%\AutoShutdown）。</summary>
+    public string DataDirectoryText => AppInfo.DataDirectory;
+
+    /// <summary>关于页：隐私与安全边界说明（静态文案）。</summary>
+    public const string PrivacyBoundaryText =
+        "· 全部数据（配置、任务、日志、WoL 目标、远程配对）只保存在本机数据目录，绝不上传任何服务器。\n"
+        + "· 远程控制默认关闭且默认只读；即使启用也只监听你配置的地址与端口，并强制 TLS。\n"
+        + "· 诊断包仅在你在「日志与诊断」页主动导出时生成，且默认脱敏（PIN/密钥/私钥/PFX 密码绝不带出）。\n"
+        + "· 截图仅在你在「日志与诊断」页主动保存当前窗口时写入你选择的路径，无自动上传、无远程桌面、无后台外传。\n"
+        + "· 真实电源操作仅在你关闭测试模式且显式开启后才会执行（双闸门）；默认全程安全测试模式隔离。";
+
+    /// <summary>关于页：帮助与反馈说明（静态文案）。</summary>
+    public const string HelpFeedbackText =
+        "· 使用问题：先查看「日志与诊断」页的日志目录与安全自检；诊断包可在需要时主动导出。\n"
+        + "· 任务计划同步/远程控制的已知限制与风险见「高级功能」「软件设置」各卡片说明。\n"
+        + "· 反馈请随附版本号（见本页「版本」）与诊断摘要；候选包未签名，首次运行可能触发 SmartScreen，属预期。";
 
     private string _configInitErrorText = string.Empty;
 
@@ -1683,8 +1773,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public string CloseAppsStatusText
     {
         get => _closeAppsStatusText;
-        private set => SetProperty(ref _closeAppsStatusText, value);
+        private set
+        {
+            if (SetProperty(ref _closeAppsStatusText, value))
+            {
+                OnPropertyChanged(nameof(HasCloseAppsStatus));
+            }
+        }
     }
+
+    public bool HasCloseAppsStatus => !string.IsNullOrEmpty(_closeAppsStatusText);
 
     private string _closeAppsErrorText = string.Empty;
 
