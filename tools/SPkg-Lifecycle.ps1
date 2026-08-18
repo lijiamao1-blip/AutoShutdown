@@ -159,6 +159,41 @@ function Assert-ASFullChainSafe {
     }
 }
 
+# ---- D4：候选目录整树预检（候选根 + 任意子目录/文件含 junction/symlink/reparse point 即拒绝） ----
+# 在任何备份槽创建、删除旧 appFiles、删除 owner marker、创建安装目录或复制候选文件之前，
+# 对候选树做完整预检。复用现有原语：候选根至卷根全祖先链（Test-ASFullChainSafe）+
+# 整树不跟随安全枚举（Get-ASDirTreeSafe，其内部已含 base 全祖先链 + base 自身 + 整树
+# 子节点 reparse 探测）。预检失败即返回失败，破坏性步骤一字节不执行（防半安装/备份残留）。
+# 返回 [pscustomobject]@{ Ok; ReparsePath; Message }。
+function Test-ASCandidateTreeSafe {
+    param([Parameter(Mandatory = $true)][string]$CandidateDir)
+    $candFull = Resolve-ASPath $CandidateDir
+    if (-not (Test-Path -LiteralPath $candFull)) {
+        return [pscustomobject]@{ Ok = $false; ReparsePath = $null; Message = "candidate dir not found: $candFull" }
+    }
+    $chain = Test-ASFullChainSafe -Path $candFull
+    if (-not $chain.Ok) {
+        return [pscustomobject]@{ Ok = $false; ReparsePath = $chain.ReparsePath; Message = "candidate ancestor chain unsafe at '$($chain.ReparsePath)'" }
+    }
+    $tree = Get-ASDirTreeSafe -BaseDir $candFull
+    if (-not $tree.Ok) {
+        return [pscustomobject]@{ Ok = $false; ReparsePath = $tree.ReparsePath; Message = "reparse point in candidate tree at '$($tree.ReparsePath)'" }
+    }
+    return [pscustomobject]@{ Ok = $true; ReparsePath = $null; Message = "candidate tree has no reparse point: $candFull" }
+}
+
+# ---- D4：候选整树预检断言（命中即抛错 fail-closed；必须在任何破坏性步骤之前调用） ----
+function Assert-ASCandidateTreeSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidateDir,
+        [string]$Action = 'use candidate'
+    )
+    $c = Test-ASCandidateTreeSafe -CandidateDir $CandidateDir
+    if (-not $c.Ok) {
+        throw "refusing to ${Action}: $($c.Message)"
+    }
+}
+
 # ---- D2：统一的「路径在根目录内 + 全链路无 ReparsePoint」校验 ----
 # 仅字符串/FullPath 前缀与 `..` 过滤不足：已拥有根目录内的 NTFS junction/symlink 会被
 # 文件系统透明跟随，使删除/复制/备份作用于根目录之外。这里先做逐分量包含校验（非仅前缀），
@@ -701,6 +736,10 @@ function Replace-ASBinary {
     }
     # D3：候选目录至卷根的祖先链必须无 reparse point（含祖先 junction）。
     Assert-ASFullChainSafe -Path $candFull -Action 'use candidate dir'
+    # D4：候选整树预检必须前置——任何备份槽创建、删除旧 appFiles、删除 owner marker、
+    #     创建安装目录或复制候选文件之前，候选根 + 任意子目录/文件含 reparse 即拒绝，
+    #     避免复制期才拒绝造成备份槽残留/半安装。
+    Assert-ASCandidateTreeSafe -CandidateDir $candFull -Action 'replace binary'
 
     # 0) 所有权门禁（fail-closed）：非空既有目录必须有绑定本绝对路径的有效所有权标记；
     #    危险路径（文件系统根/用户主目录/工作区/artifacts）一律拒绝。
@@ -1098,6 +1137,10 @@ function Invoke-ASReinstall {
     }
     # D3：候选目录至卷根的祖先链必须无 reparse point（含祖先 junction）。
     Assert-ASFullChainSafe -Path $candFull -Action 'use candidate dir'
+    # D4：候选整树预检必须前置——任何删除旧 appFiles、删除 owner marker、创建安装目录
+    #     或复制候选文件之前，候选根 + 任意子目录/文件含 reparse 即拒绝，避免先删后复制
+    #     期才拒绝造成半安装。
+    Assert-ASCandidateTreeSafe -CandidateDir $candFull -Action 'reinstall from candidate'
 
     $ownership = Test-ASInstallOwnership -InstallDir $installFull
     if (-not $ownership.Ok) { throw "refusing to modify install dir: $($ownership.Message)" }
