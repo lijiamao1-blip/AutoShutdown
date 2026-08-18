@@ -48,6 +48,19 @@ param(
 #  - 遇到安装目录、候选目录、备份目录或其子路径中的 junction/symlink/reparse point：
 #    在任何复制、删除、写入前拒绝，且不触碰目录外内容。
 #
+# D3 父链 junction 越界加固（最小返修，SPkg-Lifecycle 生命周期路径）：
+#  - D2 只检查传入根向下的路径，未检查卷根→根的祖先链。D3 新增 Test-ASFullChainSafe /
+#    Assert-ASFullChainSafe：对任意 InstallDir/CandidateDir/DataRoot/BackupDir 及其操作目标，
+#    从卷根开始逐分量检查到目标（保留调用者传入的词法路径，绝不先解析为物理目标——否则
+#    junction 被透明解析后会掩盖自身）；任何现存祖先分量是 junction/symlink/reparse point
+#    一律 fail-closed；对不存在的目标检查到最后一个已存在祖先目录（该祖先若是 reparse
+#    point 必须拒绝）。
+#  - 全部破坏性/递归路径接入：所有权门禁、清单删除、空目录清理、候选复制、安装备份、
+#    回滚恢复、DataRoot 备份/恢复/删除（经 Test-ASPathWithinRoot / Get-ASDirTreeSafe /
+#    Get-ASRelPathReparsePoint 内部升级 + 各入口显式 Assert-ASFullChainSafe）。
+#  - 不先解析为物理目标：所有探测基于 Resolve-ASPath（Path.GetFullPath，纯词法），
+#    每个分量用 Get-Item -LiteralPath 探测 reparse 属性，命中即在跟随前拒绝。
+#
 # 使用：
 #   . ./SPkg-Lifecycle.ps1            # 点源加载函数
 #   ./SPkg-Lifecycle.ps1 -Command backup -DataRoot <dir> [-Tag <tag>]
@@ -88,8 +101,12 @@ function Test-ASForbiddenPath {
     param([Parameter(Mandatory = $true)][string]$Path)
     $full = Resolve-ASPath $Path
     if ($full -eq ([System.IO.Path]::GetPathRoot($full))) { return $true }
-    $userHome = Resolve-ASPath ([Environment]::GetFolderPath('UserProfile'))
-    if ($full -eq $userHome) { return $true }
+    # UserProfile 为空（非交互/服务环境）时跳过用户主目录比较，避免 GetFullPath('') 异常中断。
+    $userProfile = [Environment]::GetFolderPath('UserProfile')
+    if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
+        $userHome = Resolve-ASPath $userProfile
+        if ($full -eq $userHome) { return $true }
+    }
     $sysRoot = Resolve-ASPath $env:SystemRoot
     if ($full -eq $sysRoot) { return $true }
     $repoRoot = Resolve-ASPath (Split-Path -Parent $PSScriptRoot)
@@ -98,6 +115,48 @@ function Test-ASForbiddenPath {
     if ($full -eq $artifacts) { return $true }
     if ($full.StartsWith($artifacts + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     return $false
+}
+
+# ---- D3：统一绝对路径祖先链守卫（卷根→目标全链路无 ReparsePoint） ----
+# 对任意目标路径，从卷根开始逐分量探测到目标。必须基于调用者传入的词法路径
+# （Resolve-ASPath / Path.GetFullPath 为纯词法规范化，不跟随 junction；绝不先解析为物理
+# 目标——否则 junction 被透明解析后会掩盖自身）。分量不存在即停止：此时已检查到最后一个
+# 已存在祖先目录（该祖先若是 reparse point，会在探测到该分量时返回失败）。
+# 返回 [pscustomobject]@{ Ok; Reason; Message; ReparsePath }。
+function Test-ASFullChainSafe {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = Resolve-ASPath $Path
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'no-root'; Message = "cannot determine volume root for '$full'"; ReparsePath = $null }
+    }
+    $probe = $root
+    $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in ancestor chain: $probe"; ReparsePath = $probe }
+    }
+    $rel = $full.Substring($root.Length).TrimStart('\', '/')
+    foreach ($p in @($rel -split '[\\/]' | Where-Object { $_ })) {
+        $probe = Join-Path $probe $p
+        $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { break }
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in ancestor chain: $probe"; ReparsePath = $probe }
+        }
+    }
+    return [pscustomobject]@{ Ok = $true; Reason = 'ok'; Message = "full chain from volume root has no reparse point: $full"; ReparsePath = $null }
+}
+
+# ---- D3：绝对路径祖先链断言（命中 reparse 即抛错 fail-closed） ----
+function Assert-ASFullChainSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$Action = 'operate'
+    )
+    $chain = Test-ASFullChainSafe -Path $Path
+    if (-not $chain.Ok) {
+        throw "refusing to ${Action}: reparse point in ancestor chain of '$Path' at '$($chain.ReparsePath)'"
+    }
 }
 
 # ---- D2：统一的「路径在根目录内 + 全链路无 ReparsePoint」校验 ----
@@ -128,19 +187,11 @@ function Test-ASPathWithinRoot {
             return [pscustomobject]@{ Ok = $false; Reason = 'not-within-root'; Message = "path '$full' outside root '$rootFull' (segment '$($fullParts[$i])')"; ReparsePath = $null }
         }
     }
-    # 2) 逐分量（根→目标）ReparsePoint 探测；目标缺失视为安全（其后无内容可跟随）
-    $probe = $rootFull
-    $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-    if ($null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in chain: $probe"; ReparsePath = $probe }
-    }
-    for ($i = $rootParts.Count; $i -lt $fullParts.Count; $i++) {
-        $probe = Join-Path $probe $fullParts[$i]
-        $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-        if ($null -eq $item) { break }
-        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in chain: $probe"; ReparsePath = $probe }
-        }
+    # 2) D3：全链路（卷根→目标）逐分量 ReparsePoint 探测；保留词法路径，目标缺失
+    #    检查到最后一个已存在祖先（该祖先若是 reparse point 即拒绝）。
+    $chain = Test-ASFullChainSafe -Path $full
+    if (-not $chain.Ok) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = $chain.Message; ReparsePath = $chain.ReparsePath }
     }
     return [pscustomobject]@{ Ok = $true; Reason = 'ok'; Message = "path within root with no reparse point: $full"; ReparsePath = $null }
 }
@@ -154,6 +205,9 @@ function Get-ASRelPathReparsePoint {
         [Parameter(Mandatory = $false)][string]$RelativePath = ''
     )
     $base = Resolve-ASPath $BaseDir
+    # D3：base 自身至卷根的祖先链必须无 reparse point（否则其下一切写入/删除被透明跟随）。
+    $baseChain = Test-ASFullChainSafe -Path $base
+    if (-not $baseChain.Ok) { return $baseChain.ReparsePath }
     $rel = [string]$RelativePath
     if ([string]::IsNullOrWhiteSpace($rel)) { return $null }
     if ([System.IO.Path]::IsPathRooted($rel)) { return 'TRAVERSAL' }
@@ -194,6 +248,11 @@ function Get-ASDirTreeSafe {
     $base = Resolve-ASPath $BaseDir
     $files = [System.Collections.Generic.List[string]]::new()
     $dirs = [System.Collections.Generic.List[string]]::new()
+    # D3：base 自身至卷根的祖先链必须无 reparse point（否则递归枚举/删除被透明跟随）。
+    $chain = Test-ASFullChainSafe -Path $base
+    if (-not $chain.Ok) {
+        return [pscustomobject]@{ Ok = $false; ReparsePath = $chain.ReparsePath; Files = @($files); Dirs = @($dirs) }
+    }
     if (-not (Test-Path -LiteralPath $base)) {
         return [pscustomobject]@{ Ok = $true; ReparsePath = $null; Files = @($files); Dirs = @($dirs) }
     }
@@ -321,6 +380,12 @@ function Write-ASOwnerMarker {
 function Test-ASInstallOwnership {
     param([Parameter(Mandatory = $true)][string]$InstallDir)
     $full = Resolve-ASPath $InstallDir
+    # D3：卷根→安装目录全链路无 reparse point（含祖先 junction；绝不允许经祖先 junction
+    # 操作目录外，也不允许「不存在目标」经祖先 junction 新建到目录外）。
+    $chain = Test-ASFullChainSafe -Path $full
+    if (-not $chain.Ok) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "install dir chain unsafe: $($chain.Message)"; Marker = $null }
+    }
     if (Test-ASForbiddenPath $full) {
         return [pscustomobject]@{ Ok = $false; Reason = 'forbidden'; Message = "protected location (filesystem root / user home / workspace / artifacts): $full"; Marker = $null }
     }
@@ -373,6 +438,8 @@ function Remove-ASOwnedFiles {
             throw "refusing to remove files: install dir is a reparse point: $base"
         }
     }
+    # D3：安装目录至卷根的祖先链必须无 reparse point（防御纵深）。
+    Assert-ASFullChainSafe -Path $base -Action 'remove owned files'
     foreach ($rel in $AppFiles) {
         if ([string]::IsNullOrWhiteSpace($rel)) { continue }
         if ($rel.IndexOf('..', [System.StringComparison]::Ordinal) -ge 0) { continue }
@@ -423,6 +490,10 @@ function Copy-ASDirContents {
     )
     $src = Resolve-ASPath $SourceDir
     $dst = Resolve-ASPath $DestinationDir
+    # D3：目标全链路（卷根→目标）无 reparse point（含祖先 junction；不存在的目标经祖先
+    # junction 新建也会被拒绝）。
+    $dstChain = Test-ASFullChainSafe -Path $dst
+    if (-not $dstChain.Ok) { throw "refusing to copy into '$dst': reparse point in ancestor chain at '$($dstChain.ReparsePath)'" }
     # D2：源树必须无 reparse point（不跟随的安全枚举；命中即 fail-closed，不读取目录外内容）。
     $tree = Get-ASDirTreeSafe -BaseDir $src
     if (-not $tree.Ok) { throw "refusing to copy from '$src': reparse point at '$($tree.ReparsePath)'" }
@@ -572,6 +643,9 @@ function Backup-ASDataRoot {
     $dataRoot = Get-ASDataRoot -Root $Root
     $dataRootFull = Resolve-ASPath $dataRoot
     if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to back up into a protected data root: $dataRootFull" }
+    # D3：数据根至卷根的祖先链必须无 reparse point（否则不存在的数据根会经祖先 junction
+    # 被新建到目录外；已存在数据根下的枚举/写入也会被透明跟随）。
+    Assert-ASFullChainSafe -Path $dataRootFull -Action 'back up data root'
     if (-not (Test-Path -LiteralPath $dataRootFull)) { New-Item -ItemType Directory -Force -Path $dataRootFull | Out-Null }
     # D2：DataRoot 备份前做不跟随 junction 的安全枚举；命中 reparse 即 fail-closed，不写入目录外。
     $tree = Get-ASDirTreeSafe -BaseDir $dataRootFull
@@ -616,6 +690,7 @@ function Replace-ASBinary {
     $dataRoot = Get-ASDataRoot -Root $Root
     $dataRootFull = Resolve-ASPath $dataRoot
     if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    Assert-ASFullChainSafe -Path $dataRootFull -Action 'use data root'
     $installFull = Resolve-ASPath $InstallDir
     $candFull = Resolve-ASPath $CandidateDir
     if (-not (Test-Path -LiteralPath $candFull)) { throw "candidate dir not found: $candFull" }
@@ -624,6 +699,8 @@ function Replace-ASBinary {
     if ($candItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         throw "refusing to use candidate dir: reparse point at $candFull"
     }
+    # D3：候选目录至卷根的祖先链必须无 reparse point（含祖先 junction）。
+    Assert-ASFullChainSafe -Path $candFull -Action 'use candidate dir'
 
     # 0) 所有权门禁（fail-closed）：非空既有目录必须有绑定本绝对路径的有效所有权标记；
     #    危险路径（文件系统根/用户主目录/工作区/artifacts）一律拒绝。
@@ -841,6 +918,8 @@ function Restore-ASRollback {
     $dataRoot = Get-ASDataRoot -Root $Root
     $dataRootFull = Resolve-ASPath $dataRoot
     if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    # D3：数据根至卷根的祖先链必须无 reparse point（恢复目标被透明跟随会写目录外）。
+    Assert-ASFullChainSafe -Path $dataRootFull -Action 'use data root'
     $installFull = Resolve-ASPath $InstallDir
 
     # 1) 恢复最近一次 spkg 备份的数据文件
@@ -952,6 +1031,8 @@ function Invoke-ASUninstall {
     $dataRoot = Get-ASDataRoot -Root $Root
     $dataRootFull = Resolve-ASPath $dataRoot
     if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to use a protected data root: $dataRootFull" }
+    # D3：数据根至卷根的祖先链必须无 reparse point（UserData=Remove 的备份删除被透明跟随会删目录外）。
+    Assert-ASFullChainSafe -Path $dataRootFull -Action 'use data root'
     $installFull = Resolve-ASPath $InstallDir
     $removed = @()
 
@@ -1015,6 +1096,8 @@ function Invoke-ASReinstall {
     if ($candItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         throw "refusing to use candidate dir: reparse point at $candFull"
     }
+    # D3：候选目录至卷根的祖先链必须无 reparse point（含祖先 junction）。
+    Assert-ASFullChainSafe -Path $candFull -Action 'use candidate dir'
 
     $ownership = Test-ASInstallOwnership -InstallDir $installFull
     if (-not $ownership.Ok) { throw "refusing to modify install dir: $($ownership.Message)" }
