@@ -1,0 +1,12 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  AutoShutdown.TestTreeHelper -> D:\电脑定时关机重建完整版\tests\AutoShutdown.TestTreeHelper\bin\Release\net8.0-windows\AutoShutdown.TestTreeHelper.dll
+  AutoShutdown.Core -> D:\电脑定时关机重建完整版\src\AutoShutdown.Core\bin\Release\net8.0\AutoShutdown.Core.dll
+  AutoShutdown.OfficeSaveHelper -> D:\电脑定时关机重建完整版\src\AutoShutdown.OfficeSaveHelper\bin\Release\net8.0-windows\AutoShutdown.OfficeSaveHelper.dll
+  AutoShutdown.App -> D:\电脑定时关机重建完整版\src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.dll
+  AutoShutdown.Tests -> D:\电脑定时关机重建完整版\tests\AutoShutdown.Tests\bin\Release\net8.0-windows\AutoShutdown.Tests.dll
+Test run for D:\电脑定时关机重建完整版\tests\AutoShutdown.Tests\bin\Release\net8.0-windows\AutoShutdown.Tests.dll (.NETCoreApp,Version=v8.0)
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    41, Skipped:     0, Total:    41, Duration: 242 ms - AutoShutdown.Tests.dll (net8.0)
