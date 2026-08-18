@@ -21,7 +21,7 @@ param(
 #    EXE 与配置（含 V1 EXE 恢复能力）。
 #  - 损坏 JSON 只分类、只标记，绝不静默回退为可能触发任务的默认值。
 #  - 本模块不触碰注册表、防火墙、Task Scheduler、自启或电源。系统集成在 B3 单独处理。
-#  - 所有写路径都限定在数据根或安装目录之内（Assert-AllowedPath）。
+#  - 所有写路径都限定在数据根或安装目录之内（D2 统一校验：路径在根目录内 + 全链路无 ReparsePoint）。
 #
 # D1 安装所有权与破坏性路径加固：
 #  - 新安装只允许进入「不存在的目录」或「空目录」；对已有非空目录的替换/回滚/卸载/重装
@@ -33,6 +33,20 @@ param(
 #    文件）；目录仅在为空时删除。绝不 Remove-Item <InstallDir> -Recurse 或枚举整目录全删。
 #  - DataRoot 同样受保护：UserData=Remove 只删除经本应用标记的 S-PKG 备份
 #    （backups\spkg\owner.json 绑定数据根），不因任意传入 DataRoot 删除其他数据。
+#
+# D2 junction/symlink/reparse-point 越界加固（最小返修，SPkg-Lifecycle 生命周期路径）：
+#  - 统一校验：路径必须在根目录内（逐分量包含，非仅字符串/FullPath 前缀）且从根到目标的
+#    完整链路逐分量无 ReparsePoint（junction/symlink）。仅字符串前缀与 `..` 过滤不足：
+#    已拥有安装目录内的 NTFS junction 会在删除/复制/备份时被文件系统透明跟随，导致操作
+#    作用于安装目录之外。
+#  - 所有破坏性或递归路径先过该校验（fail-closed）：所有权门禁 Test-ASInstallOwnership
+#    （安装目录自身 + 整树）、清单删除 Remove-ASOwnedFiles、空目录清理
+#    Remove-ASEmptyDirsUnder、候选复制 Copy-ASDirContents / 重装复制、安装备份
+#    Replace-ASBinary、回滚恢复 Restore-ASReplaceFailure / Restore-ASInstallBackup /
+#    Restore-ASRollback、DataRoot 备份/恢复 Backup-ASDataRoot / Restore-ASRollback /
+#    Invoke-ASUninstall（UserData=Remove）。
+#  - 遇到安装目录、候选目录、备份目录或其子路径中的 junction/symlink/reparse point：
+#    在任何复制、删除、写入前拒绝，且不触碰目录外内容。
 #
 # 使用：
 #   . ./SPkg-Lifecycle.ps1            # 点源加载函数
@@ -86,6 +100,123 @@ function Test-ASForbiddenPath {
     return $false
 }
 
+# ---- D2：统一的「路径在根目录内 + 全链路无 ReparsePoint」校验 ----
+# 仅字符串/FullPath 前缀与 `..` 过滤不足：已拥有根目录内的 NTFS junction/symlink 会被
+# 文件系统透明跟随，使删除/复制/备份作用于根目录之外。这里先做逐分量包含校验（非仅前缀），
+# 再从根逐分量探测 ReparsePoint（junction/symlink），命中即返回失败（调用方 fail-closed）。
+# 返回 [pscustomobject]@{ Ok; Reason; Message; ReparsePath }。
+function Test-ASPathWithinRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+    $rootFull = Resolve-ASPath $Root
+    $full = [System.IO.Path]::GetFullPath($Path)
+    # 1) 逐分量包含校验（GetFullPath 已解析 ..；此处杜绝 C:\data vs C:\dataevil 一类前缀误判）
+    $fullDrive = [System.IO.Path]::GetPathRoot($full)
+    $rootDrive = [System.IO.Path]::GetPathRoot($rootFull)
+    if (-not $fullDrive.Equals($rootDrive, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'not-within-root'; Message = "path '$full' not on same drive as root '$rootFull'"; ReparsePath = $null }
+    }
+    $rootParts = @(($rootFull.TrimEnd('\', '/')) -split '[\\/]' | Where-Object { $_ })
+    $fullParts = @(($full.TrimEnd('\', '/')) -split '[\\/]' | Where-Object { $_ })
+    if ($fullParts.Count -lt $rootParts.Count) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'not-within-root'; Message = "path '$full' is above root '$rootFull'"; ReparsePath = $null }
+    }
+    for ($i = 0; $i -lt $rootParts.Count; $i++) {
+        if (-not $fullParts[$i].Equals($rootParts[$i], [System.StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Ok = $false; Reason = 'not-within-root'; Message = "path '$full' outside root '$rootFull' (segment '$($fullParts[$i])')"; ReparsePath = $null }
+        }
+    }
+    # 2) 逐分量（根→目标）ReparsePoint 探测；目标缺失视为安全（其后无内容可跟随）
+    $probe = $rootFull
+    $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in chain: $probe"; ReparsePath = $probe }
+    }
+    for ($i = $rootParts.Count; $i -lt $fullParts.Count; $i++) {
+        $probe = Join-Path $probe $fullParts[$i]
+        $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { break }
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point in chain: $probe"; ReparsePath = $probe }
+        }
+    }
+    return [pscustomobject]@{ Ok = $true; Reason = 'ok'; Message = "path within root with no reparse point: $full"; ReparsePath = $null }
+}
+
+# ---- D2：相对路径（base→leaf）逐分量 ReparsePoint 探测 ----
+# 返回 $null = 安全；'TRAVERSAL' = 含 .. 或绝对路径；字符串 = 第一个 reparse point 的完整路径。
+# 不校验 BaseDir 自身（由调用方按其语义单独校验）。
+function Get-ASRelPathReparsePoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseDir,
+        [Parameter(Mandatory = $false)][string]$RelativePath = ''
+    )
+    $base = Resolve-ASPath $BaseDir
+    $rel = [string]$RelativePath
+    if ([string]::IsNullOrWhiteSpace($rel)) { return $null }
+    if ([System.IO.Path]::IsPathRooted($rel)) { return 'TRAVERSAL' }
+    $clean = @()
+    foreach ($p in @($rel -split '[\\/]')) {
+        if ([string]::IsNullOrWhiteSpace($p) -or $p -eq '.') { continue }
+        if ($p -eq '..') { return 'TRAVERSAL' }
+        $clean += $p
+    }
+    if ($clean.Count -eq 0) { return $null }
+    $probe = $base
+    foreach ($p in $clean) {
+        $probe = Join-Path $probe $p
+        $item = Get-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { return $null }
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $probe }
+    }
+    return $null
+}
+
+# ---- D2：相对路径链路断言（命中 reparse/越界即抛错 fail-closed） ----
+function Assert-ASRelPathSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseDir,
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [string]$Action = 'operate'
+    )
+    $rp = Get-ASRelPathReparsePoint -BaseDir $BaseDir -RelativePath $RelativePath
+    if ($rp -eq 'TRAVERSAL') { throw "refusing to $Action outside '$BaseDir' (path traversal in rel '$RelativePath')" }
+    if ($rp) { throw "refusing to $Action through reparse point at '$rp' (rel '$RelativePath')" }
+}
+
+# ---- D2：不跟随 junction/symlink 的安全递归枚举 ----
+# 逐层枚举（绝不下钻 reparse 点）；遇到 ReparsePoint 立即返回失败路径，调用方必须 fail-closed。
+# 返回 [pscustomobject]@{ Ok; ReparsePath; Files=@(绝对路径); Dirs=@(绝对路径) }。
+function Get-ASDirTreeSafe {
+    param([Parameter(Mandatory = $true)][string]$BaseDir)
+    $base = Resolve-ASPath $BaseDir
+    $files = [System.Collections.Generic.List[string]]::new()
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path -LiteralPath $base)) {
+        return [pscustomobject]@{ Ok = $true; ReparsePath = $null; Files = @($files); Dirs = @($dirs) }
+    }
+    $item = Get-Item -LiteralPath $base -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        return [pscustomobject]@{ Ok = $false; ReparsePath = $base; Files = @($files); Dirs = @($dirs) }
+    }
+    $stack = [System.Collections.Generic.Stack[string]]::new()
+    $stack.Push($base)
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        $children = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue)
+        foreach ($c in $children) {
+            if ($c.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                return [pscustomobject]@{ Ok = $false; ReparsePath = $c.FullName; Files = @($files); Dirs = @($dirs) }
+            }
+            if ($c.PSIsContainer) { $dirs.Add($c.FullName); $stack.Push($c.FullName) }
+            else { $files.Add($c.FullName) }
+        }
+    }
+    return [pscustomobject]@{ Ok = $true; ReparsePath = $null; Files = @($files); Dirs = @($dirs) }
+}
+
 # ---- 替换失败的内部回滚（仅在本函数刚创建的 rollback-install 槽上调用） ----
 # 有完整的 backup.json 绑定（sourceInstallDir==本路径）作证据；只删除所有权清单文件 +
 # 候选残留 + 标记文件，再按 complete/no-install 标记恢复或清理，绝不整目录删除。
@@ -107,9 +238,15 @@ function Restore-ASReplaceFailure {
     $deleteRel = @($deleteRel | Where-Object { $_ -and ($_ -ne $script:OwnerMarkerFile) } | Sort-Object -Unique)
     Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $deleteRel
     $markerPath = Join-Path $installFull $script:OwnerMarkerFile
-    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+    if (Test-Path -LiteralPath $markerPath) {
+        Assert-ASRelPathSafe -BaseDir $installFull -RelativePath $script:OwnerMarkerFile -Action 'remove ownership marker'
+        Remove-Item -LiteralPath $markerPath -Force
+    }
     $markerTmp = Join-Path $installFull ($script:OwnerMarkerFile + '.tmp')
-    if (Test-Path -LiteralPath $markerTmp) { Remove-Item -LiteralPath $markerTmp -Force }
+    if (Test-Path -LiteralPath $markerTmp) {
+        Assert-ASRelPathSafe -BaseDir $installFull -RelativePath ($script:OwnerMarkerFile + '.tmp') -Action 'remove ownership marker tmp'
+        Remove-Item -LiteralPath $markerTmp -Force
+    }
     if ($complete) {
         $saved = Join-Path $BackupDir (Split-Path -Leaf $installFull)
         if (Test-Path -LiteralPath $saved) {
@@ -134,8 +271,10 @@ function Get-ASRelFileList {
     $base = Resolve-ASPath $BaseDir
     $rel = @()
     if (Test-Path -LiteralPath $base) {
-        $rel = @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue |
-            ForEach-Object { $_.FullName.Substring($base.Length).TrimStart('\', '/') })
+        # D2：不跟随 junction 的安全枚举；命中 reparse 即抛错 fail-closed。
+        $tree = Get-ASDirTreeSafe -BaseDir $base
+        if (-not $tree.Ok) { throw "refusing to enumerate '$base': reparse point at '$($tree.ReparsePath)'" }
+        $rel = @($tree.Files | ForEach-Object { $_.Substring($base.Length).TrimStart('\', '/') })
     }
     return $rel
 }
@@ -188,6 +327,11 @@ function Test-ASInstallOwnership {
     if (-not (Test-Path -LiteralPath $full)) {
         return [pscustomobject]@{ Ok = $true; Reason = 'new'; Message = "install dir does not exist: $full"; Marker = $null }
     }
+    # D2：安装目录自身不得是 junction/symlink/reparse point（否则全部后续写入/删除会被透明跟随）。
+    $dirItem = Get-Item -LiteralPath $full -Force
+    if ($dirItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "install dir itself is a reparse point: $full"; Marker = $null }
+    }
     $entries = @(Get-ChildItem -LiteralPath $full -Force -ErrorAction SilentlyContinue)
     if ($entries.Count -eq 0) {
         return [pscustomobject]@{ Ok = $true; Reason = 'empty'; Message = "install dir is empty: $full"; Marker = $null }
@@ -205,6 +349,11 @@ function Test-ASInstallOwnership {
     if ([string]$marker.installDir -ne $full) {
         return [pscustomobject]@{ Ok = $false; Reason = 'path-mismatch'; Message = "install ownership marker bound to '$($marker.installDir)' but target is '$full'"; Marker = $marker }
     }
+    # D2：所有权有效仅当整树无 junction/symlink/reparse point（不跟随的安全枚举；命中即拒绝）。
+    $tree = Get-ASDirTreeSafe -BaseDir $full
+    if (-not $tree.Ok) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'reparse-point'; Message = "reparse point under install dir: $($tree.ReparsePath)"; Marker = $marker }
+    }
     return [pscustomobject]@{ Ok = $true; Reason = 'owned'; Message = "install dir owned: $full"; Marker = $marker }
 }
 
@@ -217,12 +366,27 @@ function Remove-ASOwnedFiles {
     $base = Resolve-ASPath $InstallDir
     $prefix = $base + [System.IO.Path]::DirectorySeparatorChar
     $markerPath = Join-Path $base $script:OwnerMarkerFile
+    # D2：根自身不得是 reparse point（防御纵深；调用方门禁已校验整树）。
+    if (Test-Path -LiteralPath $base) {
+        $baseItem = Get-Item -LiteralPath $base -Force
+        if ($baseItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "refusing to remove files: install dir is a reparse point: $base"
+        }
+    }
     foreach ($rel in $AppFiles) {
         if ([string]::IsNullOrWhiteSpace($rel)) { continue }
         if ($rel.IndexOf('..', [System.StringComparison]::Ordinal) -ge 0) { continue }
         $full = [System.IO.Path]::GetFullPath((Join-Path $base $rel))
         if (-not $full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($full -eq $markerPath) { continue }
+        # D2：统一「根内 + 全链路无 ReparsePoint」校验；命中 reparse 即 fail-closed（不触碰目录外）。
+        $within = Test-ASPathWithinRoot -Root $base -Path $full
+        if (-not $within.Ok) {
+            if ($within.Reason -eq 'reparse-point') {
+                throw "refusing to remove '$rel': reparse point at '$($within.ReparsePath)' under install dir '$base'"
+            }
+            continue
+        }
         if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Force }
     }
 }
@@ -232,13 +396,20 @@ function Remove-ASEmptyDirsUnder {
     param([Parameter(Mandatory = $true)][string]$InstallDir)
     $base = Resolve-ASPath $InstallDir
     if (-not (Test-Path -LiteralPath $base)) { return }
-    Get-ChildItem -LiteralPath $base -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-        Sort-Object { $_.FullName.Length } -Descending |
-        ForEach-Object {
-            if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) {
-                Remove-Item -LiteralPath $_.FullName -Force
-            }
+    # D2：不跟随 junction 的安全枚举；命中 reparse 即 fail-closed（绝不 Remove-Item 到 junction 目录）。
+    $tree = Get-ASDirTreeSafe -BaseDir $base
+    if (-not $tree.Ok) { throw "refusing to remove empty dirs: reparse point under '$base' at '$($tree.ReparsePath)'" }
+    $allDirs = @($tree.Dirs)
+    if ($allDirs.Count -eq 0) { return }
+    $allDirs | Sort-Object { $_.Length } -Descending | ForEach-Object {
+        $d = $_
+        if (-not (Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue)) {
+            # 二次链路校验（防御纵深：枚举后至删除前可能被替换为 junction）。
+            $rel = $d.Substring($base.Length).TrimStart('\', '/')
+            Assert-ASRelPathSafe -BaseDir $base -RelativePath $rel -Action 'remove empty dir'
+            Remove-Item -LiteralPath $d -Force
         }
+    }
 }
 
 # ---- 目录内容合并复制（逐文件、逐级）----
@@ -252,13 +423,25 @@ function Copy-ASDirContents {
     )
     $src = Resolve-ASPath $SourceDir
     $dst = Resolve-ASPath $DestinationDir
-    New-Item -ItemType Directory -Force -Path $dst | Out-Null
-    if (-not (Test-Path -LiteralPath $src)) { return }
-    Get-ChildItem -LiteralPath $src -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
-        $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+    # D2：源树必须无 reparse point（不跟随的安全枚举；命中即 fail-closed，不读取目录外内容）。
+    $tree = Get-ASDirTreeSafe -BaseDir $src
+    if (-not $tree.Ok) { throw "refusing to copy from '$src': reparse point at '$($tree.ReparsePath)'" }
+    # D2：目标自身不得已是 junction/symlink（存在时校验）；不存在时新建。
+    if (Test-Path -LiteralPath $dst) {
+        $dstItem = Get-Item -LiteralPath $dst -Force
+        if ($dstItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "refusing to copy into '$dst': destination is a reparse point"
+        }
+    } else {
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    }
+    foreach ($f in $tree.Files) {
+        $rel = $f.Substring($src.Length).TrimStart('\', '/')
         $dest = Join-Path $dst $rel
+        # D2：目标链路逐分量校验（已存在子目录可能是 junction，写入前拒绝）。
+        Assert-ASRelPathSafe -BaseDir $dst -RelativePath $rel -Action 'copy into'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-        Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+        Copy-Item -LiteralPath $f -Destination $dest -Force
     }
 }
 
@@ -292,6 +475,8 @@ function Ensure-ASSpkgBackupsRoot {
     param([Parameter(Mandatory = $true)][string]$DataRoot)
     $dataRootFull = Resolve-ASPath $DataRoot
     $backupRoot = Join-Path $dataRootFull 'backups\spkg'
+    # D2：backups\spkg 链路不得含 junction/symlink（否则 New-Item/写入会透明跟随到目录外）。
+    Assert-ASRelPathSafe -BaseDir $dataRootFull -RelativePath 'backups\spkg' -Action 'create backups root'
     New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
     $ownerPath = Join-Path $backupRoot $script:SpkgBackupsOwnerFile
     if (-not (Test-Path -LiteralPath $ownerPath)) {
@@ -309,6 +494,9 @@ function Test-ASSpkgBackupsOwned {
     param([Parameter(Mandatory = $true)][string]$DataRoot)
     $dataRootFull = Resolve-ASPath $DataRoot
     if (Test-ASForbiddenPath $dataRootFull) { return $false }
+    # D2：备份根链路含 junction/symlink 时视为非本应用标记备份（fail-closed，拒绝删除）。
+    $rp = Get-ASRelPathReparsePoint -BaseDir $dataRootFull -RelativePath ('backups\spkg\' + $script:SpkgBackupsOwnerFile)
+    if ($rp) { return $false }
     $ownerPath = Join-Path $dataRootFull ("backups\spkg\" + $script:SpkgBackupsOwnerFile)
     if (-not (Test-Path -LiteralPath $ownerPath)) { return $false }
     $owner = $null
@@ -385,18 +573,22 @@ function Backup-ASDataRoot {
     $dataRootFull = Resolve-ASPath $dataRoot
     if (Test-ASForbiddenPath $dataRootFull) { throw "refusing to back up into a protected data root: $dataRootFull" }
     if (-not (Test-Path -LiteralPath $dataRootFull)) { New-Item -ItemType Directory -Force -Path $dataRootFull | Out-Null }
+    # D2：DataRoot 备份前做不跟随 junction 的安全枚举；命中 reparse 即 fail-closed，不写入目录外。
+    $tree = Get-ASDirTreeSafe -BaseDir $dataRootFull
+    if (-not $tree.Ok) { throw "refusing to back up data root: reparse point at '$($tree.ReparsePath)'" }
     $backupRoot = Ensure-ASSpkgBackupsRoot -DataRoot $dataRootFull
     $ts = Get-Date -Format 'yyyyMMddHHmmss'
     $backupDir = Join-Path $backupRoot ("{0}-{1}" -f $ts, $Tag)
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    $backupRootPrefix = $backupRoot + [System.IO.Path]::DirectorySeparatorChar
     $files = @()
-    $rawFiles = Get-ChildItem -LiteralPath $dataRootFull -File -Recurse |
-        Where-Object { $_.FullName -notlike (Join-Path $backupRoot '*') }
-    foreach ($f in $rawFiles) {
-        $rel = $f.FullName.Substring($dataRootFull.Length).TrimStart('\', '/')
+    foreach ($f in $tree.Files) {
+        # 排除备份根自身（含上次备份）与备份目录，避免自我复制。
+        if ($f.StartsWith($backupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $rel = $f.Substring($dataRootFull.Length).TrimStart('\', '/')
         $dest = Join-Path $backupDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
+        Copy-Item -LiteralPath $f -Destination $dest -Force
         $files += $rel
     }
     $meta = [ordered]@{
@@ -427,6 +619,11 @@ function Replace-ASBinary {
     $installFull = Resolve-ASPath $InstallDir
     $candFull = Resolve-ASPath $CandidateDir
     if (-not (Test-Path -LiteralPath $candFull)) { throw "candidate dir not found: $candFull" }
+    # D2：候选目录自身不得是 junction/symlink/reparse point（其子路径由复制/枚举路径守卫）。
+    $candItem = Get-Item -LiteralPath $candFull -Force
+    if ($candItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "refusing to use candidate dir: reparse point at $candFull"
+    }
 
     # 0) 所有权门禁（fail-closed）：非空既有目录必须有绑定本绝对路径的有效所有权标记；
     #    危险路径（文件系统根/用户主目录/工作区/artifacts）一律拒绝。
@@ -447,11 +644,22 @@ function Replace-ASBinary {
     New-Item -ItemType Directory -Force -Path $slotNew | Out-Null
     try {
         if ($hadInstall) {
-            Copy-Item -LiteralPath $installFull -Destination $slotNew -Recurse -Force
-            $backed = @(Get-ChildItem -LiteralPath (Join-Path $slotNew (Split-Path -Leaf $installFull)) -Recurse -File)
-            $src = @(Get-ChildItem -LiteralPath $installFull -Recurse -File)
-            if ($backed.Count -ne $src.Count) {
-                throw "install backup incomplete ($($backed.Count)/$($src.Count)); aborting replace"
+            # D2：安装备份改用不跟随 junction 的安全枚举 + 逐文件复制；命中 reparse 即
+            # fail-closed（原安装目录不受影响），绝不 Copy-Item -Recurse 沿 junction 复制目录外内容。
+            $tree = Get-ASDirTreeSafe -BaseDir $installFull
+            if (-not $tree.Ok) { throw "refusing to back up install dir: reparse point at '$($tree.ReparsePath)'" }
+            $savedDir = Join-Path $slotNew (Split-Path -Leaf $installFull)
+            New-Item -ItemType Directory -Force -Path $savedDir | Out-Null
+            foreach ($f in $tree.Files) {
+                $rel = $f.Substring($installFull.Length).TrimStart('\', '/')
+                $dest = Join-Path $savedDir $rel
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+                Copy-Item -LiteralPath $f -Destination $dest -Force
+            }
+            $backed = @(Get-ChildItem -LiteralPath $savedDir -Recurse -File)
+            $srcCount = @($tree.Files).Count
+            if ($backed.Count -ne $srcCount) {
+                throw "install backup incomplete ($($backed.Count)/$($srcCount)); aborting replace"
             }
             Set-Content -LiteralPath $completeMarker -Value (Get-Date -Format o) -Encoding UTF8
         } else {
@@ -552,7 +760,10 @@ function Restore-ASInstallBackup {
     $deleteRel = @($deleteRel + $candResidue | Where-Object { $_ -and ($_ -ne $script:OwnerMarkerFile) } | Sort-Object -Unique)
     Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $deleteRel
     $markerPath = Join-Path $installFull $script:OwnerMarkerFile
-    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+    if (Test-Path -LiteralPath $markerPath) {
+        Assert-ASRelPathSafe -BaseDir $installFull -RelativePath $script:OwnerMarkerFile -Action 'remove ownership marker'
+        Remove-Item -LiteralPath $markerPath -Force
+    }
 
     if ((Test-Path -LiteralPath $completeMarker) -and (Test-Path -LiteralPath $saved)) {
         # 只复制备份目录的「内容」到安装目录（绝不整目录删除；目标目录存在时逐子项、逐级
@@ -649,6 +860,10 @@ function Restore-ASRollback {
         throw "spkg data backup bound to '$($meta.dataRoot)' but current data root is '$dataRootFull'; refusing to restore"
     }
     $dataPrefix = $dataRootFull + [System.IO.Path]::DirectorySeparatorChar
+    # D2：备份槽整条链路（dataRoot→matched）不得含 junction/symlink，否则读取会透明跟随。
+    $matchedRel = $matched.FullName.Substring($dataRootFull.Length).TrimStart('\', '/')
+    $rpMatched = Get-ASRelPathReparsePoint -BaseDir $dataRootFull -RelativePath $matchedRel
+    if ($rpMatched) { throw "refusing to restore: reparse point at '$rpMatched' in backup path" }
     foreach ($rel in $meta.files) {
         $relPath = [string]$rel
         # 兼容旧备份：若记录为绝对路径则换算为相对路径；同时校验不得越出数据根。
@@ -659,8 +874,17 @@ function Restore-ASRollback {
         if ($relPath.IndexOf('..', [System.StringComparison]::Ordinal) -ge 0) { continue }
         $destFull = [System.IO.Path]::GetFullPath((Join-Path $dataRootFull $relPath))
         if (-not $destFull.StartsWith($dataPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        # D2：恢复目标链路与备份源链路均无 reparse；命中即 fail-closed（不写目录外）。
+        $destRel = $destFull.Substring($dataRootFull.Length).TrimStart('\', '/')
+        $rpDest = Get-ASRelPathReparsePoint -BaseDir $dataRootFull -RelativePath $destRel
+        if ($rpDest) {
+            if ($rpDest -eq 'TRAVERSAL') { throw "refusing to restore outside data root (path traversal): $relPath" }
+            throw "refusing to restore through reparse point at '$rpDest' (rel '$relPath')"
+        }
         $src = Join-Path $matched.FullName $relPath
         if (-not (Test-Path -LiteralPath $src)) { continue }
+        $rpSrc = Get-ASRelPathReparsePoint -BaseDir $matched.FullName -RelativePath $relPath
+        if ($rpSrc) { throw "refusing to restore from reparse point in backup at '$rpSrc' (rel '$relPath')" }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destFull) | Out-Null
         Copy-Item -LiteralPath $src -Destination $destFull -Force
         $restored += $relPath
@@ -753,11 +977,16 @@ function Invoke-ASUninstall {
             if (-not (Test-ASSpkgBackupsOwned -DataRoot $dataRootFull)) {
                 throw "refusing to remove user data: spkg backups at $dataRootFull\backups\spkg are not app-owned"
             }
+            # D2：备份根链路与整树不得含 junction/symlink，否则 Remove-Item -Recurse 会透明跟随。
+            Assert-ASRelPathSafe -BaseDir $dataRootFull -RelativePath 'backups\spkg' -Action 'remove user data backups'
+            $bkpTree = Get-ASDirTreeSafe -BaseDir $backupRoot
+            if (-not $bkpTree.Ok) { throw "refusing to remove user data: reparse point at '$($bkpTree.ReparsePath)'" }
             Remove-Item -LiteralPath $backupRoot -Recurse -Force
             $removed += $backupRoot
         }
         $backupsDir = Join-Path $dataRootFull 'backups'
         if ((Test-Path -LiteralPath $backupsDir) -and -not (Get-ChildItem -LiteralPath $backupsDir -Force -ErrorAction SilentlyContinue)) {
+            Assert-ASRelPathSafe -BaseDir $dataRootFull -RelativePath 'backups' -Action 'remove empty backups dir'
             Remove-Item -LiteralPath $backupsDir -Force
             $removed += $backupsDir
         }
@@ -781,6 +1010,11 @@ function Invoke-ASReinstall {
     $installFull = Resolve-ASPath $InstallDir
     $candFull = Resolve-ASPath $CandidateDir
     if (-not (Test-Path -LiteralPath $candFull)) { throw "candidate dir not found: $candFull" }
+    # D2：候选目录自身不得是 junction/symlink/reparse point（其子路径由复制/枚举路径守卫）。
+    $candItem = Get-Item -LiteralPath $candFull -Force
+    if ($candItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "refusing to use candidate dir: reparse point at $candFull"
+    }
 
     $ownership = Test-ASInstallOwnership -InstallDir $installFull
     if (-not $ownership.Ok) { throw "refusing to modify install dir: $($ownership.Message)" }
@@ -789,7 +1023,10 @@ function Invoke-ASReinstall {
         if ($null -ne $ownership.Marker.PSObject.Properties['appFiles']) { $appFiles = @($ownership.Marker.appFiles) }
         Remove-ASOwnedFiles -InstallDir $installFull -AppFiles $appFiles
         $markerPath = Join-Path $installFull $script:OwnerMarkerFile
-        if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+        if (Test-Path -LiteralPath $markerPath) {
+            Assert-ASRelPathSafe -BaseDir $installFull -RelativePath $script:OwnerMarkerFile -Action 'remove ownership marker'
+            Remove-Item -LiteralPath $markerPath -Force
+        }
         Remove-ASEmptyDirsUnder -InstallDir $installFull
     } elseif (-not (Test-Path -LiteralPath $installFull)) {
         New-Item -ItemType Directory -Force -Path $installFull | Out-Null
