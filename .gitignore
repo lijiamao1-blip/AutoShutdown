@@ -8,6 +8,9 @@ TestResults/
 # ===== 发布产物（可由 tools/Publish-SafeRelease.ps1 重新生成）=====
 artifacts/
 
+# ===== 本阶段隔离构建输出（S-UI2：现有进程占用标准 bin/Release 时的替代输出）=====
+.build-tmp/
+
 # ===== 构建/测试日志（保留在磁盘，不入基线）=====
 *.log
 *.out

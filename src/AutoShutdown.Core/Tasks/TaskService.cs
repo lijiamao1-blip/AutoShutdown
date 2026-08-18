@@ -112,7 +112,8 @@ public sealed class TaskService : ITaskService
                 RealPowerConfirmed = definition.RealPowerConfirmed,
                 UseUnattended = definition.UseUnattended,
                 TargetMachineId = definition.TargetMachineId,
-                RtcWakeTimeUtc = definition.RtcWakeTimeUtc
+                RtcWakeTimeUtc = definition.RtcWakeTimeUtc,
+                IsEnabled = definition.IsEnabled
             };
 
             return new TaskCommandResult
@@ -160,7 +161,8 @@ public sealed class TaskService : ITaskService
             RealPowerConfirmed = definition.RealPowerConfirmed,
             UseUnattended = definition.UseUnattended,
             TargetMachineId = definition.TargetMachineId,
-            RtcWakeTimeUtc = definition.RtcWakeTimeUtc
+            RtcWakeTimeUtc = definition.RtcWakeTimeUtc,
+            IsEnabled = definition.IsEnabled
         };
 
         return new TaskCommandResult

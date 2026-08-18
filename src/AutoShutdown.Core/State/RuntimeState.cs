@@ -78,4 +78,12 @@ public sealed record TaskInstance
     /// 填入 Pre-Pipeline 上下文，由 RtcWakeAction 作为受控关机前步骤处理。
     /// </summary>
     public DateTimeOffset? RtcWakeTimeUtc { get; init; }
+
+    /// <summary>
+    /// 任务定义当前是否启用（S-UI2 多任务 UI 呈现）。由 <see cref="TaskDefinition.IsEnabled"/>
+    /// 在实例创建时复制，并在 <c>SetTaskEnabledCommand</c> 时随定义同步更新并持久化。
+    /// 停用任务不会触发执行；旧 runtime.json 无此字段时按 true（启用）向后兼容。
+    /// 仅为 UI/运行态呈现，不影响引擎执行裁决（执行仍以 TaskCollection 定义为唯一事实源）。
+    /// </summary>
+    public bool IsEnabled { get; init; } = true;
 }

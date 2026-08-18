@@ -23,18 +23,18 @@ public sealed class S12_4_2TaskActionTests
 {
     private static readonly DateTimeOffset Now = new(2024, 1, 15, 11, 0, 0, TimeSpan.Zero);
 
-    // ---- 1. Scheduled 活动任务时 Create 禁用 ----
+    // ---- 1. Scheduled 活动任务时 Create 仍可创建（S-UI2 多任务） ----
 
     [Fact]
-    public async Task ScheduledTask_CreateIsDisabled()
+    public async Task ScheduledTask_CreateRemainsEnabled()
     {
         var viewModel = CreateViewModel(ScheduledInstance());
         await viewModel.InitializeAsync();
         viewModel.Refresh(viewModelEngine(viewModel).Snapshot, Now);
 
-        Assert.False(viewModel.CreateCommand.CanExecute(null));
-        Assert.False(viewModel.CanCreateNow(out var reason));
-        Assert.Equal("已有活动任务", reason);
+        // S-UI2：存在活动任务不再禁用创建（可创建第 2/3 个任务）；默认表单为合法倒计时。
+        Assert.True(viewModel.CreateCommand.CanExecute(null));
+        Assert.True(viewModel.CanCreateNow(out _));
     }
 
     // ---- 2. Scheduled 活动任务时 Cancel 启用 ----

@@ -56,7 +56,10 @@ public sealed record TaskListItem(
     TaskInstanceState State,
     bool CanStop,
     bool CanSnooze,
-    bool CanClear);
+    bool CanClear,
+    bool IsEnabled,
+    bool CanSetEnabled,
+    string EnabledText);
 
 /// <summary>强制冲突待决仲裁的候选任务（供 UI 询问用户）。</summary>
 public sealed record PendingArbitrationItem(Guid TaskId, string ActionText, string FireTimeText);
@@ -200,7 +203,10 @@ public sealed class MainWindowViewModel : ObservableObject
         RowSnoozeCommand = new RelayCommand(RowSnooze);
         RowStopCommand = new RelayCommand(RowStop);
         RowClearCommand = new RelayCommand(RowClear);
+        RowSetEnabledCommand = new RelayCommand(RowSetEnabled);
         ResolveArbitrationCommand = new RelayCommand(ResolveArbitration);
+        OneTimeTodayCommand = new RelayCommand(SelectTodayForOneTime);
+        GoToLogsCommand = new RelayCommand(() => SelectedNav = NavItems[4]);
     }
 
     // ---- 导航 ----
@@ -632,6 +638,36 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private bool _weekdaySaturday;
+
+    /// <summary>周六是否选中（S-UI2：每周指定星期允许周六/周日；默认不选）。</summary>
+    public bool WeekdaySaturday
+    {
+        get => _weekdaySaturday;
+        set
+        {
+            if (SetProperty(ref _weekdaySaturday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
+    private bool _weekdaySunday;
+
+    /// <summary>周日是否选中（S-UI2：每周指定星期允许周六/周日；默认不选）。</summary>
+    public bool WeekdaySunday
+    {
+        get => _weekdaySunday;
+        set
+        {
+            if (SetProperty(ref _weekdaySunday, value))
+            {
+                RefreshCreateState();
+            }
+        }
+    }
+
     public IReadOnlyList<string> NthWorkdayOptions { get; } =
         Enumerable.Range(1, 23).Select(value => $"第 {value} 个工作日").ToArray();
 
@@ -662,6 +698,33 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>一次性日历最早可选日期 = 本地今天（过去日期不可选；S-UI2）。</summary>
+    public DateTime OneTimeDisplayDateStart => GetLocalToday();
+
+    private string _oneTimeDateTimeError = string.Empty;
+
+    /// <summary>一次性日期时间区域的内联错误提示（如所选时间已过去）。</summary>
+    public string OneTimeDateTimeError
+    {
+        get => _oneTimeDateTimeError;
+        private set => SetProperty(ref _oneTimeDateTimeError, value);
+    }
+
+    /// <summary>一次性日期时间区域是否显示错误提示。</summary>
+    public bool HasOneTimeDateTimeError => !string.IsNullOrEmpty(_oneTimeDateTimeError);
+
+    /// <summary>一次性日期「今天」快捷：把执行日期设为本地今天（过去时间由校验拒绝）。</summary>
+    private void SelectTodayForOneTime()
+    {
+        OneTimeDate = GetLocalToday();
+    }
+
+    /// <summary>当前本地日期（按 VM 时钟时区转换，测试可注入）。</summary>
+    private DateTime GetLocalToday() => LocalNow().Date;
+
+    /// <summary>当前本地时刻（按 VM 时钟时区转换，测试可注入）。</summary>
+    private DateTimeOffset LocalNow() => TimeZoneInfo.ConvertTime(_clock.UtcNow, _clock.LocalTimeZone);
 
     private string _holidayDatesText = string.Empty;
 
@@ -941,6 +1004,20 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _hasCurrentTask, value);
     }
 
+    /// <summary>
+    /// 首页「当前任务」卡右上角的多任务计数摘要（S-UI2）。与任务管理页共用
+    /// <see cref="TaskItems"/>，保证首页摘要与任务管理一致：1 个任务显示空，
+    /// 2+ 个任务显示「共 N 个任务」。
+    /// </summary>
+    public string CurrentTaskCountText
+    {
+        get
+        {
+            var count = TaskItems.Count;
+            return count > 1 ? $"共 {count} 个任务" : string.Empty;
+        }
+    }
+
     private bool _canSnooze;
 
     public bool CanSnooze
@@ -1113,7 +1190,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 ?.InformationalVersion;
             if (string.IsNullOrWhiteSpace(informational))
             {
-                return "v1.0.0-dev";
+                return "v2.0.0-dev";
             }
 
             var plusIndex = informational.IndexOf('+');
@@ -1136,19 +1213,28 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>数据目录（AUTOSHUTDOWN_DATA_ROOT 覆盖或默认 %LocalAppData%\AutoShutdown）。</summary>
     public string DataDirectoryText => AppInfo.DataDirectory;
 
-    /// <summary>关于页：隐私与安全边界说明（静态文案）。</summary>
-    public const string PrivacyBoundaryText =
-        "· 全部数据（配置、任务、日志、WoL 目标、远程配对）只保存在本机数据目录，绝不上传任何服务器。\n"
-        + "· 远程控制默认关闭且默认只读；即使启用也只监听你配置的地址与端口，并强制 TLS。\n"
-        + "· 诊断包仅在你在「日志与诊断」页主动导出时生成，且默认脱敏（PIN/密钥/私钥/PFX 密码绝不带出）。\n"
-        + "· 截图仅在你在「日志与诊断」页主动保存当前窗口时写入你选择的路径，无自动上传、无远程桌面、无后台外传。\n"
-        + "· 真实电源操作仅在你关闭测试模式且显式开启后才会执行（双闸门）；默认全程安全测试模式隔离。";
+    /// <summary>关于页：隐私与安全边界说明（实例属性：{Binding} 无法绑定 static/const 字段，S-UI2 冒烟 P8 修复）。</summary>
+    public string PrivacyBoundaryText => PrivacyBoundary;
 
-    /// <summary>关于页：帮助与反馈说明（静态文案）。</summary>
-    public const string HelpFeedbackText =
-        "· 使用问题：先查看「日志与诊断」页的日志目录与安全自检；诊断包可在需要时主动导出。\n"
-        + "· 任务计划同步/远程控制的已知限制与风险见「高级功能」「软件设置」各卡片说明。\n"
-        + "· 反馈请随附版本号（见本页「版本」）与诊断摘要；候选包未签名，首次运行可能触发 SmartScreen，属预期。";
+    private const string PrivacyBoundary =
+        "· 数据只存本机：配置、任务、日志、WoL 目标、远程配对均只保存在本机数据目录，程序不自动上传日志、截图、诊断包或任何文档。\n"
+        + "· 诊断包脱敏：仅在你在「日志与诊断」页主动导出时生成；默认剔除 PIN、HMAC/配对 secret、证书私钥与 PFX 密码。\n"
+        + "· 隐私信息受保护：IP 地址、MAC 地址、机器名称、文件路径、任务名均属隐私，导出诊断包默认脱敏，仅在你显式确认后才会包含。\n"
+        + "· 网络唤醒（WoL）只向你显式配置的局域网目标发送唤醒包，不扫描局域网、不访问公网。\n"
+        + "· 远程控制默认关闭且默认只读；启用后也只监听你配置的地址与端口并强制 TLS，绝不对本地配置/策略做远程写入。\n"
+        + "· Office 文档自动保存只在你本地运行中的 Word/Excel/PowerPoint 上按既有路径保存，程序不读取、不上传文档内容。\n"
+        + "· 真实电源操作受 TestMode、创建时人工确认与双闸门三重门控；默认全程安全测试模式隔离，绝不静默执行真实关机。";
+
+    /// <summary>关于页：帮助与反馈说明（实例属性：{Binding} 无法绑定 static/const 字段，S-UI2 冒烟 P8 修复）。</summary>
+    public string HelpFeedbackText => HelpFeedback;
+
+    private const string HelpFeedback =
+        "· 新手快速开始：启动后默认安全测试模式。在首页选择时间模式（如倒计时）、选择动作（如关机），点击「创建任务」即可。首次使用请先看「软件设置」页。\n"
+        + "· 常见问题：任务未按时执行？先看「日志与诊断」页的调度状态与错误日志；任务计划同步/远程控制的已知限制与风险见「高级功能」「软件设置」各卡片说明。\n"
+        + "· 故障排查：在「日志与诊断」页运行「安全自检」、筛选错误日志，必要时导出脱敏诊断包并附带版本号（见本页「版本」）与构建提交。\n"
+        + "· 数据目录：%LocalAppData%\\AutoShutdown（可用环境变量 AUTOSHUTDOWN_DATA_ROOT 覆盖）；日志目录见「日志与诊断」页。\n"
+        + "· 当前版本暂无在线反馈通道。请导出脱敏诊断包，并通过你获取本软件的原渠道反馈。\n"
+        + "· 候选包未签名，首次运行可能触发 SmartScreen，属预期。";
 
     private string _configInitErrorText = string.Empty;
 
@@ -1974,7 +2060,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RowClearCommand { get; }
 
+    public ICommand RowSetEnabledCommand { get; }
+
     public ICommand ResolveArbitrationCommand { get; }
+
+    /// <summary>一次性日期「今天」快捷：将执行日期设为本地今天。</summary>
+    public ICommand OneTimeTodayCommand { get; }
+
+    /// <summary>跳转到「日志与诊断」页（高级功能 Office 说明卡导航）。</summary>
+    public ICommand GoToLogsCommand { get; }
 
     public AsyncRelayCommand InitializeConfigCommand { get; }
 
@@ -2210,11 +2304,8 @@ public sealed class MainWindowViewModel : ObservableObject
             return false;
         }
 
-        if (_currentInstance is not null && !IsTerminal(_currentInstance.State))
-        {
-            reason = "已有活动任务";
-            return false;
-        }
+        // S-UI2：允许创建第 2/3 个任务（底层 TaskCollection/SchedulerEngine 均按任务 id 支持多任务）。
+        // 不在此处按"已有活动任务"一刀切禁用；冲突检测与仲裁由引擎按任务 id + TaskArbitrator 唯一路径处理。
 
         if (!TryBuildTimeInput(out _, out _, out var inputError))
         {
@@ -2308,19 +2399,31 @@ public sealed class MainWindowViewModel : ObservableObject
         return true;
     }
 
-    /// <summary>校验 S14 复杂排程的附加字段（工作日/一次性日期/节假日），无副作用。</summary>
+    /// <summary>校验 S14 复杂排程的附加字段（星期/一次性日期/节假日），无副作用。</summary>
     public bool TryValidateRuleFields(out string error)
     {
         if (SelectedMode == TimeMode.Weekdays && GetSelectedWeekdays().Count == 0)
         {
-            error = "请至少选择一个工作日";
+            error = "请至少选择一个星期";
             return false;
         }
 
-        if (SelectedMode == TimeMode.OneTime && OneTimeDate is null)
+        if (SelectedMode == TimeMode.OneTime)
         {
-            error = "请选择一次性执行的日期";
-            return false;
+            if (OneTimeDate is null)
+            {
+                error = "请选择一次性执行的日期";
+                return false;
+            }
+
+            // S-UI2：禁止选择已过去的日期时间并给出明确提示（过期一次性任务不追溯）。
+            if (TryBuildTimeInput(out _, out var oneTimeTarget, out _)
+                && oneTimeTarget is { } target
+                && BuildOneTimeDateTime(target) <= LocalNow().DateTime)
+            {
+                error = "所选日期时间已过去，请选择未来时间";
+                return false;
+            }
         }
 
         if (!TryParseHolidayDates(out _, out error))
@@ -2446,7 +2549,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private IReadOnlyList<DayOfWeek> GetSelectedWeekdays()
     {
-        var days = new List<DayOfWeek>(5);
+        var days = new List<DayOfWeek>(7);
         if (WeekdayMonday)
         {
             days.Add(DayOfWeek.Monday);
@@ -2470,6 +2573,16 @@ public sealed class MainWindowViewModel : ObservableObject
         if (WeekdayFriday)
         {
             days.Add(DayOfWeek.Friday);
+        }
+
+        if (WeekdaySaturday)
+        {
+            days.Add(DayOfWeek.Saturday);
+        }
+
+        if (WeekdaySunday)
+        {
+            days.Add(DayOfWeek.Sunday);
         }
 
         return days;
@@ -2689,6 +2802,86 @@ public sealed class MainWindowViewModel : ObservableObject
             "清除记录");
     }
 
+    /// <summary>
+    /// 单任务启用/停用（S-UI2 多任务）。提交 <see cref="SetTaskEnabledCommand"/> 到引擎唯一
+    /// 仲裁路径；成功后经 ConfigurationService 把启停状态持久化到 tasks.json（不直接改 JSON）。
+    /// </summary>
+    private void RowSetEnabled(object? parameter)
+    {
+        if (parameter is not TaskListItem item || _isSubmitting)
+        {
+            return;
+        }
+
+        var target = !item.IsEnabled;
+        _ = SubmitSetEnabledAsync(item.TaskId, target);
+    }
+
+    private async Task SubmitSetEnabledAsync(Guid taskId, bool isEnabled)
+    {
+        var submitted = await SubmitCommandAsync(
+            new SetTaskEnabledCommand(taskId, isEnabled),
+            isEnabled ? "启用任务" : "停用任务");
+        if (submitted)
+        {
+            await PersistEnabledStateAsync(taskId, isEnabled);
+        }
+    }
+
+    /// <summary>把某任务的启停状态持久化到 tasks.json（经服务读写，不直接编辑 JSON）。</summary>
+    private async Task PersistEnabledStateAsync(Guid taskId, bool isEnabled)
+    {
+        try
+        {
+            var load = await _configurationService.LoadTasksAsync(CancellationToken.None);
+            List<TaskDefinition> tasks;
+            if (load.Status == TasksLoadStatus.Success && load.Document is not null)
+            {
+                tasks = load.Document.Tasks.ToList();
+            }
+            else if (load.Status == TasksLoadStatus.NotFound)
+            {
+                tasks = [];
+            }
+            else
+            {
+                TryLog(logger => logger.Warning(
+                    "TaskEnablePersistSkipped",
+                    "任务启停状态未持久化：tasks.json 状态为 " + load.Status + "。"));
+                return;
+            }
+
+            var index = tasks.FindIndex(task => task.Id == taskId);
+            if (index < 0)
+            {
+                return;
+            }
+
+            tasks[index] = tasks[index] with { IsEnabled = isEnabled };
+
+            var save = await _configurationService.SaveTasksAsync(
+                new TasksDocument { Tasks = tasks },
+                CancellationToken.None);
+
+            if (save.Succeeded)
+            {
+                AppendActivity(isEnabled ? "任务已启用" : "任务已停用");
+            }
+            else
+            {
+                TryLog(logger => logger.Warning(
+                    "TaskEnablePersistFailed",
+                    "任务启停状态保存失败：" + string.Join("；", save.Errors)));
+            }
+        }
+        catch (Exception exception)
+        {
+            TryLog(logger => logger.Warning(
+                "TaskEnablePersistFailed",
+                "任务启停状态持久化异常：" + exception.Message));
+        }
+    }
+
     private void ResolveArbitration(object? parameter)
     {
         if (parameter is not Guid taskId || _isSubmitting)
@@ -2735,11 +2928,15 @@ public sealed class MainWindowViewModel : ObservableObject
                 instance.State is TaskInstanceState.Cancelled
                     or TaskInstanceState.Executed
                     or TaskInstanceState.Faulted
-                    or TaskInstanceState.Interrupted));
+                    or TaskInstanceState.Interrupted,
+                instance.IsEnabled,
+                true,
+                instance.IsEnabled ? "停用" : "启用"));
         }
 
         HasTasks = instances.Count > 0;
         HasNoTasks = instances.Count == 0;
+        OnPropertyChanged(nameof(CurrentTaskCountText));
     }
 
     /// <summary>
@@ -2986,7 +3183,23 @@ public sealed class MainWindowViewModel : ObservableObject
         var canCreate = CanCreateNow(out var reason);
         CreateDisabledReason = canCreate ? string.Empty : reason;
         OnPropertyChanged(nameof(CreateDisabledReason));
+        OneTimeDateTimeError = SelectedMode == TimeMode.OneTime ? BuildOneTimeDateTimeError() : string.Empty;
         CreateCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>一次性日期时间区域的内联错误（所选日期+时间已过去时提示；无则空）。</summary>
+    private string BuildOneTimeDateTimeError()
+    {
+        if (OneTimeDate is null
+            || !TryBuildTimeInput(out _, out var target, out _)
+            || target is not { } time)
+        {
+            return string.Empty;
+        }
+
+        return BuildOneTimeDateTime(time) <= LocalNow().DateTime
+            ? "所选日期时间已过去，请选择未来时间"
+            : string.Empty;
     }
 
     private void RaiseAllCommands()

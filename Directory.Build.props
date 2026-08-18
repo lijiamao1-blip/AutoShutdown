@@ -4,5 +4,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- S-UI2 版本单一源：AssemblyVersion/FileVersion/InformationalVersion 统一取 2.0.0。
+         构建时 SDK 自动在 InformationalVersion 追加真实 +{commit}（IncludeSourceRevisionInInformationalVersion
+         默认开启，git 仓库内构建即真实哈希）；顶部/左下角/关于页均从程序集读取，不在 XAML 硬编码。 -->
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
 </Project>

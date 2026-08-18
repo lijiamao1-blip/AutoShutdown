@@ -1400,7 +1400,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
             SnoozeTaskCommand snooze => await HandleSnoozeAsync(snooze, cancellationToken).ConfigureAwait(false),
             CancelTaskCommand cancel => await HandleCancelAsync(cancel, cancellationToken).ConfigureAwait(false),
             ClearTerminalTaskCommand clear => await HandleClearTerminalAsync(clear, cancellationToken).ConfigureAwait(false),
-            SetTaskEnabledCommand setEnabled => HandleSetEnabledAsync(setEnabled),
+            SetTaskEnabledCommand setEnabled => await HandleSetEnabledAsync(setEnabled, cancellationToken).ConfigureAwait(false),
             ResolveArbitrationCommand resolve => await HandleResolveArbitrationAsync(resolve, cancellationToken).ConfigureAwait(false),
             ExternalTriggerTaskCommand external => await HandleExternalTriggerAsync(external, cancellationToken).ConfigureAwait(false),
             RemoteTriggerTaskCommand remoteTrigger => await HandleRemoteTriggerAsync(remoteTrigger, cancellationToken).ConfigureAwait(false),
@@ -1589,7 +1589,9 @@ public sealed class SchedulerEngine : ISchedulerEngine
         return Success("The terminal instance was cleared.");
     }
 
-    private SchedulerCommandResult HandleSetEnabledAsync(SetTaskEnabledCommand command)
+    private async Task<SchedulerCommandResult> HandleSetEnabledAsync(
+        SetTaskEnabledCommand command,
+        CancellationToken cancellationToken)
     {
         var result = _taskService.SetEnabled(command.TaskId, command.IsEnabled);
         if (!result.Succeeded)
@@ -1598,6 +1600,22 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 GetSnapshot(),
                 SchedulerCommandStatus.TaskServiceRejected,
                 result.Message);
+        }
+
+        // 同步运行态实例的启用标志（供 UI 快照呈现；执行裁决仍以 TaskCollection 为唯一事实源）。
+        var instances = GetSnapshot().Instances;
+        if (instances.TryGetValue(command.TaskId, out var instance))
+        {
+            var updated = instance with { IsEnabled = command.IsEnabled };
+            var now = _clock.UtcNow.ToUniversalTime();
+            var next = WithInstance(instances, updated);
+            if (!await PersistAndCommitAsync(next, now, cancellationToken).ConfigureAwait(false))
+            {
+                return Rejected(
+                    GetSnapshot(),
+                    SchedulerCommandStatus.PersistenceFailed,
+                    "Failed to persist the task enable state.");
+            }
         }
 
         return Success("The task enable state was updated.");
@@ -1722,9 +1740,21 @@ public sealed class SchedulerEngine : ISchedulerEngine
     }
 
     private IReadOnlyList<TaskInstance> GetActiveInstances()
-        => GetSnapshot().Instances.Values
+    {
+        // S-UI2 启停闸门：停用任务不进入到期/空闲评估，不产生 deadline，绝不触发执行。
+        // 以 TaskCollection 定义为唯一事实源；定义缺失（旧 runtime.json 孤儿实例）时回退到
+        // 实例标志，维持既有「孤儿实例按状态推进」恢复行为（不因缺少定义而静默执行或取消）。
+        return GetSnapshot().Instances.Values
             .Where(instance => instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming)
+            .Where(instance => instance.IsEnabled && IsDefinitionEnabled(instance.SourceTaskId))
             .ToList();
+    }
+
+    private bool IsDefinitionEnabled(Guid taskId)
+    {
+        var definition = _taskService.Get(taskId);
+        return definition is null || definition.IsEnabled;
+    }
 
     private DateTimeOffset? ComputeNextDeadline(DateTimeOffset now)
     {

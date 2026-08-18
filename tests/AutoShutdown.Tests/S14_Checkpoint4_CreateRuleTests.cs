@@ -143,7 +143,7 @@ public sealed class S14_Checkpoint4_CreateRuleTests
         viewModel.WeekdayFriday = false;
 
         Assert.False(viewModel.TryValidateRuleFields(out var error));
-        Assert.Contains("工作日", error);
+        Assert.Contains("星期", error);
     }
 
     [Fact]

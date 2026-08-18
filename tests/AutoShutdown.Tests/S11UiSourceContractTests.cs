@@ -241,15 +241,18 @@ public sealed class S11UiSourceContractTests
     }
 
     [Fact]
-    public async Task Create_WhenActiveTaskExists_IsDisabled()
+    public async Task Create_WhenActiveTaskExists_RemainsEnabledForMultiTask()
     {
+        // S-UI2：存在活动任务时允许继续创建第 2/3 个任务（底层按任务 id 支持多任务）。
+        // 不再按"已有活动任务"一刀切禁用创建按钮；冲突检测与仲裁由引擎唯一路径处理。
         var engine = CreateRunningEngine(
             ScheduledInstance());
         var viewModel = CreateViewModel(engine);
         await viewModel.InitializeAsync();
 
-        Assert.False(viewModel.CreateCommand.CanExecute(null));
-        Assert.Contains("已有活动任务", viewModel.CreateDisabledReason);
+        Assert.True(viewModel.CreateCommand.CanExecute(null));
+        Assert.True(viewModel.CanCreateNow(out _));
+        Assert.DoesNotContain("已有活动任务", viewModel.CreateDisabledReason);
     }
 
     // ---- 11. Snooze 使用当前身份 ----

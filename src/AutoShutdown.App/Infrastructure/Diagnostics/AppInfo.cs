@@ -39,7 +39,7 @@ public static class AppInfo
     {
         if (string.IsNullOrWhiteSpace(informational))
         {
-            return "v1.0.0-dev";
+            return "v2.0.0-dev";
         }
 
         var plusIndex = informational.IndexOf('+');
