@@ -302,7 +302,7 @@
 
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <TextBlock Text="任务管理" FontSize="26" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                                <TextBlock Text="任务管理" FontSize="26" FontWeight="Bold" Foreground="Black" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Content="＋  新建任务" Style="{StaticResource PrimaryButtonStyle}" Padding="22,10" HorizontalAlignment="Right" Command="{Binding HomeCommand}"/>
                             </Grid>
 
@@ -340,8 +340,8 @@
 
                             <!-- 空状态 -->
                             <StackPanel Visibility="{Binding HasNoTasks, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" Margin="0,40,0,0">
-                                <TextBlock Text="暂无任务" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                                <TextBlock Text="点击右上角「新建任务」创建第一个定时任务。" FontSize="14" Foreground="{StaticResource TextOnDarkMutedBrush}"/>
+                                <TextBlock Text="暂无任务" FontSize="22" FontWeight="SemiBold" Foreground="Black" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                <TextBlock Text="点击右上角「新建任务」创建第一个定时任务。" FontSize="14" Foreground="Black"/>
                             </StackPanel>
 
                             <!-- 任务列表 -->
@@ -393,8 +393,8 @@
                     <ScrollViewer Grid.Column="1" Visibility="{Binding IsAdvancedPageVisible, Converter={StaticResource BoolToVisibility}}"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="20,16,20,24">
-                            <TextBlock Text="高级功能" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
-                            <TextBlock Text="以下高风险功能默认关闭；开启需二次确认，并始终受配置双闸门约束。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                            <TextBlock Text="高级功能" FontSize="26" FontWeight="Bold" Foreground="Black" Margin="0,0,0,4"/>
+                            <TextBlock Text="以下高风险功能默认关闭；开启需二次确认，并始终受配置双闸门约束。" FontSize="13" Foreground="Black" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
                                 <StackPanel>
@@ -488,8 +488,8 @@
                     <ScrollViewer Grid.Column="1" Visibility="{Binding IsWolPageVisible, Converter={StaticResource BoolToVisibility}}"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="20,16,20,24">
-                            <TextBlock Text="网络唤醒" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
-                            <TextBlock Text="Wake-on-LAN：向局域网内已配置的目标机器发送 Magic Packet，将目标从睡眠/关机状态唤醒。仅局域网、仅显式配置的目标；绝不扫描、不自动发现、不出公网。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                            <TextBlock Text="网络唤醒" FontSize="26" FontWeight="Bold" Foreground="Black" Margin="0,0,0,4"/>
+                            <TextBlock Text="Wake-on-LAN：向局域网内已配置的目标机器发送 Magic Packet，将目标从睡眠/关机状态唤醒。仅局域网、仅显式配置的目标；绝不扫描、不自动发现、不出公网。" FontSize="13" Foreground="Black" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
                                 <StackPanel>
@@ -564,8 +564,8 @@
                     <ScrollViewer Grid.Column="1" Visibility="{Binding IsLogsPageVisible, Converter={StaticResource BoolToVisibility}}"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="20,16,20,24">
-                            <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
-                            <TextBlock Text="查看日志、运行只读安全自检、导出脱敏诊断包或保存当前窗口截图。以下操作均不会修改配置，也不会执行任何电源操作。" FontSize="13" Foreground="{StaticResource TextOnDarkMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                            <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="Black" Margin="0,0,0,4"/>
+                            <TextBlock Text="查看日志、运行只读安全自检、导出脱敏诊断包或保存当前窗口截图。以下操作均不会修改配置，也不会执行任何电源操作。" FontSize="13" Foreground="Black" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                             <!-- 日志目录与摘要 -->
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
@@ -914,7 +914,7 @@
                     <ScrollViewer Grid.Column="1" Visibility="{Binding IsAboutPageVisible, Converter={StaticResource BoolToVisibility}}"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="20,16,20,24">
-                            <TextBlock Text="关于软件" FontSize="26" FontWeight="Bold" Foreground="White" Margin="0,0,0,12"/>
+                            <TextBlock Text="关于软件" FontSize="26" FontWeight="Bold" Foreground="Black" Margin="0,0,0,12"/>
                             <Border Style="{StaticResource GlassCardStyle}" Padding="24,20">
                                 <StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
