@@ -265,10 +265,10 @@
                                     <Grid Margin="0,0,0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                                        <TextBlock Text="下次执行：" FontSize="13" Foreground="#D9D1F6" Margin="0,3"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="13" Foreground="White" Margin="0,3" TextWrapping="Wrap"/>
-                                        <TextBlock Grid.Row="1" Text="任务类型：" FontSize="13" Foreground="#D9D1F6" Margin="0,3"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="13" Foreground="White" Margin="0,3"/>
-                                        <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="13" Foreground="#D9D1F6" Margin="0,3"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="13" Foreground="White" Margin="0,3"/>
-                                        <TextBlock Grid.Row="3" Text="触发方式：" FontSize="13" Foreground="#D9D1F6" Margin="0,3"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CountdownSourceText}" FontSize="13" Foreground="White" Margin="0,3"/>
+                                        <TextBlock Text="下次执行：" FontSize="13" Foreground="Black" Margin="0,3"/><TextBlock Grid.Column="1" Text="{Binding NextFireTimeText}" FontSize="13" Foreground="Black" Margin="0,3" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="1" Text="任务类型：" FontSize="13" Foreground="Black" Margin="0,3"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TaskActionText}" FontSize="13" Foreground="Black" Margin="0,3"/>
+                                        <TextBlock Grid.Row="2" Text="提前提醒：" FontSize="13" Foreground="Black" Margin="0,3"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WarningTimeText}" FontSize="13" Foreground="Black" Margin="0,3"/>
+                                        <TextBlock Grid.Row="3" Text="触发方式：" FontSize="13" Foreground="Black" Margin="0,3"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CountdownSourceText}" FontSize="13" Foreground="Black" Margin="0,3"/>
                                     </Grid>
                                     <WrapPanel>
                                         <Button Content="延迟 10 分钟" Style="{StaticResource SolidBlueButtonStyle}" Command="{Binding SnoozeCommand}" Margin="0,0,8,0"/>
