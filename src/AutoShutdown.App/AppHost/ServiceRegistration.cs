@@ -345,7 +345,10 @@ public static class ServiceRegistration
                 rtcStatusSection: provider.GetRequiredService<RtcStatusSectionViewModel>(),
                 taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>(),
                 remoteSection: provider.GetRequiredService<RemoteSectionViewModel>(),
-                diagnosticsCenter: provider.GetRequiredService<DiagnosticsCenterViewModel>()));
+                diagnosticsCenter: provider.GetRequiredService<DiagnosticsCenterViewModel>(),
+                // S-UI1-D2：注入任务定义集合与空闲监视器，供首页「当前任务」卡显示真实空闲状态。
+                taskService: provider.GetRequiredService<ITaskService>(),
+                idleMonitor: provider.GetRequiredService<IIdleMonitor>()));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

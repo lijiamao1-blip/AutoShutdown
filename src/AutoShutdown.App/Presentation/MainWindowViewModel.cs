@@ -8,6 +8,7 @@ using AutoShutdown.App.Infrastructure.Diagnostics;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Configuration;
+using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.Scheduling;
 using AutoShutdown.Core.State;
 using AutoShutdown.Core.Storage;
@@ -86,6 +87,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly TaskSyncSectionViewModel? _taskSyncSection;
     private readonly RemoteSectionViewModel? _remoteSection;
     private readonly DiagnosticsCenterViewModel? _diagnosticsCenter;
+    private readonly ITaskService? _taskService;
+    private readonly IIdleMonitor? _idleMonitor;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -119,7 +122,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RtcStatusSectionViewModel? rtcStatusSection = null,
         TaskSyncSectionViewModel? taskSyncSection = null,
         RemoteSectionViewModel? remoteSection = null,
-        DiagnosticsCenterViewModel? diagnosticsCenter = null)
+        DiagnosticsCenterViewModel? diagnosticsCenter = null,
+        ITaskService? taskService = null,
+        IIdleMonitor? idleMonitor = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -145,6 +150,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _taskSyncSection = taskSyncSection;
         _remoteSection = remoteSection;
         _diagnosticsCenter = diagnosticsCenter;
+        _taskService = taskService;
+        _idleMonitor = idleMonitor;
 
         NavItems =
         [
@@ -970,6 +977,19 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _countdownSourceText;
         private set => SetProperty(ref _countdownSourceText, value);
+    }
+
+    private bool _isIdleStatusVisible;
+
+    /// <summary>
+    /// 首页「当前任务」卡是否处于"空闲任务等待触发"展示态（S-UI1-D2）：为 true 时
+    /// CountdownText 显示的是真实空闲状态长文本，XAML 以小字号换行呈现，避免 40px
+    /// 大字倒计时样式撑爆卡片；非 Idle 与 Idle 已触发（Confirming）保持大字号倒计时。
+    /// </summary>
+    public bool IsIdleStatusVisible
+    {
+        get => _isIdleStatusVisible;
+        private set => SetProperty(ref _isIdleStatusVisible, value);
     }
 
     private string _nextFireTimeText = "--";
@@ -2229,6 +2249,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CurrentStateText = "当前没有活动任务";
             CountdownText = "—";
             CountdownSourceText = "—";
+            IsIdleStatusVisible = false;
             NextFireTimeText = "--";
             TaskActionText = "--";
             WarningTimeText = "--";
@@ -2246,20 +2267,40 @@ public sealed class MainWindowViewModel : ObservableObject
         _currentInstance = instance;
         HasCurrentTask = true;
         CurrentStateText = UiTextMapper.Map(instance);
-        CountdownSourceText = instance.IsIdleTriggered ? "空闲触发" : "定时排程";
         TaskActionText = UiTextMapper.Map(instance.ActionSnapshot);
         var localFire = TimeZoneInfo.ConvertTime(instance.ScheduledFireTime, _clock.LocalTimeZone);
         var localWarning = instance.WarningStartTime is null
             ? (DateTimeOffset?)null
             : TimeZoneInfo.ConvertTime(instance.WarningStartTime.Value, _clock.LocalTimeZone);
-        NextFireTimeText = localFire.ToString("yyyy-MM-dd HH:mm:ss");
         WarningTimeText = localWarning?.ToString("HH:mm:ss") ?? "无";
-        TaskSummaryText = $"当前任务：{UiTextMapper.Map(instance.State)} / {UiTextMapper.Map(instance.ActionSnapshot)} / {localFire:yyyy-MM-dd HH:mm}";
 
-        var remaining = instance.ScheduledFireTime - now;
-        CountdownText = remaining > TimeSpan.Zero
-            ? remaining.ToString(@"hh\:mm\:ss")
-            : "即将执行";
+        // S-UI1-D2：空闲任务等待触发（Waiting、IsIdleTriggered=false）时，首页「当前任务」
+        // 卡显示真实空闲时长/阈值，不再展示占位 fire time 倒计时（占位时间仅是安全下限，
+        // 非真实触发时间）。检测失败或依赖缺失一律 fail-closed，绝不回退到假数字。
+        var isIdleWaiting = IsIdleTask(instance.SourceTaskId)
+            && instance.State == TaskInstanceState.Waiting
+            && !instance.IsIdleTriggered;
+        if (isIdleWaiting)
+        {
+            CountdownSourceText = "空闲触发";
+            CountdownText = BuildIdleStatusText(instance.SourceTaskId);
+            NextFireTimeText = "等待连续空闲达阈值后触发";
+            IsIdleStatusVisible = true;
+        }
+        else
+        {
+            // 维持现状：非 Idle 任务为真实定时倒计时；Idle 已触发（Confirming+IsIdleTriggered）
+            // 为真实告警窗口倒计时，此路径已是真实行为，不得改动。
+            CountdownSourceText = instance.IsIdleTriggered ? "空闲触发" : "定时排程";
+            var remaining = instance.ScheduledFireTime - now;
+            CountdownText = remaining > TimeSpan.Zero
+                ? remaining.ToString(@"hh\:mm\:ss")
+                : "即将执行";
+            NextFireTimeText = localFire.ToString("yyyy-MM-dd HH:mm:ss");
+            IsIdleStatusVisible = false;
+        }
+
+        TaskSummaryText = $"当前任务：{UiTextMapper.Map(instance.State)} / {UiTextMapper.Map(instance.ActionSnapshot)} / {localFire:yyyy-MM-dd HH:mm}";
 
         CanSnooze = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming
             && instance.InstanceId != Guid.Empty
@@ -2288,6 +2329,55 @@ public sealed class MainWindowViewModel : ObservableObject
 
         RefreshCreateState();
         RaiseAllCommands();
+    }
+
+    /// <summary>
+    /// 判定实例是否来自空闲触发任务（S-UI1-D2）。TaskInstance 不含 Kind 字段，SchedulerSnapshot
+    /// 也不含定义，必须以任务定义集合（TaskCollection）为事实来源。taskService 未注入时无法
+    /// 判定，一律按非 Idle 处理（fail-closed，维持既有显示）。
+    /// </summary>
+    private bool IsIdleTask(Guid sourceTaskId)
+        => _taskService?.Get(sourceTaskId)?.Kind == TaskKind.Idle;
+
+    /// <summary>
+    /// 空闲任务等待触发时的状态文本（S-UI1-D2）：真实空闲时长 / 阈值。空闲检测失败或依赖
+    /// 缺失时显示「输入状态未知（无法确认空闲）」，绝不回退到占位倒计时。
+    /// </summary>
+    private string BuildIdleStatusText(Guid sourceTaskId)
+    {
+        TimeSpan? idleDuration;
+        try
+        {
+            idleDuration = _idleMonitor?.GetIdleDuration();
+        }
+        catch
+        {
+            // 检测异常一律视为无法确认空闲，fail-closed。
+            idleDuration = null;
+        }
+
+        if (idleDuration is not { } duration)
+        {
+            return "输入状态未知（无法确认空闲）";
+        }
+
+        var threshold = ResolveIdleThreshold(sourceTaskId);
+        var minutes = (int)duration.TotalMinutes;
+        var seconds = duration.Seconds;
+        var thresholdMinutes = (int)threshold.TotalMinutes;
+        return $"已连续空闲 {minutes} 分 {seconds} 秒 / 阈值 {thresholdMinutes} 分钟";
+    }
+
+    /// <summary>
+    /// 空闲任务展示阈值（S-UI1-D2）：任务显式 IdleThresholdSeconds（>0）优先；
+    /// 未设置/非法继承全局默认 30 分钟（IdleShutdownRule.GlobalDefaultThreshold）。
+    /// </summary>
+    private TimeSpan ResolveIdleThreshold(Guid sourceTaskId)
+    {
+        var definition = _taskService?.Get(sourceTaskId);
+        return definition?.IdleThresholdSeconds is { } seconds && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : IdleShutdownRule.GlobalDefaultThreshold;
     }
 
     public bool CanCreateNow(out string reason)

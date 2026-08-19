@@ -234,8 +234,32 @@
                                     </Grid>
                                     <StackPanel Margin="0,8,0,0">
                                         <TextBlock Text="{Binding CurrentStateText}" FontSize="13" FontWeight="SemiBold" Foreground="#294064"/>
-                                        <TextBlock Text="{Binding CountdownText}" FontSize="40" FontWeight="Bold" Foreground="White" Margin="0,2,0,4" CacheMode="BitmapCache">
-                                            <TextBlock.Effect><DropShadowEffect Color="#B681FF" BlurRadius="12" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect>
+                                        <TextBlock Text="{Binding CountdownText}" Margin="0,2,0,4" CacheMode="BitmapCache" TextWrapping="Wrap">
+                                            <!-- S-UI1-D2：常规倒计时为 40px 大字白字 + 紫色辉光；空闲任务等待触发（IsIdleStatusVisible）
+                                                 时切换为小字号深色换行文本，展示真实空闲时长/阈值，避免长句撑爆卡片。
+                                                 辉光放在 Style.Setter 而非元素局部值：WPF 优先级中 Style 触发器高于 Style
+                                                 setter，因此 IsIdleStatusVisible 时 Effect={x:Null} 才能真正生效移除辉光；
+                                                 若作元素局部值会压过触发器，空闲态仍残留辉光。 -->
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="FontSize" Value="40"/>
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                    <Setter Property="Effect">
+                                                        <Setter.Value>
+                                                            <DropShadowEffect Color="#B681FF" BlurRadius="12" ShadowDepth="0" Opacity="0.55"/>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsIdleStatusVisible}" Value="True">
+                                                            <Setter Property="FontSize" Value="15"/>
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            <Setter Property="Foreground" Value="#273A5D"/>
+                                                            <Setter Property="Effect" Value="{x:Null}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
                                         </TextBlock>
                                     </StackPanel>
                                     <Grid Margin="0,0,0,6">
