@@ -1,0 +1,14 @@
+S-UI1-D4 标题黑色像素 A/B 取证（150% 真机截图，同一标题带 [x340-1580, y116-276] 统计 RGB<70 像素）
+基线 = 提交 1a74d76（改动前）；D4 = 提交 738083f（改动后）
+---- 基线 (1a74d76) ----
+d4-tasks-150percent.png : nearBlackPixels=0
+d4-advanced-150percent.png : nearBlackPixels=0
+d4-wol-150percent.png : nearBlackPixels=0
+d4-logs-150percent.png : nearBlackPixels=0
+d4-about-150percent.png : nearBlackPixels=0
+---- D4 (738083f) ----
+d4-tasks-150percent.png : nearBlackPixels=2850
+d4-advanced-150percent.png : nearBlackPixels=4172
+d4-wol-150percent.png : nearBlackPixels=6814
+d4-logs-150percent.png : nearBlackPixels=5880
+d4-about-150percent.png : nearBlackPixels=2314

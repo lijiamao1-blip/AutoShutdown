@@ -1,0 +1,86 @@
+== S-UI2 UI smoke (v2.0.0-S-UI2.738083f) ==
+EXE: d:/电脑定时关机重建完整版/artifacts/d4-smoke/S-UI2-738083f/AutoShutdown-v2.0.0-S-UI2.738083f.exe
+
+系统缩放：AppliedDPI=144 → 150%（窗口高度交叉校验 150%）
+  SKIP  DPI 100% 完整电池  (当前机器实际缩放为 150%（单显示器）；100% 需在对应缩放的机器上运行（列入人工待验）)
+  SKIP  DPI 125% 完整电池  (当前机器实际缩放为 150%（单显示器）；125% 需在对应缩放的机器上运行（列入人工待验）)
+
+-- 启动（DPI 150% 档） --
+  PASS  process alive
+  PASS  window found
+  档位 scale=150% （初始窗口物理 1620x958）
+  PASS  P1: 1600×900 窗口精确尺寸
+  PASS  P2: 紧凑 900×580 窗口尺寸
+  PASS  P1: fresh 配置不可用 header
+  PASS  P1: 首页 button(恢复导航) 存在
+  PASS  P1: 初始化安全配置 button(首页, 可恢复)
+  PASS  P1: init 后 安全测试模式 header
+  PASS  P1: init 后 config.json 写入
+  PASS  P1: config.TestMode=true
+  PASS  P1: config 未开启真实电源
+  PASS  P1: 首页 创建定时任务 区可见
+  PASS  P1: 首页 当前任务 卡可见
+  PASS  P1: 首页 最近活动 区可见
+  PASS  P2: 首页内部滚动可用(左卡紧凑档溢出可滚)
+  PASS  P2: 首页无整页(最外层)滚动条
+  PASS  reachable: 首页创建任务按钮(内部滚动可达)
+  PASS  P3: 时间模式「每周指定星期」存在
+  PASS  P3: 「每周指定星期」可选中
+  PASS  reachable: 周选择项 周一 可见
+  PASS  reachable: 周选择项 周二 可见
+  PASS  reachable: 周选择项 周三 可见
+  PASS  reachable: 周选择项 周四 可见
+  PASS  reachable: 周选择项 周五 可见
+  PASS  reachable: 周选择项 周六 可见
+  PASS  reachable: 周选择项 周日 可见
+  PASS  P3: 默认 周一 选中
+  PASS  P3: 默认 周六 未选
+  PASS  P3: 默认 周日 未选
+  PASS  P3: 周六 可选中
+  PASS  P3: 周六 可取消
+  PASS  P9: 截图 每周指定星期 已保存
+  PASS  P4: 时间模式「一次性指定」存在
+  PASS  P4: 「一次性指定」可选中
+  PASS  reachable: 执行日期 区
+  PASS  P4: 「今天」快捷键存在
+  PASS  P4: 「今天」可点击并设置日期
+  PASS  P4: DatePicker(执行日期) 存在并已设今天
+  PASS  P4: 日期已设为非空(今天)
+  PASS  P4: 日历弹出 包含日期日按钮(可用)
+  PASS  P4: 日历包含当天日期
+  PASS  P4: 过去时间被明确拒绝(内联错误)
+  PASS  P9: 截图 一次性日历 已保存
+  PASS  P5: 回到 倒计时 模式
+  PASS  P5: 创建任务 button 存在
+  PASS  P5: 创建任务1(倒计时默认30分钟) 可点击
+  PASS  P5: 切换「每周指定星期」创建任务2
+  PASS  P5: 每周指定星期 面板已展开(周日可见)
+  PASS  P5: 创建任务2(每周指定星期) 可点击
+  PASS  P5: 首页当前任务卡显示「共 2 个任务」
+  PASS  P9: 截图 首页(两任务) 已保存
+  PASS  P5: 导航到 任务管理
+  PASS  P5: 任务管理同时显示 2 行任务
+  PASS  P5: 两任务均为启用(显示「停用」按钮)
+  PASS  P9: 截图 任务管理(两任务) 已保存
+  PASS  P6: 首页 顶部状态栏 + 左下导航 两处显示版本
+  PASS  P6: 导航到 关于软件
+  PASS  P6: 关于页 三处显示同一版本
+  PASS  P7: 导航到 高级功能
+  PASS  reachable: Office 只读说明卡
+  PASS  P7: 「查看日志与诊断」可见可点
+  PASS  P9: 截图 高级功能(Office卡) 已保存
+  PASS  P7: 「查看日志与诊断」跳转至 日志与诊断页
+  PASS  P8: 导航到 关于软件
+  PASS  reachable: 隐私与安全边界 卡
+  PASS  reachable: 帮助与反馈 卡
+  PASS  reachable: 诚实反馈通道声明
+  PASS  reachable: 隐私边界: 数据只存本机
+  PASS  reachable: 隐私边界: 诊断包脱敏
+  PASS  reachable: 隐私边界: 远程只读
+  PASS  reachable: 隐私边界: Office 不读内容
+  PASS  reachable: 帮助: 新手快速开始
+  PASS  reachable: 帮助: 故障排查
+  PASS  P9: 截图 关于软件 已保存
+  PASS  P10: 全程应用存活(无崩溃)
+
+S-UI2 UI SMOKE: pass=75 fail=0 skip=2

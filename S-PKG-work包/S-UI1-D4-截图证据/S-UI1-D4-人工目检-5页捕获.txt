@@ -1,0 +1,6 @@
+d4-tasks-150percent.png -> True verified=暂无任务
+d4-advanced-150percent.png -> True verified=高级功能
+d4-wol-150percent.png -> True verified=网络唤醒
+d4-logs-150percent.png -> True verified=日志与诊断
+d4-about-150percent.png -> True verified=关于软件
+DONE

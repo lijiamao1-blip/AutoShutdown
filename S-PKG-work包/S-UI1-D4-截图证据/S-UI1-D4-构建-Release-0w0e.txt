@@ -1,0 +1,11 @@
+  Determining projects to restore...
+  所有项目均是最新的，无法还原。
+  AutoShutdown.Core -> D:\电脑定时关机重建完整版\src\AutoShutdown.Core\bin\Release\net8.0\AutoShutdown.Core.dll
+  AutoShutdown.OfficeSaveHelper -> D:\电脑定时关机重建完整版\src\AutoShutdown.OfficeSaveHelper\bin\Release\net8.0-windows\AutoShutdown.OfficeSaveHelper.dll
+  AutoShutdown.App -> D:\电脑定时关机重建完整版\src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.dll
+
+已成功生成。
+    0 个警告
+    0 个错误
+
+已用时间 00:00:04.81
