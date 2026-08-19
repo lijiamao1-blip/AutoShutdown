@@ -1,0 +1,9 @@
+== S-UI1-D2 UIA 冒烟 连过第 2 轮（独立运行；pass=75 fail=0 skip=2）==
+== S-UI2 UI smoke (v2.0.0-S-UI2.943d685) ==
+EXE: D:\电脑定时关机重建完整版\artifacts\d2-smoke\S-UI2-943d685\AutoShutdown-v2.0.0-S-UI2.943d685.exe
+
+本轮为 S-UI1-D2 冒烟序列中两轮连续通过的第二轮（序列第 5 轮）。
+完整序列见 S-UI1-D2-结果记录.md（含第 2/3 轮「停用按钮数」既有冒烟脚本时序抖动说明与基线对照）。
+
+S-UI2 UI SMOKE: pass=75 fail=0 skip=2
+EXIT=0
