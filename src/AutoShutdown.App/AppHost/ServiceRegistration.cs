@@ -9,6 +9,7 @@ using AutoShutdown.App.Infrastructure.Idle;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.App.Infrastructure.Office;
 using AutoShutdown.App.Infrastructure.Power;
+using AutoShutdown.App.Infrastructure.ProcessSelection;
 using AutoShutdown.App.Infrastructure.Remote;
 using AutoShutdown.App.Infrastructure.Rtc;
 using AutoShutdown.App.Infrastructure.TaskScheduler;
@@ -109,6 +110,11 @@ public static class ServiceRegistration
         // 无 shell；强杀仅逐目标 opt-in。CloseAppsAction 默认 Block（fail-closed）。
         services.AddSingleton<IProcessManager, DiagnosticProcessManager>();
         services.AddSingleton<IAppWindowManager, DiagnosticAppWindowManager>();
+
+        // S-CLOSEUI1：从运行中的进程选择关闭目标。只读进程信息探测（System.Diagnostics.
+        // Process + FileVersionInfo，逐字段容错），仅用于选择窗口展示/勾选，绝不启动、
+        // 关闭、结束任何进程，不发送窗口消息，不请求提权。与执行边界 IProcessManager 分离。
+        services.AddSingleton<IProcessInfoProvider, DiagnosticProcessInfoProvider>();
         services.AddSingleton<CloseAppsService>(provider =>
             new CloseAppsService(
                 provider.GetRequiredService<IConfigurationService>(),
@@ -348,7 +354,18 @@ public static class ServiceRegistration
                 diagnosticsCenter: provider.GetRequiredService<DiagnosticsCenterViewModel>(),
                 // S-UI1-D2：注入任务定义集合与空闲监视器，供首页「当前任务」卡显示真实空闲状态。
                 taskService: provider.GetRequiredService<ITaskService>(),
-                idleMonitor: provider.GetRequiredService<IIdleMonitor>()));
+                idleMonitor: provider.GetRequiredService<IIdleMonitor>(),
+                // S-CLOSEUI1：注入只读进程信息探测与进程选择窗口启动器（模态弹出，仅读取）。
+                processInfoProvider: provider.GetRequiredService<IProcessInfoProvider>(),
+                processPickerLauncher: viewModel =>
+                {
+                    var window = new ProcessPickerWindow(viewModel)
+                    {
+                        Owner = System.Windows.Application.Current?.MainWindow
+                    };
+                    window.ShowDialog();
+                    return window.ConfirmedResult;
+                }));
         services.AddSingleton<IMainWindowFactory, MainWindowFactory>();
         services.AddSingleton<INotificationService, WpfNotificationService>();
         services.AddSingleton<NotificationCoordinator>();

@@ -756,6 +756,8 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                         <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="300" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
                                         <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
+                                        <Button Content="从运行中的进程选择" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding OpenProcessPickerCommand}" Padding="20,10" Margin="10,0,0,0"
+                                                ToolTip="只读取当前进程信息，不会启动、关闭或结束任何程序"/>
                                     </StackPanel>
                                     <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
                                         <ItemsControl.ItemTemplate>
@@ -765,12 +767,26 @@
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <CheckBox Content="{Binding Identifier}" IsChecked="{Binding ForceKillAllowed}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                            <TextBlock Text="{Binding IdentitySummary}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="22,2,0,0" TextWrapping="Wrap"
+                                                                       Visibility="{Binding HasIdentityInfo, Converter={StaticResource BoolToVisibility}}"/>
+                                                            <StackPanel Orientation="Horizontal" Margin="22,2,0,0" Visibility="{Binding AddedAtDisplay, Converter={StaticResource StringNotEmptyToVisibilityConverter}}">
+                                                                <TextBlock Text="添加于 " FontSize="11" Foreground="{StaticResource TextMutedBrush}"/>
+                                                                <TextBlock Text="{Binding AddedAtDisplay}" FontSize="11" Foreground="{StaticResource TextMutedBrush}"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding PathInvalidHintText}" FontSize="11" Foreground="#B26A00" Margin="22,2,0,0" TextWrapping="Wrap"
+                                                                       Visibility="{Binding IsPathInvalid, Converter={StaticResource BoolToVisibility}}"/>
                                                             <TextBlock Text="已授权强杀：将立即终止该进程，未保存工作可能丢失。" FontSize="11" Foreground="#C62828" Margin="22,2,0,0"
                                                                        Visibility="{Binding RiskVisible, Converter={StaticResource BoolToVisibility}}"/>
                                                         </StackPanel>
-                                                        <Button Grid.Column="1" Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
-                                                                Command="{Binding DataContext.RemoveCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding}"/>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Content="重新选择" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
+                                                                    Visibility="{Binding IsPathInvalid, Converter={StaticResource BoolToVisibility}}"
+                                                                    Command="{Binding DataContext.ReSelectCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                            <Button Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
+                                                                    Command="{Binding DataContext.RemoveCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>

@@ -6,7 +6,9 @@ using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.AutoStart;
 using AutoShutdown.App.Infrastructure.Diagnostics;
 using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.App.Infrastructure.ProcessSelection;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.CloseApps;
 using AutoShutdown.Core.Configuration;
 using AutoShutdown.Core.Idle;
 using AutoShutdown.Core.Scheduling;
@@ -89,6 +91,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DiagnosticsCenterViewModel? _diagnosticsCenter;
     private readonly ITaskService? _taskService;
     private readonly IIdleMonitor? _idleMonitor;
+    private readonly IProcessInfoProvider? _processInfoProvider;
+    private readonly Func<ProcessPickerViewModel, ProcessPickerResult?>? _processPickerLauncher;
 
     private TaskInstance? _currentInstance;
     private TaskInstanceState _lastState = TaskInstanceState.Unknown;
@@ -124,7 +128,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RemoteSectionViewModel? remoteSection = null,
         DiagnosticsCenterViewModel? diagnosticsCenter = null,
         ITaskService? taskService = null,
-        IIdleMonitor? idleMonitor = null)
+        IIdleMonitor? idleMonitor = null,
+        IProcessInfoProvider? processInfoProvider = null,
+        Func<ProcessPickerViewModel, ProcessPickerResult?>? processPickerLauncher = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -152,6 +158,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _diagnosticsCenter = diagnosticsCenter;
         _taskService = taskService;
         _idleMonitor = idleMonitor;
+        _processInfoProvider = processInfoProvider;
+        _processPickerLauncher = processPickerLauncher;
 
         NavItems =
         [
@@ -201,6 +209,14 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         });
         SaveCloseAppsCommand = new AsyncRelayCommand(ExecuteSaveCloseAppsAsync);
+        OpenProcessPickerCommand = new RelayCommand(_ => OpenProcessPicker());
+        ReSelectCloseAppsTargetCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is CloseAppsTargetRow row)
+            {
+                ReSelectCloseAppsTarget(row);
+            }
+        });
         EnableUnattendedCommand = new AsyncRelayCommand(
             ExecuteEnableUnattendedAsync,
             () => !IsUnattendedBusy && !_unattendedAuthorized && _unattendedPolicy is not null);
@@ -1368,6 +1384,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public AsyncRelayCommand SaveCloseAppsCommand { get; }
 
+    public ICommand OpenProcessPickerCommand { get; }
+
+    public ICommand ReSelectCloseAppsTargetCommand { get; }
+
     public void RefreshAutoStart()
     {
         AutoStartStatus status;
@@ -1925,13 +1945,20 @@ public sealed class MainWindowViewModel : ObservableObject
                 }
 
                 var hasPath = !string.IsNullOrWhiteSpace(target.ExecutablePath);
+                var path = hasPath ? target.ExecutablePath!.Trim() : null;
                 CloseAppsTargets.Add(new CloseAppsTargetRow(
-                    hasPath ? Path.GetFileName(target.ExecutablePath!.Trim()) : $"pid:{target.ProcessId}",
-                    hasPath ? target.ExecutablePath!.Trim() : null,
+                    hasPath ? (Path.GetFileName(path) ?? string.Empty) : $"pid:{target.ProcessId}",
+                    path,
                     target.ProcessId,
                     target.GracefulTimeoutSeconds,
                     target.ForceKillAllowed,
-                    ConfirmCloseAppsForceKill));
+                    ConfirmCloseAppsForceKill,
+                    target.ProcessName,
+                    target.ProductName,
+                    target.CompanyName,
+                    target.WindowTitleAtAdd,
+                    target.AddedAtUtc,
+                    isPathInvalid: IsPathInvalid(path)));
             }
         }
 
@@ -1996,7 +2023,13 @@ public sealed class MainWindowViewModel : ObservableObject
                     ExecutablePath = row.ExecutablePath,
                     ProcessId = row.ProcessId,
                     ForceKillAllowed = row.ForceKillAllowed,
-                    GracefulTimeoutSeconds = row.GracefulTimeoutSeconds
+                    GracefulTimeoutSeconds = row.GracefulTimeoutSeconds,
+                    // 只读识别信息（S-CLOSEUI1）：仅展示用，绝不参与执行匹配。
+                    ProcessName = row.ProcessName,
+                    ProductName = row.ProductName,
+                    CompanyName = row.CompanyName,
+                    WindowTitleAtAdd = row.WindowTitleAtAdd,
+                    AddedAtUtc = row.AddedAtUtc
                 });
             }
         }
@@ -2048,6 +2081,147 @@ public sealed class MainWindowViewModel : ObservableObject
             "启用强杀（关闭应用）",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning) == MessageBoxResult.OK;
+    }
+
+    // ---- 从运行中的进程选择（S-CLOSEUI1） ----
+
+    /// <summary>打开进程选择窗口（仅读取当前进程信息，不启动/关闭/结束任何进程）。</summary>
+    private void OpenProcessPicker()
+    {
+        ApplyPickerResult(LaunchProcessPicker(replaceRow: null), replaceRow: null);
+    }
+
+    /// <summary>失效路径重新选择：用用户新确认的运行中程序替换失效行。</summary>
+    private void ReSelectCloseAppsTarget(CloseAppsTargetRow row)
+    {
+        ApplyPickerResult(LaunchProcessPicker(replaceRow: row), replaceRow: row);
+    }
+
+    /// <summary>
+    /// 构建只读选择上下文并弹出进程选择窗口，返回确定结果（取消为 null）。
+    /// 生产实现由 DI 注入 lambda 弹出 <see cref="ProcessPickerWindow"/>；测试注入替身，绝不影响真实进程。
+    /// </summary>
+    private ProcessPickerResult? LaunchProcessPicker(CloseAppsTargetRow? replaceRow)
+    {
+        if (_processInfoProvider is null || _processPickerLauncher is null)
+        {
+            return null;
+        }
+
+        var context = new ProcessSelectionContext
+        {
+            CurrentProcessId = _processInfoProvider.CurrentProcessId,
+            CurrentSessionId = _processInfoProvider.CurrentSessionId,
+            CurrentExecutablePath = _processInfoProvider.CurrentExecutablePath,
+            ExistingTargetPaths = CloseAppsTargets
+                .Where(row => !ReferenceEquals(row, replaceRow) && !string.IsNullOrWhiteSpace(row.ExecutablePath))
+                .Select(row => row.ExecutablePath!.Trim())
+                .ToList()
+        };
+
+        return _processPickerLauncher(new ProcessPickerViewModel(_processInfoProvider, context));
+    }
+
+    /// <summary>合并选择结果到目标列表；取消（null）不改动任何目标。</summary>
+    private void ApplyPickerResult(ProcessPickerResult? result, CloseAppsTargetRow? replaceRow)
+    {
+        if (result is null)
+        {
+            return; // 取消：不改动目标集合。
+        }
+
+        AddConfirmedProcesses(result.ConfirmedProcesses, replaceRow);
+
+        var message = result.Warnings;
+        if (result.ConfirmedProcesses.Count > 0)
+        {
+            var added = result.ConfirmedProcesses.Count == 1
+                ? "已添加 1 个运行中的程序目标"
+                : $"已添加 {result.ConfirmedProcesses.Count} 个运行中的程序目标";
+            message = string.IsNullOrEmpty(message) ? added : $"{added}；{message}";
+        }
+
+        if (!string.IsNullOrEmpty(message))
+        {
+            CloseAppsStatusText = message;
+        }
+    }
+
+    /// <summary>
+    /// 把复核通过的运行中进程加入目标列表：按规范化完整路径去重；从进程选择添加绝不授予强杀、
+    /// 不持久化 PID 作为长期目标。
+    /// </summary>
+    private void AddConfirmedProcesses(IReadOnlyList<RunningProcessInfo> confirmed, CloseAppsTargetRow? replaceRow)
+    {
+        if (replaceRow is not null)
+        {
+            CloseAppsTargets.Remove(replaceRow);
+        }
+
+        foreach (var info in confirmed)
+        {
+            var normalized = ExecutablePathKey.Normalize(info.ExecutablePath);
+            if (normalized is null)
+            {
+                continue; // fail-closed：无法规范化的路径不加入。
+            }
+
+            var alreadyAdded = CloseAppsTargets.Any(row => ExecutablePathKey.EqualsNormalized(row.ExecutablePath, normalized));
+            if (alreadyAdded)
+            {
+                continue; // 同一程序（同完整路径）只保留一个目标。
+            }
+
+            CloseAppsTargets.Add(CreateRowFromRunningProcess(info));
+        }
+    }
+
+    private CloseAppsTargetRow CreateRowFromRunningProcess(RunningProcessInfo info)
+    {
+        var normalized = ExecutablePathKey.Normalize(info.ExecutablePath);
+        var identifier = normalized is not null
+            ? Path.GetFileName(normalized)
+            : (string.IsNullOrWhiteSpace(info.ProcessName) ? $"pid:{info.ProcessId}" : info.ProcessName);
+
+        return new CloseAppsTargetRow(
+            identifier,
+            info.ExecutablePath?.Trim(),
+            processId: null, // 不持久化 PID：仅展示当前 PID，长期目标只按完整路径。
+            gracefulTimeoutSeconds: null,
+            forceKillAllowed: false, // 从进程选择添加绝不授予强杀。
+            ConfirmCloseAppsForceKill,
+            info.ProcessName,
+            info.ProductName,
+            info.CompanyName,
+            info.WindowTitle,
+            _clock.UtcNow);
+    }
+
+    /// <summary>
+    /// 判断已保存路径是否已失效（用于升级提示「原程序路径已失效，请重新选择运行中的程序」）。
+    /// 规范化失败 / 读取异常 / 文件不存在 / 环境变量占位一律视为失效，提示用户重新选择运行中的程序。
+    /// </summary>
+    private static bool IsPathInvalid(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false; // PID-only 目标没有路径可校验。
+        }
+
+        var normalized = ExecutablePathKey.Normalize(path);
+        if (normalized is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return !File.Exists(normalized);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            return true; // 无法确认路径状态：fail-closed 视为失效。
+        }
     }
 
     // ---- 最近活动 ----

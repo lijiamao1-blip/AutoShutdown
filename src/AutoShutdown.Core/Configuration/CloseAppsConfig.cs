@@ -28,4 +28,24 @@ public sealed record CloseAppsTargetConfig
 
     /// <summary>逐目标优雅关闭等待期限覆盖（秒）；未设置用全局值。</summary>
     public int? GracefulTimeoutSeconds { get; init; }
+
+    // ---- S-CLOSEUI1 只读识别信息（仅展示与候选提示；绝不参与执行期匹配） ----
+    // 由「从运行中的进程选择」在添加时记录，帮助用户识别目标与在路径失效后辅助搜索；
+    // 执行期匹配的唯一依据始终是 ExecutablePath（规范化完整绝对路径）。缺失（旧配置/
+    // 手工添加）为 null，绝不因此改变执行匹配或校验结果。
+
+    /// <summary>添加时的进程名（仅识别用）。</summary>
+    public string? ProcessName { get; init; }
+
+    /// <summary>添加时的产品名称（仅识别用）。</summary>
+    public string? ProductName { get; init; }
+
+    /// <summary>添加时的公司名称（仅识别用）。</summary>
+    public string? CompanyName { get; init; }
+
+    /// <summary>添加时的窗口标题（仅识别用；窗口标题会变化，绝不作为执行依据）。</summary>
+    public string? WindowTitleAtAdd { get; init; }
+
+    /// <summary>添加时间（UTC，仅识别用）。</summary>
+    public DateTimeOffset? AddedAtUtc { get; init; }
 }
