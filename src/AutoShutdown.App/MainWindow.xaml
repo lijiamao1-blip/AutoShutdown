@@ -572,6 +572,30 @@
                             <TextBlock Text="日志与诊断" FontSize="26" FontWeight="Bold" Foreground="Black" Margin="0,0,0,4"/>
                             <TextBlock Text="查看日志、运行只读安全自检、导出脱敏诊断包或保存当前窗口截图。以下操作均不会修改配置，也不会执行任何电源操作。" FontSize="13" Foreground="Black" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
+                            <!-- S-UI3：只读测试环境卡；普通运行也如实显示，但不改变任何运行状态。 -->
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="16,12" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="当前测试环境" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,8"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                        <TextBlock Text="当前运行模式"/><TextBlock Grid.Column="1" Text="{Binding DiagnosticsCenter.TestEnvironmentModeText}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="1" Text="数据目录"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DiagnosticsCenter.TestDataDirectory}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="2" Text="Git 构建提交"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DiagnosticsCenter.TestEnvironmentCommitText}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="3" Text="产品版本"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding DiagnosticsCenter.TestEnvironmentVersionText}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="4" Text="是否允许真实电源操作"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding DiagnosticsCenter.TestEnvironmentRealPowerText}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Row="5" Text="当前任务数量"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding DiagnosticsCenter.TestEnvironmentTaskCountText}"/>
+                                        <TextBlock Grid.Row="6" Text="日志目录"/><TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding DiagnosticsCenter.LogDirectory}" TextWrapping="Wrap"/>
+                                    </Grid>
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Content="打开测试数据目录" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.OpenTestDataDirectoryCommand}" Margin="0,0,8,0"/>
+                                        <Button Content="打开日志目录" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.OpenLogDirectoryCommand}" Margin="0,0,8,0"/>
+                                        <Button Content="复制测试环境摘要" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.CopyTestEnvironmentSummaryCommand}" Margin="0,0,8,0"/>
+                                        <Button Content="截图当前窗口" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding DiagnosticsCenter.ScreenshotCommand}"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
                             <!-- 日志目录与摘要 -->
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
                                 <StackPanel>

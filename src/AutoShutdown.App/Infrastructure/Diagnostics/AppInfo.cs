@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using AutoShutdown.App.Infrastructure;
 
 namespace AutoShutdown.App.Infrastructure.Diagnostics;
 
@@ -22,7 +23,9 @@ public static class AppInfo
     public static string VersionText { get; } = FormatVersion(InformationalVersion);
 
     /// <summary>构建提交（InformationalVersion 中 + 之后的部分；无则如实说明）。</summary>
-    public static string BuildCommitText { get; } = FormatCommit(InformationalVersion);
+    public static string BuildCommitText { get; } = UiTestEnvironment.IsRequested && UiTestEnvironment.BuildCommit.Length > 0
+        ? UiTestEnvironment.BuildCommit
+        : FormatCommit(InformationalVersion);
 
     /// <summary>候选包签名状态：如实标记 unsigned-candidate，并附运行时 Authenticode 探测结果。</summary>
     public static string SigningStatusText { get; } = DetectSigningStatus();

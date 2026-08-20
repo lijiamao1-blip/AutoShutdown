@@ -30,6 +30,15 @@ public partial class App : System.Windows.Application
         logger.Info("ApplicationStarting", "应用启动。");
         logger.Info("DataRoot", "数据根目录：" + dataRoot);
 
+        if (!UiTestEnvironment.TryValidate(dataRoot, out var uiTestError))
+        {
+            logger.Error("UiTestStartupRefused", uiTestError);
+            System.Windows.MessageBox.Show(uiTestError, "安全测试启动已拒绝", MessageBoxButton.OK, MessageBoxImage.Error);
+            logger.Dispose();
+            Shutdown(2);
+            return;
+        }
+
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             LogUnhandled(args.ExceptionObject as Exception);
         DispatcherUnhandledException += (_, args) =>
@@ -46,6 +55,15 @@ public partial class App : System.Windows.Application
         var acquire = singleInstance.TryAcquirePrimary();
         if (acquire.Result != SingleInstanceResult.Primary)
         {
+            // S-UI3：测试实例绝不向既有正式实例转发激活或任务请求。
+            if (UiTestEnvironment.IsRequested)
+            {
+                logger.Warning("UiTestExistingInstanceRefused", "检测到已有实例；安全测试拒绝启动且不转发。 ");
+                singleInstance.Dispose();
+                logger.Dispose();
+                Shutdown(3);
+                return;
+            }
             if (acquire.Result == SingleInstanceResult.Secondary)
             {
                 logger.Warning(

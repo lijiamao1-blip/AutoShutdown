@@ -104,6 +104,8 @@ public sealed class DiagnosticsCenterViewModel : ObservableObject
         RefreshCommand = new AsyncRelayCommand(ExecuteRefreshAsync);
         CopySelectedLogCommand = new RelayCommand(CopySelectedLog, () => SelectedLogEntry is not null);
         OpenLogDirectoryCommand = new RelayCommand(() => _shell.OpenDirectory(LogDirectory));
+        OpenTestDataDirectoryCommand = new RelayCommand(() => _shell.OpenDirectory(TestDataDirectory));
+        CopyTestEnvironmentSummaryCommand = new RelayCommand(CopyTestEnvironmentSummary);
         CopyDiagnosticSummaryCommand = new RelayCommand(CopyDiagnosticSummary);
         RunSelfCheckCommand = new AsyncRelayCommand(ExecuteRunSelfCheckAsync, () => !_isSelfCheckRunning);
         ExportDiagnosticsCommand = new AsyncRelayCommand(ExecuteExportDiagnosticsAsync);
@@ -111,6 +113,22 @@ public sealed class DiagnosticsCenterViewModel : ObservableObject
     }
 
     public string LogDirectory => _logger.LogDirectory;
+
+    public bool IsUiTestEnvironment => Infrastructure.UiTestEnvironment.IsRequested;
+
+    public string TestDataDirectory => _dataRootProvider();
+
+    public string TestEnvironmentModeText => IsUiTestEnvironment ? "安全测试模式" : "正式/普通运行模式";
+
+    public string TestEnvironmentCommitText => IsUiTestEnvironment
+        ? Infrastructure.UiTestEnvironment.BuildCommit
+        : _liveSummaryProvider().BuildCommitText;
+
+    public string TestEnvironmentVersionText => _liveSummaryProvider().VersionText;
+
+    public string TestEnvironmentRealPowerText => IsUiTestEnvironment ? "否（强制禁止）" : "以当前配置为准";
+
+    public string TestEnvironmentTaskCountText => _liveSummaryProvider().Tasks.Count.ToString();
 
     public ObservableCollection<string> LogFileNames { get; } = [];
 
@@ -222,6 +240,10 @@ public sealed class DiagnosticsCenterViewModel : ObservableObject
 
     public RelayCommand OpenLogDirectoryCommand { get; }
 
+    public RelayCommand OpenTestDataDirectoryCommand { get; }
+
+    public RelayCommand CopyTestEnvironmentSummaryCommand { get; }
+
     public RelayCommand CopyDiagnosticSummaryCommand { get; }
 
     public AsyncRelayCommand RunSelfCheckCommand { get; }
@@ -229,6 +251,26 @@ public sealed class DiagnosticsCenterViewModel : ObservableObject
     public AsyncRelayCommand ExportDiagnosticsCommand { get; }
 
     public RelayCommand ScreenshotCommand { get; }
+
+    private void CopyTestEnvironmentSummary()
+    {
+        var text = $"当前运行模式：{TestEnvironmentModeText}\n"
+            + $"数据目录：{TestDataDirectory}\n"
+            + $"Git 构建提交：{TestEnvironmentCommitText}\n"
+            + $"产品版本：{TestEnvironmentVersionText}\n"
+            + $"是否允许真实电源操作：{TestEnvironmentRealPowerText}\n"
+            + $"当前任务数量：{TestEnvironmentTaskCountText}\n"
+            + $"日志目录：{LogDirectory}";
+        try
+        {
+            _clipboardWriter(text);
+            DiagnosticsStatusText = "测试环境摘要已复制";
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText = "复制测试环境摘要失败：" + exception.Message;
+        }
+    }
 
     // ---- 刷新日志 ----
 

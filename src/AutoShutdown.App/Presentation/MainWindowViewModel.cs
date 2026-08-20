@@ -2143,10 +2143,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 ConfigStatusText = config.TestMode
                     ? "安全有效"
                     : (config.RealPowerEnabled ? "真实电源模式" : "测试模式已关闭（拒绝执行）");
-                HeaderModeText = _configRealPowerEnabled ? "真实电源模式" : "安全测试模式";
-                HeaderModeHint = _configRealPowerEnabled
-                    ? "当前将执行真实系统电源操作，请谨慎使用"
-                    : "当前不会执行真实系统电源操作";
+                HeaderModeText = Infrastructure.UiTestEnvironment.IsRequested
+                    ? "安全测试模式——不会执行真实系统电源操作"
+                    : (_configRealPowerEnabled ? "真实电源模式" : "安全测试模式");
+                HeaderModeHint = Infrastructure.UiTestEnvironment.IsRequested
+                    ? "独立 UiTestSandbox，本地数据隔离"
+                    : (_configRealPowerEnabled
+                        ? "当前将执行真实系统电源操作，请谨慎使用"
+                        : "当前不会执行真实系统电源操作");
                 TryLog(logger => logger.Info(
                     "ConfigurationLoaded",
                     "配置加载成功，SchemaVersion=" + config.SchemaVersion
