@@ -739,30 +739,124 @@ public sealed class S_UI2_MultiTaskHomeTests
     }
 
     // ======================================================================================
-    // H. 首页布局契约（S-UI2 第 6 节）
+    // H. 首页布局契约（最终首页：左侧完整表单；右侧当前任务/最近活动为 2:1）
     // ======================================================================================
 
     [Fact]
-    public void Homepage_OuterContainer_IsGrid_NotScrollViewer()
+    public void Homepage_OuterContainer_IsGrid_NoHomeScrollViewer()
     {
+        // 首页最外层是 Grid（非 ScrollViewer，无首页整体滚动条）。
         var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
 
-        // 首页最外层是 Grid（非 ScrollViewer，无首页整体滚动条）；滚动只发生在内部（创建卡）。
         Assert.StartsWith("<Grid ", home.TrimStart());
-        Assert.Contains("<ScrollViewer", home);
+        // 首页全区块不含显式 ScrollViewer；最近活动仅使用 ListBox 自身的内部滚动。
+        Assert.DoesNotContain("<ScrollViewer", home);
     }
 
     [Fact]
-    public void Homepage_HasThreeRegions_Create_Current_Recent()
+    public void Homepage_HasTwoColumnLayout_Create_Current_Recent()
     {
         var xaml = ReadAppFile("MainWindow.xaml");
         var home = ExtractElementWithVisibility(xaml, "IsHomeVisible");
 
+        // 主页面左右两栏：左完整创建表单，右当前任务/最近活动。
+        Assert.Contains("Width=\"1.06*\"", home);
+        Assert.Contains("Width=\"0.94*\"", home);
         Assert.Contains("创建定时任务", home);
         Assert.Contains("当前任务", home);
         Assert.Contains("最近活动", home);
         Assert.Contains("CurrentTaskCountText", home);
-        Assert.Contains("RecentActivities", home);
+        // 最近活动直接绑定完整 20 条列表（非 D1 的 5 条摘要）
+        Assert.Contains("ItemsSource=\"{Binding RecentActivities}\"", home);
+    }
+
+    [Fact]
+    public void Homepage_Cards_HaveFifteenDipEdgeMargins()
+    {
+        // 卡片 15 DIP 间距：由 Grid/Margin 实现，随 WPF DPI 一致缩放。
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+
+        Assert.Contains("Margin=\"15,15,0,15\"", home);
+        Assert.Contains("Margin=\"0,15,15,0\"", home);
+        Assert.Contains("Margin=\"0,0,15,15\"", home);
+    }
+
+    [Fact]
+    public void Homepage_RightCards_UseTwoToOneHeightRatio_AndCountdownIsDoubled()
+    {
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+
+        Assert.Contains("<RowDefinition Height=\"2*\"/>", home);
+        Assert.Contains("<RowDefinition Height=\"*\"/>", home);
+        Assert.Contains("<Setter Property=\"FontSize\" Value=\"80\"/>", home);
+        // 空闲状态的长文本继续用较小字号和换行，避免内容截断。
+        Assert.Contains("<Setter Property=\"FontSize\" Value=\"15\"/>", home);
+    }
+
+    [Fact]
+    public void Homepage_CurrentTaskCard_HasThreeStatusCardsAtBottom()
+    {
+        // 三张状态小卡（任务状态/调度服务/配置状态）恢复到当前任务卡底部。
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+
+        Assert.Contains("任务状态", home);
+        Assert.Contains("调度服务", home);
+        Assert.Contains("配置状态", home);
+        Assert.Contains("SchedulerStatusText", home);
+        Assert.Contains("ConfigStatusText", home);
+        Assert.Contains("UniformGrid Columns=\"3\"", home);
+    }
+
+    [Fact]
+    public void Homepage_RecentActivities_TitleFixed_ListScrollsInternally()
+    {
+        // 最近活动卡：标题固定（Grid 行 Auto），仅列表区内部纵向滚动
+        // （VerticalScrollBarVisibility=Auto，HorizontalScrollBarVisibility=Disabled）。
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+
+        Assert.Contains("<RowDefinition Height=\"Auto\"/>", home);
+        Assert.Contains("<RowDefinition Height=\"*\"/>", home);
+        Assert.Contains("ScrollViewer.VerticalScrollBarVisibility=\"Auto\"", home);
+        Assert.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Disabled\"", home);
+        Assert.Contains("ItemsSource=\"{Binding RecentActivities}\"", home);
+    }
+
+    [Fact]
+    public void Homepage_KeepsFullForm_NoTrimming_NoCreateView()
+    {
+        // 完整创建表单直接位于首页左侧（非独立创建视图）：时间模式 WrapPanel 自动宽度，
+        // 关键文案不省略、不缩字、不用 Viewbox；未选中模式的输入区按绑定折叠。
+        var xaml = ReadAppFile("MainWindow.xaml");
+        var home = ExtractElementWithVisibility(xaml, "IsHomeVisible");
+
+        Assert.Contains("时间模式（8 种）", home);
+        Assert.Contains("WrapPanel", home);
+        Assert.Contains("Content=\"每月第N个工作日\"", home);
+        Assert.Contains("Content=\"每周指定星期\"", home);
+        Assert.Contains("Content=\"唤醒他机\"", home);
+        Assert.DoesNotContain("Viewbox", home);
+        Assert.DoesNotContain("TextTrimming", home);
+        Assert.Contains("ModeIsCountdown", home);
+        Assert.Contains("IsTimeInputVisible", home);
+        Assert.Contains("IsIdleSelectorVisible", home);
+        // 已删除独立创建视图/仪表盘逻辑
+        Assert.DoesNotContain("IsCreateViewVisible", xaml);
+        Assert.DoesNotContain("IsDashboardVisible", xaml);
+        Assert.DoesNotContain("OpenCreateCommand", xaml);
+        Assert.DoesNotContain("BackToDashboardCommand", xaml);
+        Assert.DoesNotContain("HomeRecentActivities", xaml);
+    }
+
+    [Fact]
+    public void Homepage_CurrentTaskCard_TextStaysBlack_OrHighContrast()
+    {
+        // 当前任务卡内信息文字保持黑/高对比（S-UI1-D3 已将 4 行说明改为 Black，须保持不变）。
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+
+        Assert.Contains("下次执行：", home);
+        Assert.Contains("Foreground=\"Black\"", home);
+        Assert.Contains("Foreground=\"#294064\"", home);   // 状态行（深蓝高对比）
+        Assert.Contains("Foreground=\"#E9E1FF\"", home);   // 计数徽标（紫色卡上浅色高对比）
     }
 
     [Fact]
@@ -804,6 +898,7 @@ public sealed class S_UI2_MultiTaskHomeTests
         Assert.Contains("OneTimeDateTimeError", home);
         Assert.Contains("CalendarStyle", home);
     }
+
 
     // ======================================================================================
     // Helpers

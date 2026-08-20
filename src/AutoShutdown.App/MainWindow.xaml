@@ -94,7 +94,7 @@
                 <!-- 内容区：各页均为可滚动布局（垂直滚动条自动出现），不裁切 -->
                 <Grid Grid.Column="1">
 
-                    <!-- 首页（S-UI2：无最外层滚动条；左=创建任务内滚，右上=当前任务，右下=最近活动内滚） -->
+                    <!-- 首页：左侧完整创建表单；右侧当前任务与最近活动按 2:1 分配高度。 -->
                     <Grid Grid.Column="1" Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.06*"/>
@@ -102,33 +102,33 @@
                             <ColumnDefinition Width="0.94*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- 左：创建定时任务（仅内部滚动，不产生首页最外层滚动条） -->
-                        <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
-                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                <StackPanel>
-                                    <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,14"/>
-                                    <TextBlock Text="时间模式（8 种）" Style="{StaticResource FieldLabelStyle}"/>
-                                    <WrapPanel Margin="0,7,0,12">
-                                        <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="每周指定星期" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                        <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                    </WrapPanel>
-                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12">
+                        <!-- 左：创建定时任务。15 DIP 外边距随 WPF DPI 缩放，保持各缩放档观感一致。 -->
+                    <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="15,15,0,15">
+                        <StackPanel>
+                            <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,8"/>
+                            <TextBlock Text="时间模式（8 种）" Style="{StaticResource FieldLabelStyle}"/>
+                            <WrapPanel Margin="0,5,0,8">
+                                <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="每周指定星期" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                            </WrapPanel>
+                            <StackPanel>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8">
                                         <Grid>
                                             <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource BoolToVisibility}}">
                                                 <WrapPanel>
-                                                    <StackPanel MinWidth="150" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding CountdownHourOptions}" SelectedItem="{Binding CountdownHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
-                                                    <StackPanel MinWidth="150" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding CountdownMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
-                                                    <StackPanel MinWidth="150" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding CountdownHourOptions}" SelectedItem="{Binding CountdownHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding CountdownMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding CountdownSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
                                                 </WrapPanel>
                                             </StackPanel>
                                             <StackPanel Visibility="{Binding IsTimeInputVisible, Converter={StaticResource BoolToVisibility}}">
-                                                <StackPanel Margin="0,0,0,10" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Margin="0,0,0,8" Visibility="{Binding IsOneTimeDateVisible, Converter={StaticResource BoolToVisibility}}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="执行日期" Style="{StaticResource MicroLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -148,13 +148,13 @@
                                                     <TextBlock Text="{Binding OneTimeDateTimeError}" FontSize="11" Foreground="#C62828" TextWrapping="Wrap" Margin="0,4,0,0"
                                                                Visibility="{Binding HasOneTimeDateTimeError, Converter={StaticResource BoolToVisibility}}"/>
                                                 </StackPanel>
-                                                <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                <TextBlock Text="目标时间" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,6"/>
                                                 <WrapPanel>
-                                                    <StackPanel MinWidth="150" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
-                                                    <StackPanel MinWidth="150" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
-                                                    <StackPanel MinWidth="150" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="0,0,8,0"><TextBlock Text="小时" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ClockHourOptions}" SelectedItem="{Binding TimeHoursText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="4,0"><TextBlock Text="分钟" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding MinuteOptions}" SelectedItem="{Binding TimeMinutesText}" HorizontalAlignment="Stretch"/></StackPanel>
+                                                    <StackPanel MinWidth="130" Margin="8,0,0,0"><TextBlock Text="秒" Style="{StaticResource MicroLabelStyle}"/><ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding SecondOptions}" SelectedItem="{Binding TimeSecondsText}" HorizontalAlignment="Stretch"/></StackPanel>
                                                 </WrapPanel>
-                                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsWeekdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Margin="0,8,0,0" Visibility="{Binding IsWeekdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
                                                     <TextBlock Text="触发星期（周一至周日，可多选；默认周一至周五）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
                                                     <WrapPanel>
                                                         <CheckBox Content="周一" IsChecked="{Binding WeekdayMonday}" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -166,66 +166,66 @@
                                                         <CheckBox Content="周日" IsChecked="{Binding WeekdaySunday}" VerticalAlignment="Center"/>
                                                     </WrapPanel>
                                                 </StackPanel>
-                                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Margin="0,8,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
                                                     <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
                                                     <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
                                                 </StackPanel>
                                             </StackPanel>
                                             <StackPanel Visibility="{Binding IsIdleSelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                                <TextBlock Text="空闲阈值" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                                <TextBlock Text="空闲阈值" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,6"/>
                                                 <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding IdleThresholdOptions}" SelectedIndex="{Binding IdleThresholdIndex}" HorizontalAlignment="Stretch"/>
-                                                <TextBlock Text="鼠标/键盘持续无操作达到阈值即触发倒计时；倒计时期间输入恢复会自动取消。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                                <TextBlock Text="鼠标/键盘持续无操作达到阈值即触发倒计时；倒计时期间输入恢复会自动取消。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,5,0,0"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>
-                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
                                         <StackPanel>
                                             <TextBlock Text="例外日历（节假日）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
                                             <TextBlock Text="每行一个日期（yyyy-MM-dd），这些日期不执行；留空表示无例外。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
                                             <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
                                         </StackPanel>
                                     </Border>
-                                    <TextBlock Text="电源动作（5 种）" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
-                                    <WrapPanel Margin="0,0,0,12">
+                                    <TextBlock Text="电源动作（5 种）" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,5"/>
+                                    <WrapPanel Margin="0,0,0,8">
                                         <RadioButton Content="关机" IsChecked="{Binding ActionIsShutdown}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         <RadioButton Content="重启" IsChecked="{Binding ActionIsRestart}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         <RadioButton Content="睡眠" IsChecked="{Binding ActionIsSleep}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         <RadioButton Content="休眠" IsChecked="{Binding ActionIsHibernate}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                         <RadioButton Content="唤醒他机" IsChecked="{Binding ActionIsWakeOnLan}" GroupName="TaskAction" Style="{StaticResource ActionRadioStyle}"/>
                                     </WrapPanel>
-                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsWolTargetSelectorVisible, Converter={StaticResource BoolToVisibility}}">
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8" Visibility="{Binding IsWolTargetSelectorVisible, Converter={StaticResource BoolToVisibility}}">
                                         <StackPanel>
-                                            <TextBlock Text="目标机器" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,7"/>
+                                            <TextBlock Text="目标机器" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,6"/>
                                             <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding WolTargetsSection.Targets}"
                                                       SelectedValuePath="Id" SelectedValue="{Binding SelectedWolTargetId}"
                                                       DisplayMemberPath="Name" HorizontalAlignment="Stretch"/>
-                                            <TextBlock Text="仅向已配置的局域网目标发送 Magic Packet（不扫描、不自动发现、不出公网）。目标机器请在「网络唤醒」或「软件设置」中管理。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                            <TextBlock Text="仅向已配置的局域网目标发送 Magic Packet（不扫描、不自动发现、不出公网）。目标机器请在「网络唤醒」或「软件设置」中管理。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,5,0,0"/>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,12" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8" Visibility="{Binding IsUnattendedTaskOptionVisible, Converter={StaticResource BoolToVisibility}}">
                                         <StackPanel>
                                             <CheckBox Content="使用无人值守（到期不等待人工确认）" IsChecked="{Binding UseUnattended}" IsEnabled="{Binding IsUnattendedTaskOptionAvailable}" VerticalAlignment="Center"/>
                                             <TextBlock Text="{Binding UnattendedTaskOptionHint}" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="23,4,0,0"/>
                                         </StackPanel>
                                     </Border>
-                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,12"/>
+                                    <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding ReminderOptions}" SelectedIndex="{Binding ReminderIndex}" HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
                                     <TextBlock Text="{Binding ConfigInitErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasConfigInitError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,10" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="初始化安全配置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding InitializeConfigCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,8" Visibility="{Binding IsConfigInitVisible, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding CreateDisabledReason}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="{Binding HasCreateError, Converter={StaticResource BoolToVisibility}}"/>
                                     <Button Content="创建任务" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}" HorizontalAlignment="Stretch"/>
-                                </StackPanel>
-                            </ScrollViewer>
-                        </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
 
-                        <!-- 右上：当前任务（紧凑状态卡；S-UI2 首页摘要与任务管理一致） -->
+                        <!-- 右上：当前任务（紧凑状态卡；S-UI2 首页摘要与任务管理一致；卡内底部三张状态小卡恢复） -->
                         <Grid Grid.Column="2">
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="2*"/>
                                 <RowDefinition Height="12"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
-                            <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="20,14">
+                            <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="20,14" Margin="0,15,15,0">
                                 <StackPanel>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -242,7 +242,7 @@
                                                  若作元素局部值会压过触发器，空闲态仍残留辉光。 -->
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
-                                                    <Setter Property="FontSize" Value="40"/>
+                                                    <Setter Property="FontSize" Value="80"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                     <Setter Property="Foreground" Value="White"/>
                                                     <Setter Property="Effect">
@@ -283,14 +283,19 @@
                                 </StackPanel>
                             </Border>
 
-                            <!-- 右下：最近活动（只使用内部列表滚动，不产生首页最右侧滚动条） -->
-                            <Border Grid.Row="2" Style="{StaticResource GlassCardStyle}" Padding="16,12">
-                                <StackPanel>
+                            <!-- 右下：最近活动（标题固定，仅列表区内部纵向滚动；内容未超出不显示滚动条，超出自动显示） -->
+                            <Border Grid.Row="2" Style="{StaticResource GlassCardStyle}" Padding="16,12" Margin="0,0,15,15">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
                                     <TextBlock Text="最近活动" Style="{StaticResource CardTitleStyle}" FontSize="15" Margin="0,0,0,8"/>
-                                    <ListBox ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MinHeight="60">
+                                    <ListBox Grid.Row="1" ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MinHeight="60"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                         <ListBox.ItemTemplate><DataTemplate><TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock></DataTemplate></ListBox.ItemTemplate>
                                     </ListBox>
-                                </StackPanel>
+                                </Grid>
                             </Border>
                         </Grid>
                     </Grid>
