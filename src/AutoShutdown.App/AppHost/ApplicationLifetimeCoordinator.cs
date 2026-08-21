@@ -8,6 +8,7 @@ using AutoShutdown.App.Presentation;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Recovery;
 using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
+using AutoShutdown.Core.Storage;
 
 namespace AutoShutdown.App.AppHost;
 
@@ -23,6 +24,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private readonly NotificationCoordinator _notificationCoordinator;
     private readonly RecoveryNoticeService _recoveryNotice;
     private readonly TaskSyncCoordinator _taskSyncCoordinator;
+    private readonly TaskSyncSettingsStore _taskSyncSettingsStore;
     private readonly RemoteServer _remoteServer;
     private readonly IApplicationLogger _logger;
     private readonly LogRetentionService _logRetention;
@@ -33,6 +35,12 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     private Task? _exitTask;
     private bool _exiting;
     private bool _disposed;
+
+    /// <summary>
+    /// 单个启动步骤的统一超时（S-STARTUP-D1）：超过即视为启动卡死，fail-closed 失败处理，
+    /// 绝不在 UI 线程无限等待任何可能阻塞的初始化。
+    /// </summary>
+    private static readonly TimeSpan StartupStepTimeout = TimeSpan.FromSeconds(20);
 
     public ApplicationLifetimeCoordinator(
         SingleInstanceCoordinator singleInstance,
@@ -45,6 +53,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         NotificationCoordinator notificationCoordinator,
         RecoveryNoticeService recoveryNotice,
         TaskSyncCoordinator taskSyncCoordinator,
+        TaskSyncSettingsStore taskSyncSettingsStore,
         RemoteServer remoteServer,
         IApplicationLogger logger,
         LogRetentionService logRetention)
@@ -59,6 +68,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(notificationCoordinator);
         ArgumentNullException.ThrowIfNull(recoveryNotice);
         ArgumentNullException.ThrowIfNull(taskSyncCoordinator);
+        ArgumentNullException.ThrowIfNull(taskSyncSettingsStore);
         ArgumentNullException.ThrowIfNull(remoteServer);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(logRetention);
@@ -75,6 +85,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
         // 在调度引擎启动（RunAsync 加载任务）前解析，保证 ctor 中订阅本地事实源事件不遗漏
         // 初始加载；Dispose 时解除订阅并取消在途防抖。
         _taskSyncCoordinator = taskSyncCoordinator;
+        _taskSyncSettingsStore = taskSyncSettingsStore;
         _remoteServer = remoteServer;
         _logger = logger;
         _logRetention = logRetention;
@@ -110,26 +121,97 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     public void Start()
     {
         System.Windows.Application.Current.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-        _logRetention.RunOnce();
+
+        // S-STARTUP-D1：激活管道最先启动——即使后续启动步骤偏慢，次实例的激活/触发请求也能
+        // 立刻到达并排队到 UI 线程处理，杜绝「主实例卡住但管道未起 → 次实例转发失败」。
+        _logger.Info("ActivationPipeStarting", "激活管道启动中。");
+        _pipeServer.Start();
+        _logger.Info("ActivationPipeStarted", "激活管道已启动。");
+
+        // 日志保留清理：线程池执行 + 限时，绝不阻塞 UI 线程启动；失败仅记日志。
+        RunLogRetention();
+
+        // 任务计划程序同步开关：线程池读取 task-sync.json（有界 + fail-closed），必须在调度
+        // 引擎加载任务前决定（协调器 ctor 已在引擎启动前解析并订阅事实源事件）。
+        LoadTaskSyncSettings();
+
         _logger.Info("SchedulerStarting", "调度引擎启动中。");
         RecoverFromCrash();
-        _pipeServer.Start();
         _engineTask = _schedulerEngine.RunAsync(_appCts.Token);
         _logger.Info("SchedulerRunning", "调度引擎已启动。");
         _ = ObserveEngineAsync(_engineTask);
+
         // S23：调度引擎就绪后再按 remote-settings.json 启动远程控制（默认关闭，绝不静默启用）。
-        _remoteServer.StartAsync(_appCts.Token).GetAwaiter().GetResult();
+        // 线程池执行 + 限时：失败/超时保持不监听（fail-closed），且绝不让 UI 线程卡死在启动。
+        StartRemoteServer();
+
         _trayIcon.ExitRequested = RequestExit;
         _trayIcon.Start();
         _dashboardRefreshService.Start();
         _notificationCoordinator.Start();
+
+        _logger.Info("MainWindowActivating", "主窗口激活中。");
         _windowActivation.ActivateMainWindow();
+        _logger.Info("MainWindowActivated", "主窗口已激活。");
         _logger.Info("ApplicationStarted", "应用启动完成。");
+    }
+
+    /// <summary>
+    /// 日志保留清理：可能枚举/删除日志目录（磁盘停滞时可能长时间阻塞），故在线程池执行并限时；
+    /// 失败只记日志，绝不阻塞启动。
+    /// </summary>
+    private void RunLogRetention()
+    {
+        try
+        {
+            Task.Run(() => _logRetention.RunOnce())
+                .WaitAsync(StartupStepTimeout)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception exception)
+        {
+            _logger.Warning("LogRetentionFailed", "日志保留清理超时或失败（" + exception.Message + "），忽略。");
+        }
+    }
+
+    /// <summary>
+    /// 任务计划程序同步开关：有界、可记录、fail-closed。读取失败/超时一律保持关闭，
+    /// 绝不静默启用（启用会创建外部计划任务）。
+    /// </summary>
+    private void LoadTaskSyncSettings()
+    {
+        var enabled = StartupTaskSyncSettingsGate.LoadEnabled(
+            _taskSyncSettingsStore,
+            _logger,
+            StartupStepTimeout);
+        _taskSyncCoordinator.Enabled = enabled;
+    }
+
+    /// <summary>
+    /// 远程控制启动（S23）：线程池执行 + 限时。失败/超时保持不监听（fail-closed），
+    /// 且绝不让 UI 线程在启动阶段无限等待（远程默认关闭，不属关键初始化）。
+    /// </summary>
+    private void StartRemoteServer()
+    {
+        try
+        {
+            Task.Run(() => _remoteServer.StartAsync(_appCts.Token))
+                .WaitAsync(StartupStepTimeout)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception exception)
+        {
+            _logger.Warning("RemoteStartFailed", "远程控制启动失败或超时（" + exception.Message + "），保持不监听。");
+        }
     }
 
     /// <summary>
     /// 调度循环前执行崩溃恢复。启动期间同步阻塞：恢复必须完成后再启动调度，
     /// 否则瞬态实例可能被调度循环当作在途任务继续执行。
+    /// S-STARTUP-D1：后台线程执行 + WaitAsync 限时。超时是「状态未知」的关键初始化失败——
+    /// 中止启动（异常向上传播，App 捕获后干净释放并非零退出），绝不在 UI 线程无限等待。
     /// </summary>
     private void RecoverFromCrash()
     {
@@ -140,6 +222,7 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
             // 调度器而永久挂起。线程池线程无 SynchronizationContext，杜绝该类死锁，
             // 同时保留「恢复完成后再启动调度」的同步顺序保证。
             var result = Task.Run(() => _crashRecoveryManager.RecoverAsync(_appCts.Token))
+                .WaitAsync(StartupStepTimeout)
                 .GetAwaiter().GetResult();
 
             // 恢复通知交给 UI 检查点（T08）呈现横幅；只读，不持久化。
@@ -164,6 +247,17 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
             _logger.Error(
                 "CrashRecoveryFailed",
                 "崩溃恢复失败：" + string.Join(" ", result.Errors));
+        }
+        catch (TimeoutException exception)
+        {
+            // 关键初始化超时：运行状态未知 → fail-closed，中止启动（不启动调度、不执行任何
+            // 电源；App 捕获后释放全部资源与单实例所有权并无窗口非零退出）。
+            _logger.Error(
+                "CrashRecoveryTimeout",
+                "崩溃恢复超过 " + (int)StartupStepTimeout.TotalSeconds
+                + " 秒未完成；中止启动，释放单实例所有权并无窗口退出。",
+                exception);
+            throw;
         }
         catch (Exception exception)
         {

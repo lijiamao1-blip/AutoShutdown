@@ -14,6 +14,7 @@ public sealed class DashboardRefreshService : IDisposable
 
     private Task? _loopTask;
     private bool _started;
+    private int _disposed;
 
     public DashboardRefreshService(
         MainWindowViewModel viewModel,
@@ -63,6 +64,13 @@ public sealed class DashboardRefreshService : IDisposable
 
     public void Dispose()
     {
+        // S-STARTUP-D1：幂等——协调器 Dispose 与 DI 容器会先后各释放一次，二次释放不得在
+        // 已 Dispose 的 CTS 上抛 ObjectDisposedException（干净失败路径依赖完整释放）。
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         Task? loopTask;
         lock (_sync)
         {

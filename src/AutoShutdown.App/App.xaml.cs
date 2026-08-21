@@ -14,6 +14,14 @@ namespace AutoShutdown.App;
 
 public partial class App : System.Windows.Application
 {
+    /// <summary>
+    /// 主实例获得互斥体后启动生命周期失败的退出码（非零；区别于正常退出 0 / UI 测试拒绝 2 / 3
+    /// / 启动超时卫兵 4）。失败路径必须无窗口、释放单实例所有权、不留后台进程。
+    /// </summary>
+    private const int StartupFailureExitCode = 5;
+
+    private const int HeadlessStepTimeoutSeconds = 20;
+
     private IServiceProvider? _serviceProvider;
     private ApplicationLifetimeCoordinator? _coordinator;
     private IApplicationLogger? _bootstrapLogger;
@@ -103,23 +111,48 @@ public partial class App : System.Windows.Application
 
         logger.Info("PrimaryInstanceAcquired", "本实例成为主实例。");
 
-        var services = new ServiceCollection();
-        services.AddAutoShutdownServices(dataRoot);
-        services.AddSingleton(singleInstance);
-        // Override the default logger registration so the bootstrap instance
-        // (which already wrote startup events) remains the single sink.
-        services.AddSingleton<IApplicationLogger>(logger);
-        _serviceProvider = services.BuildServiceProvider();
+        // S-STARTUP-D1：启动超时卫兵。主实例就绪前，若启动生命周期（DI 构建、协调器解析、
+        // Start 内各步骤）超过上限仍未完成，记录明确错误并以非零退出码终止——进程退出即由
+        // OS 释放命名单实例互斥体，绝不留无窗口后台进程、不阻塞后续实例成为主实例。正常完成
+        // 必须在 ApplicationStarted 后 Disarm。仅作为启动卡死的兜底，不替代各启动步骤自身的
+        // 超时/失败处理。
+        using var startupGuard = new StartupTimeoutGuard(logger);
+        startupGuard.Arm();
 
-        if (triggerTaskId is { } primaryTriggerId)
+        try
         {
-            // 外部触发回调的无界面模式：不打开主窗口，仅把触发交回本地 Workflow 后退出。
-            HandleExternalTriggerAndExit(primaryTriggerId, logger);
-            return;
-        }
+            var services = new ServiceCollection();
+            services.AddAutoShutdownServices(dataRoot);
+            services.AddSingleton(singleInstance);
+            // Override the default logger registration so the bootstrap instance
+            // (which already wrote startup events) remains the single sink.
+            services.AddSingleton<IApplicationLogger>(logger);
+            _serviceProvider = services.BuildServiceProvider();
+            logger.Info("ServiceProviderBuilt", "服务容器构建完成。");
 
-        _coordinator = _serviceProvider.GetRequiredService<ApplicationLifetimeCoordinator>();
-        _coordinator.Start();
+            if (triggerTaskId is { } primaryTriggerId)
+            {
+                // 外部触发回调的无界面模式：不打开主窗口，仅把触发交回本地 Workflow 后退出。
+                HandleExternalTriggerAndExit(primaryTriggerId, logger);
+                startupGuard.Disarm();
+                return;
+            }
+
+            logger.Info("LifetimeCoordinatorResolving", "解析应用生命周期协调器。");
+            _coordinator = _serviceProvider.GetRequiredService<ApplicationLifetimeCoordinator>();
+            logger.Info("LifetimeCoordinatorResolved", "应用生命周期协调器已解析。");
+            _coordinator.Start();
+            startupGuard.Disarm();
+        }
+        catch (Exception exception)
+        {
+            // S-STARTUP-D1：主实例获得互斥体后关键初始化失败——写入明确错误、释放已创建资源
+            // 与单实例所有权（OnExit 会 Dispose 协调器/容器），以非零退出码结束，绝不留半启动
+            // 的无窗口后台进程；不执行任何真实电源/远程/任务计划同步写。
+            startupGuard.Disarm();
+            logger.Error("StartupFailed", "启动生命周期失败；将释放单实例所有权并无窗口退出。", exception);
+            Shutdown(StartupFailureExitCode);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -169,6 +202,8 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void HandleExternalTriggerAndExit(Guid taskId, IApplicationLogger logger)
     {
+        // S-STARTUP-D1：headless 触发失败（含崩溃恢复超时）也必须非零退出，不留半启动进程。
+        var failed = false;
         try
         {
             var engine = _serviceProvider!.GetRequiredService<ISchedulerEngine>();
@@ -209,6 +244,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
+            failed = true;
             logger.Error("ExternalTriggerFailed", "外部触发回调异常；不执行任何电源。", exception);
         }
         finally
@@ -232,7 +268,7 @@ public partial class App : System.Windows.Application
             }
 
             _bootstrapLogger?.Dispose();
-            Shutdown();
+            Shutdown(failed ? StartupFailureExitCode : 0);
         }
     }
 
@@ -244,7 +280,11 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            // S-STARTUP-D1：有界执行——headless 启动同样不得无限等待崩溃恢复；超时视为
+            // 关键失败（状态未知，fail-closed），向上传播由 HandleExternalTriggerAndExit
+            // 非零退出，绝不补执行电源。
             var result = Task.Run(() => crashRecovery.RecoverAsync(CancellationToken.None))
+                .WaitAsync(TimeSpan.FromSeconds(HeadlessStepTimeoutSeconds))
                 .GetAwaiter().GetResult();
 
             foreach (var taskId in result.InterruptedTaskIds)
@@ -264,6 +304,14 @@ public partial class App : System.Windows.Application
             logger.Error(
                 "CrashRecoveryFailed",
                 "崩溃恢复失败：" + string.Join(" ", result.Errors));
+        }
+        catch (TimeoutException exception)
+        {
+            logger.Error(
+                "CrashRecoveryTimeout",
+                "崩溃恢复超过 " + HeadlessStepTimeoutSeconds + " 秒未完成；中止外部触发，非零退出。",
+                exception);
+            throw;
         }
         catch (Exception exception)
         {

@@ -17,6 +17,7 @@ public sealed class ActivationPipeServer : IAsyncDisposable
 
     private readonly IWindowActivationService _windowActivation;
     private readonly ExternalTaskTriggerService? _triggerService;
+    private readonly string _pipeName;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _sync = new();
 
@@ -25,11 +26,15 @@ public sealed class ActivationPipeServer : IAsyncDisposable
 
     public ActivationPipeServer(
         IWindowActivationService windowActivation,
-        ExternalTaskTriggerService? triggerService = null)
+        ExternalTaskTriggerService? triggerService = null,
+        string? pipeName = null)
     {
         ArgumentNullException.ThrowIfNull(windowActivation);
         _windowActivation = windowActivation;
         _triggerService = triggerService;
+        // S-STARTUP-D1：允许测试注入独立管道名做聚焦回归（避免与真实运行实例的命名管道竞争）；
+        // 生产路径保持默认协议名不变。
+        _pipeName = pipeName ?? PipeName;
     }
 
     public void Start()
@@ -81,7 +86,7 @@ public sealed class ActivationPipeServer : IAsyncDisposable
             try
             {
                 await using var pipe = new NamedPipeServerStream(
-                    PipeName,
+                    _pipeName,
                     PipeDirection.InOut,
                     maxNumberOfServerInstances: 1,
                     PipeTransmissionMode.Byte,

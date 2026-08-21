@@ -171,14 +171,13 @@ public static class ServiceRegistration
                 Environment.ProcessPath
                     ?? throw new InvalidOperationException("No process path is available."));
 
-            // 启动即按存储恢复开关（fail-closed：缺失/损坏/非法一律关闭）。协调器在调度引擎
-            // 加载任务前解析，保证初始加载触发的防抖同步在「同步关闭」时绝不创建外部任务。
-            // FileStorage 内部全程 ConfigureAwait(false)，此处同步等待不会死锁。
-            var load = provider.GetRequiredService<TaskSyncSettingsStore>()
-                .LoadAsync(CancellationToken.None)
-                .GetAwaiter().GetResult();
-            coordinator.Enabled = load.Status == TaskSyncSettingsLoadStatus.Success
-                && load.Document?.Enabled == true;
+            // S-STARTUP-D1：不再在 DI 构造阶段同步读取 task-sync.json——无界文件 I/O 会把
+            // UI 线程卡死在「主实例已获取互斥体」与「调度引擎启动」之间，造成半启动实例永久
+            // 占用单实例所有权、次实例激活转发失败。开关读取移入启动生命周期步骤
+            // （ApplicationLifetimeCoordinator.Start → StartupTaskSyncSettingsGate：线程池读取
+            // + WaitAsync 限时 + fail-closed），且仍在调度引擎加载任务前完成；此处保持
+            // fail-closed 默认关闭（缺失/损坏/非法一律关闭，绝不静默启用，启用会创建外部任务）。
+            coordinator.Enabled = false;
             return coordinator;
         });
         services.AddSingleton<ExternalTriggerScheduleGate>();

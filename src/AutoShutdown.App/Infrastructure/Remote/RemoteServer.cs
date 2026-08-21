@@ -41,6 +41,7 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     private readonly IRemoteAuditLog _auditLog;
     private readonly IApplicationLogger _logger;
     private readonly object _sync = new();
+    private int _disposed;
 
     // 连接资源边界（D1 远程拒绝服务防护）：固定、受测的连接期限与在途连接上限。
     private readonly TimeSpan _firstByteTimeout;
@@ -237,6 +238,13 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
 
     public void Dispose()
     {
+        // S-STARTUP-D1：幂等——协调器 Dispose 与 DI 容器会先后各释放一次，二次释放不得在
+        // 已 Dispose 的 SemaphoreSlim 上抛 ObjectDisposedException（干净失败路径依赖完整释放）。
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         try
         {
             StopAsync().GetAwaiter().GetResult();
