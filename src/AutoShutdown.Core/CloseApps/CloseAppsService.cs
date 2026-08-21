@@ -9,6 +9,11 @@ namespace AutoShutdown.Core.CloseApps;
 /// 自身/系统关键/非当前会话进程绝不关闭；访问拒绝、进程已退出、窗口消失、PID 重用等竞态
 /// 安全收敛为结构化结果。不触碰电源服务边界（唯一电源出口保持不变）。摘要脱敏、限长，
 /// 不含命令行/窗口正文/无关路径。
+/// 按路径匹配时（S-CLOSEUI1-D2）：目标路径与进程枚举路径统一经
+/// <see cref="ExecutablePathKey.EqualsNormalized"/> 规范化后大小写不敏感比较；任一侧为
+/// 空、非法、含 NUL 或无法规范化（如含非法字符）时 fail-closed，绝不按进程名/文件名兜底，
+/// 也绝不回退 PID。规范化只委托既有 <see cref="Path.GetFullPath"/>（含其在 Windows 上对
+/// 真实存在 8.3 短名段的展开），不做任何手工字符串替换、8.3 展开、文件名或进程名匹配。
 /// </summary>
 public sealed class CloseAppsService
 {
@@ -140,8 +145,12 @@ public sealed class CloseAppsService
         }
 
         var path = target.ExecutablePath!;
+        // S-CLOSEUI1-D2：与保存端一致，统一经 ExecutablePathKey.EqualsNormalized 规范化后
+        // 大小写不敏感比较；任一侧无法规范化（空/NUL/非法字符）fail-closed，绝不按进程名
+        // 或文件名兜底，也不回退 PID。规范化只委托既有 Path.GetFullPath（含其在 Windows 上
+        // 对真实存在 8.3 短名段的展开），不做手工字符串替换或 8.3 展开。
         return _processManager.EnumerateProcesses()
-            .Where(process => string.Equals(process.ExecutablePath, path, StringComparison.OrdinalIgnoreCase))
+            .Where(process => ExecutablePathKey.EqualsNormalized(process.ExecutablePath, path))
             .ToList();
     }
 
