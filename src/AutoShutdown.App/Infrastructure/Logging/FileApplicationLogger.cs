@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace AutoShutdown.App.Infrastructure.Logging;
 
@@ -27,6 +28,12 @@ public sealed class FileApplicationLogger : IApplicationLogger
     private readonly Func<DateTimeOffset> _now;
     private readonly long _maxFileBytes;
     private readonly object _sync = new();
+
+    // S-STARTUP-D1：跨进程日志写锁。主实例运行期间，双击启动的次实例会短暂地向同一日志文件
+    // 追加检测/转发日志；若两个进程的追加位置互相陈旧（各自在打开时刻记录 EOF），后写的进程
+    // 可能覆盖先写进程的行（实测：次实例的「检测到主实例已在运行…」覆盖了主实例的
+    // MainWindowActivated 行）。命名互斥锁保证同一时刻只有一个进程写日志文件。
+    private static readonly Mutex _writeMutex = new(initiallyOwned: false, @"Local\AutoShutdown.Desktop.LogWriter.v1");
 
     private bool _disposed;
 
@@ -94,23 +101,57 @@ public sealed class FileApplicationLogger : IApplicationLogger
                 $"autoshutdown-{entry.Timestamp:yyyy-MM-dd}.log");
 
             var line = Format(entry);
-            var lineBytes = Encoding.UTF8.GetByteCount(line) + 2; // line + newline
+            // 整行（含换行）作为一个字节数组一次追加：单次写 + 写前重锚定 EOF，杜绝多进程
+            // 并发追加时因陈旧 EOF 位置导致的行级覆盖/交错（见 _writeMutex 注释）。
+            var lineBytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
 
             var currentLength = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
-            if (currentLength + lineBytes > _maxFileBytes)
+            if (currentLength + lineBytes.Length > _maxFileBytes)
             {
                 Rotate(filePath);
             }
 
-            using var stream = new FileStream(
-                filePath,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.ReadWrite);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            writer.Write(line);
-            writer.Write(writer.NewLine);
-            writer.Flush();
+            var acquired = false;
+            try
+            {
+                acquired = _writeMutex.WaitOne(TimeSpan.FromMilliseconds(500));
+            }
+            catch (AbandonedMutexException)
+            {
+                // 上一个进程在写日志时崩溃：互斥锁被放弃，本进程已获得所有权，可继续写。
+                acquired = true;
+            }
+            catch
+            {
+                // 拿不到互斥锁绝不崩溃、绝不丢业务：退化为无锁追加（单次原子写仍尽力而为）。
+                acquired = false;
+            }
+
+            try
+            {
+                using var stream = new FileStream(
+                    filePath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite);
+                stream.Seek(0, SeekOrigin.End); // 写前重锚定到真实 EOF，缩小跨进程覆盖窗口
+                stream.Write(lineBytes, 0, lineBytes.Length);
+                stream.Flush(true); // 落盘，保证退出后日志可立即可靠读取
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    try
+                    {
+                        _writeMutex.ReleaseMutex();
+                    }
+                    catch
+                    {
+                        // 释放失败仅影响后续写锁竞争，不影响本次写入。
+                    }
+                }
+            }
         }
     }
 

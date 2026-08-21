@@ -97,10 +97,12 @@
 | `src/AutoShutdown.App/Notifications/NotificationCoordinator.cs` | `Dispose()` 幂等（`Interlocked` guard）——协调器与 DI 容器先后双释放不抛 ObjectDisposedException |
 | `src/AutoShutdown.App/Presentation/DashboardRefreshService.cs` | `Dispose()` 幂等（同上） |
 | `src/AutoShutdown.App/Infrastructure/Remote/RemoteServer.cs` | `Dispose()` 幂等（同上） |
+| `src/AutoShutdown.App/Infrastructure/Logging/FileApplicationLogger.cs` | **验证期发现的日志缺陷修复**（§4.7）：整行一次原子追加 + 写前重锚定 EOF + 跨进程命名互斥锁，杜绝次实例并发写同一日志文件时行级覆盖/交错（实测覆盖了主实例 `MainWindowActivated` 检查点行） |
 | `tests/AutoShutdown.Tests/S_STARTUP_D1_StartupLifecycleTests.cs`（新增） | 11 个聚焦测试（见 §5） |
 | `tests/AutoShutdown.Tests/S_UI3_UiTestLauncherTests.cs` | 已有 S-UI3 聚焦契约测试，未改动（回归验证） |
 | `tools/test/Invoke-SStartupD1Probe.ps1`（新增） | 真机探针：启动候选 → 确认主窗口 → 枚举进程窗口 → 托盘退出 |
-| `tools/test/Invoke-SStartupD1Loop.ps1`（新增） | 20 轮真机循环（见 §7） |
+| `tools/test/Invoke-SStartupD1TrayExit.ps1`（新增） | 托盘退出工具：按 PID 定位托盘图标（溢出区 scoped UIA）→ 右键 → 「退出程序」 |
+| `tools/test/Invoke-SStartupD1Loop.ps1`（新增） | 20 轮真机循环（见 §7）；托盘退出采用「ESC 归一化 → 打开溢出区 → 溢出区窗口内 scoped UIA 找图标 → 右键 → 菜单 → 退出程序」；每轮前置 ESC 关闭上一轮遗留溢出区，避免壳窗口占据前台干扰激活证据 |
 
 **明确不改**：SchedulerEngine / TaskCollection / ShutdownWorkflow / IPowerService / TestMode 与 RealPowerEnabled 双门 / TaskSyncCoordinator 同步语义 / Office / 远程白名单 / S22 同步行为 / MainWindow.xaml 布局 / TaskSyncSectionViewModel / RemoteSectionViewModel（回退到原始 fire-and-forget 形式，见 §4.4）。
 
@@ -138,6 +140,24 @@ fail-closed 默认关闭保持不变；真实开关读取移到 `ApplicationLife
 ### 4.6 单实例边界不变
 
 仍由 `SingleInstanceCoordinator`（`Local\AutoShutdown.Desktop.Singleton.v1`）+ `ActivationPipeServer/Client`（`AutoShutdown.Desktop.Activation.v1`）承载。未削弱任何安全边界；不自动杀进程、不按进程名杀进程、不转发测试实例请求（`UiTestExistingInstanceRefused` 在 `ActivationPipeClient.Try` 之前的不变量由 S-UI3 源码契约测试守住）。
+
+### 4.7 验证期发现的日志缺陷与修复（S-STARTUP-D1 第二实现提交）
+
+**现象（20 轮真机循环验证证据，非推测）**：多轮日志检查显示 `MainWindowActivating` 已记录、窗口已出现并置于前台、次实例正常转发且应用正常托盘退出，但日志文件缺失 `MainWindowActivated`（少数轮连同 `ApplicationStarted` 一并缺失）。保留失败轮日志逐字节检查（`S-PKG-work包/S-STARTUP-D1-循环证据/round-16-fail-9912/`、`round-5-fail-34364/`）：
+
+```
+17 len=84 ... 00:51:55.702 [Information] ApplicationStarted 应用启动完成。
+18 len=43 b'\xb2\xe5\x9c\xa8\xe8\xbf\x90\xe8\xa1\x8c...'   ← 残行
+```
+
+第 18 行以「已」的末字节 `\xb2` 开头后接「在运行，发送激活通知后退出。」——这是次实例的 `SecondaryInstanceDetected` 消息。**根因**：主实例与双击产生的次实例共用同一日志文件（`autoshutdown-YYYY-MM-DD.log`），`FileApplicationLogger` 原实现分行缓冲追加（`StreamWriter.Write(line)` + `Write(NewLine)` 多次系统写 + 打开时记录的 EOF），两个进程并发追加时后写进程用陈旧 EOF 位置**覆盖**了先写进程的行。主实例的 `MainWindowActivated` 检查点行恰好被次实例的检测消息覆盖。
+
+**修复（仅触碰诊断日志面，不涉业务逻辑）**：
+- 整行（含换行）作为一个字节数组，`FileStream` 打开后**写前显式 `Seek(0, End)` 重锚定真实 EOF**，单次 `Write` 追加 + `Flush(true)` 落盘；
+- 新增跨进程命名互斥锁 `Local\AutoShutdown.Desktop.LogWriter.v1`（静态 `Mutex`），同一时刻只有一个进程写日志文件；`WaitOne(500ms)` 超时/放弃锁异常均 fail-safe（不崩溃、不丢业务，退化为无锁尽力追加）；
+- 原行内进程内 `lock(_sync)` 保留。
+
+该缺陷正是本阶段验收所依赖的**诊断证据面**（检查点日志）被破坏的根因；若不修复而靠循环脚本容忍缺失检查点，即属「掩盖缺陷」，违反本阶段纪律。修复后 Release 全量 1757/1757、聚焦 11/11 通过，20 轮循环以修复后候选重新执行。
 
 ## 5. 聚焦测试（`S_STARTUP_D1_StartupLifecycleTests.cs`，11 个）
 
@@ -178,7 +198,7 @@ fail-closed 默认关闭保持不变；真实开关读取移到 `ApplicationLife
 1. 新建**全新**隔离数据根（临时目录），写入安全 config.json；记正式数据目录前后快照（`%LOCALAPPDATA%\AutoShutdown`，排除 UiTestSandbox）；
 2. 启动候选（`AUTOSHUTDOWN_DATA_ROOT=<隔离根>`），记录 PID、等待 `MainWindowHandle != 0`（30s 上限）并记录窗口出现耗时；
 3. 重新启动同一候选（次实例）：确认原窗口被激活（记录激活耗时），确认次实例**在有限时间内退出**，确认只留原 PID；
-4. 托盘退出主实例（UIA 托盘按钮右键 →「退出程序」）：确认原 PID 消失，记录退出耗时；
+4. 托盘退出主实例（UIA 托盘按钮右键 →「退出程序」）：确认原 PID 消失，记录退出耗时；托盘按钮在 Win11 **溢出区**（`TopLevelWindowForOverflowXamlIsland`，点击 chevron「显示隐藏的图标」打开）内，检索必须 scoped 到该窗口子树（桌面全量 `FindAll` 数十秒，scoped 仅数毫秒）；每轮前置 ESC 关闭上一轮遗留溢出区，避免壳窗口占据前台干扰激活证据；
 5. 残留检查：确认无任何 AutoShutdown.App 进程残留；
-6. 记录每轮：PID、窗口出现时间、副实例退出时间、托盘退出时间、残留进程数、正式数据目录前后状态；
+6. 记录每轮：PID、窗口出现时间、副实例退出时间、托盘退出时间、残留进程数、正式数据目录前后状态、日志路径与检查点证据（`PrimaryInstanceAcquired`/`ApplicationStarted`/`MainWindowActivated`、无 `ActivationForwardFailed`/`StartupFailed`/`StartupTimedOut`）；
 7. 每轮使用全新/已验证隔离目录，绝不用正式数据根，**不 taskkill、不按名称清理**。
