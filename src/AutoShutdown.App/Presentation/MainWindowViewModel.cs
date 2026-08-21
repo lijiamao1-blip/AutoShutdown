@@ -227,6 +227,10 @@ public sealed class MainWindowViewModel : ObservableObject
         RowStopCommand = new RelayCommand(RowStop);
         RowClearCommand = new RelayCommand(RowClear);
         RowSetEnabledCommand = new RelayCommand(RowSetEnabled);
+        BulkDisableCommand = new AsyncRelayCommand(ExecuteBulkDisableAsync, () => TaskItems.Any(item => item.IsEnabled && item.CanSetEnabled));
+        BulkSnoozeCommand = new AsyncRelayCommand(ExecuteBulkSnoozeAsync, () => TaskItems.Any(item => item.CanSnooze));
+        BulkStopCommand = new AsyncRelayCommand(ExecuteBulkStopAsync, () => TaskItems.Any(item => item.CanStop));
+        BulkClearCommand = new AsyncRelayCommand(ExecuteBulkClearAsync, () => TaskItems.Any(item => item.CanClear));
         ResolveArbitrationCommand = new RelayCommand(ResolveArbitration);
         OneTimeTodayCommand = new RelayCommand(SelectTodayForOneTime);
         GoToLogsCommand = new RelayCommand(() => SelectedNav = NavItems[4]);
@@ -2273,6 +2277,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RowSetEnabledCommand { get; }
 
+    public AsyncRelayCommand BulkDisableCommand { get; }
+
+    public AsyncRelayCommand BulkSnoozeCommand { get; }
+
+    public AsyncRelayCommand BulkStopCommand { get; }
+
+    public AsyncRelayCommand BulkClearCommand { get; }
+
     public ICommand ResolveArbitrationCommand { get; }
 
     /// <summary>一次性日期「今天」快捷：将执行日期设为本地今天。</summary>
@@ -2910,7 +2922,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public void AppendActivity(string text)
     {
         RecentActivities.Insert(0, new RecentActivityItem(
-            _clock.UtcNow.ToString("HH:mm:ss"),
+            LocalNow().ToString("HH:mm:ss"),
             text));
 
         while (RecentActivities.Count > MaxRecentActivities)
@@ -3087,6 +3099,71 @@ public sealed class MainWindowViewModel : ObservableObject
             "清除记录");
     }
 
+    private async Task ExecuteBulkDisableAsync()
+    {
+        var targets = TaskItems.Where(item => item.IsEnabled && item.CanSetEnabled).ToList();
+        foreach (var item in targets)
+        {
+            await SubmitSetEnabledAsync(item.TaskId, false);
+        }
+    }
+
+    private async Task ExecuteBulkSnoozeAsync()
+    {
+        var targets = TaskItems.Where(item => item.CanSnooze).ToList();
+        foreach (var item in targets)
+        {
+            await SubmitCommandAsync(
+                new SnoozeTaskCommand(item.InstanceId, item.StageToken, TimeSpan.FromMinutes(10)),
+                "批量延迟10分钟");
+        }
+    }
+
+    private async Task ExecuteBulkStopAsync()
+    {
+        var targets = TaskItems.Where(item => item.CanStop).ToList();
+        if (targets.Count == 0 || !ConfirmBulkOperation(
+                $"将停止 {targets.Count} 个任务，停止后这些任务将不再执行。",
+                "一键停止"))
+        {
+            return;
+        }
+
+        foreach (var item in targets)
+        {
+            await SubmitCommandAsync(
+                new CancelTaskCommand(item.InstanceId, item.StageToken),
+                "批量停止任务");
+        }
+    }
+
+    private async Task ExecuteBulkClearAsync()
+    {
+        var targets = TaskItems.Where(item => item.CanClear).ToList();
+        if (targets.Count == 0 || !ConfirmBulkOperation(
+                $"将清除 {targets.Count} 条已结束的任务记录，此操作不会清除仍在等待或执行的任务。",
+                "一键清除"))
+        {
+            return;
+        }
+
+        foreach (var item in targets)
+        {
+            await SubmitCommandAsync(
+                new ClearTerminalTaskCommand(item.InstanceId),
+                "批量清除记录");
+        }
+    }
+
+    private bool ConfirmBulkOperation(string message, string title)
+        => _cancelConfirmation is not null
+            ? _cancelConfirmation()
+            : System.Windows.MessageBox.Show(
+                message,
+                title,
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning) == MessageBoxResult.OK;
+
     /// <summary>
     /// 单任务启用/停用（S-UI2 多任务）。提交 <see cref="SetTaskEnabledCommand"/> 到引擎唯一
     /// 仲裁路径；成功后经 ConfigurationService 把启停状态持久化到 tasks.json（不直接改 JSON）。
@@ -3222,6 +3299,10 @@ public sealed class MainWindowViewModel : ObservableObject
         HasTasks = instances.Count > 0;
         HasNoTasks = instances.Count == 0;
         OnPropertyChanged(nameof(CurrentTaskCountText));
+        BulkDisableCommand.RaiseCanExecuteChanged();
+        BulkSnoozeCommand.RaiseCanExecuteChanged();
+        BulkStopCommand.RaiseCanExecuteChanged();
+        BulkClearCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>
@@ -3493,6 +3574,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SnoozeCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
         ClearCommand.RaiseCanExecuteChanged();
+        BulkDisableCommand.RaiseCanExecuteChanged();
+        BulkSnoozeCommand.RaiseCanExecuteChanged();
+        BulkStopCommand.RaiseCanExecuteChanged();
+        BulkClearCommand.RaiseCanExecuteChanged();
     }
 
     private SchedulerSnapshot GetSnapshot()

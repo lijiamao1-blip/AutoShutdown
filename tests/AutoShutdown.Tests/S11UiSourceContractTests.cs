@@ -112,6 +112,36 @@ public sealed class S11UiSourceContractTests
         Assert.Contains("WrapPanel", window);
     }
 
+    [Fact]
+    public void AdvancedPage_UsesCloseAppsSummary_AndUnattendedHasPlainLanguageGuide()
+    {
+        var window = ReadAppFile("MainWindow.xaml");
+
+        Assert.Contains("简单理解：开机自启动负责登录后打开软件", window);
+        Assert.Contains("创建具体任务时仍需单独选择“使用无人值守”", window);
+        Assert.Contains("当前已配置 ", window);
+        Assert.Contains("CloseAppsTargets.Count", window);
+        Assert.Contains("Content=\"前往软件设置\"", window);
+        Assert.Equal(1, window.Split("Command=\"{Binding SaveCloseAppsCommand}\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, window.Split("Command=\"{Binding OpenProcessPickerCommand}\"", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void TaskManagement_ExposesFourSafeBulkActions()
+    {
+        var window = ReadAppFile("MainWindow.xaml");
+        var source = ReadAppFile("Presentation/MainWindowViewModel.cs");
+
+        Assert.Contains("一键停用", window);
+        Assert.Contains("一键延迟10分钟", window);
+        Assert.Contains("一键停止", window);
+        Assert.Contains("一键清除", window);
+        Assert.Contains("TaskItems.Where(item => item.CanSnooze)", source);
+        Assert.Contains("TaskItems.Where(item => item.CanStop)", source);
+        Assert.Contains("TaskItems.Where(item => item.CanClear)", source);
+        Assert.Contains("TaskItems.Where(item => item.IsEnabled && item.CanSetEnabled)", source);
+    }
+
     // ---- 6 / 15. 无立即执行 ----
 
     [Fact]

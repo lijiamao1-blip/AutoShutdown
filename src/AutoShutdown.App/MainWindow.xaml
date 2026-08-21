@@ -104,10 +104,10 @@
 
                         <!-- 左：创建定时任务。15 DIP 外边距随 WPF DPI 缩放，保持各缩放档观感一致。 -->
                     <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="15,15,0,15">
-                        <StackPanel>
+                        <StackPanel VerticalAlignment="Top">
                             <TextBlock Text="创建定时任务" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,8"/>
                             <TextBlock Text="时间模式（8 种）" Style="{StaticResource FieldLabelStyle}"/>
-                            <WrapPanel Margin="0,5,0,8">
+                            <WrapPanel Margin="0,5,0,8" Width="480" HorizontalAlignment="Left">
                                 <RadioButton Content="倒计时" IsChecked="{Binding ModeIsCountdown}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                 <RadioButton Content="今天指定时间" IsChecked="{Binding ModeIsTodayAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                 <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
@@ -226,7 +226,7 @@
                             </Grid.RowDefinitions>
 
                             <Border Style="{StaticResource GlassCardPurpleStyle}" Padding="20,14" Margin="0,15,15,0">
-                                <StackPanel>
+                                <StackPanel VerticalAlignment="Top">
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <TextBlock Text="当前任务" Style="{StaticResource CardTitleOnPurpleStyle}"/>
@@ -234,7 +234,8 @@
                                     </Grid>
                                     <StackPanel Margin="0,8,0,0">
                                         <TextBlock Text="{Binding CurrentStateText}" FontSize="13" FontWeight="SemiBold" Foreground="#294064"/>
-                                        <TextBlock Text="{Binding CountdownText}" Margin="0,2,0,4" CacheMode="BitmapCache" TextWrapping="Wrap">
+                                        <TextBlock Text="{Binding CountdownText}" Margin="0,2,0,4" CacheMode="BitmapCache"
+                                                   TextWrapping="NoWrap" MinWidth="390" HorizontalAlignment="Left">
                                             <!-- S-UI1-D2：常规倒计时为 40px 大字白字 + 紫色辉光；空闲任务等待触发（IsIdleStatusVisible）
                                                  时切换为小字号深色换行文本，展示真实空闲时长/阈值，避免长句撑爆卡片。
                                                  辉光放在 Style.Setter 而非元素局部值：WPF 优先级中 Style 触发器高于 Style
@@ -310,6 +311,13 @@
                                 <TextBlock Text="任务管理" FontSize="26" FontWeight="Bold" Foreground="Black" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Content="＋  新建任务" Style="{StaticResource PrimaryButtonStyle}" Padding="22,10" HorizontalAlignment="Right" Command="{Binding HomeCommand}"/>
                             </Grid>
+
+                            <WrapPanel Margin="0,12,0,0" HorizontalAlignment="Right">
+                                <Button Content="一键停用" Style="{StaticResource SecondaryButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkDisableCommand}"/>
+                                <Button Content="一键延迟10分钟" Style="{StaticResource SecondaryButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkSnoozeCommand}"/>
+                                <Button Content="一键停止" Style="{StaticResource DangerSolidButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkStopCommand}"/>
+                                <Button Content="一键清除" Style="{StaticResource ClearRecordButtonStyle}" Padding="16,8" Command="{Binding BulkClearCommand}"/>
+                            </WrapPanel>
 
                             <!-- 横幅区：恢复通知 / 仲裁结果 / 强制冲突询问 / 故障状态 -->
                             <StackPanel Margin="0,12,0,0">
@@ -405,6 +413,12 @@
                                 <StackPanel>
                                     <TextBlock Text="无人值守" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="{Binding UnattendedRiskText}" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Padding="12,10" Margin="0,0,0,10">
+                                        <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap">
+                                            <Run Text="简单理解：开机自启动负责登录后打开软件；任务计划同步负责让 Windows 按时唤起软件；无人值守负责让已明确勾选的任务到期后不再等待人工确认。"/>
+                                            <LineBreak/><Run Text="启用全局授权不会自动应用到全部任务，创建具体任务时仍需单独选择“使用无人值守”。" FontWeight="SemiBold"/>
+                                        </TextBlock>
+                                    </Border>
                                     <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
                                         <Run Text="{Binding UnattendedStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
                                     </TextBlock>
@@ -420,33 +434,12 @@
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
                                 <StackPanel>
                                     <TextBlock Text="关机前关闭应用" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
-                                    <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                        <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="300" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
-                                        <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
-                                    </StackPanel>
-                                    <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border Style="{StaticResource InnerPanelStyle}" Padding="12,8" Margin="0,0,0,8">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <StackPanel>
-                                                            <CheckBox Content="{Binding Identifier}" IsChecked="{Binding ForceKillAllowed}" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
-                                                            <TextBlock Text="已授权强杀：将立即终止该进程，未保存工作可能丢失。" FontSize="11" Foreground="#C62828" Margin="22,2,0,0"
-                                                                       Visibility="{Binding RiskVisible, Converter={StaticResource BoolToVisibility}}"/>
-                                                        </StackPanel>
-                                                        <Button Grid.Column="1" Content="移除" Style="{StaticResource ClearRecordButtonStyle}" Padding="12,6" VerticalAlignment="Center"
-                                                                Command="{Binding DataContext.RemoveCloseAppsTargetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding}"/>
-                                                    </Grid>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsStatus, Converter={StaticResource BoolToVisibility}}"/>
-                                    <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
+                                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
+                                        <Run Text="关机前先尝试优雅关闭指定应用；强杀始终默认关闭。当前已配置 "/>
+                                        <Run Text="{Binding CloseAppsTargets.Count, Mode=OneWay}" FontWeight="SemiBold"/>
+                                        <Run Text=" 个目标。完整添加、选择、移除和逐目标授权统一在“软件设置”中管理。"/>
+                                    </TextBlock>
+                                    <Button Content="前往软件设置" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding SettingsCommand}" Padding="20,9" HorizontalAlignment="Left"/>
                                 </StackPanel>
                             </Border>
 
@@ -738,6 +731,12 @@
                                 <StackPanel>
                                     <TextBlock Text="无人值守（高级）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="{Binding UnattendedRiskText}" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <Border Style="{StaticResource InnerPanelStyle}" Padding="12,10" Margin="0,0,0,10">
+                                        <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap">
+                                            <Run Text="简单理解：开机自启动负责登录后打开软件；任务计划同步负责让 Windows 按时唤起软件；无人值守负责让已明确勾选的任务到期后不再等待人工确认。"/>
+                                            <LineBreak/><Run Text="启用全局授权不会自动应用到全部任务，创建具体任务时仍需单独选择“使用无人值守”。" FontWeight="SemiBold"/>
+                                        </TextBlock>
+                                    </Border>
                                     <TextBlock Text="当前状态：" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}">
                                         <Run Text="{Binding UnattendedStatusText, Mode=OneWay}" FontWeight="SemiBold"/>
                                     </TextBlock>

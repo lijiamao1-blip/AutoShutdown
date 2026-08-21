@@ -205,6 +205,69 @@ public sealed class S13_T08_TaskListUiTests
         Assert.Equal(Instance1, command.ExpectedInstanceId);
     }
 
+    [Fact]
+    public async Task BulkSnooze_SubmitsTenMinuteSnooze_ForEveryEligibleTask()
+    {
+        var engine = RunningEngine(new Dictionary<Guid, TaskInstance>
+        {
+            [Task1] = WaitingInstance(Task1, Now.AddMinutes(30), PowerAction.Shutdown, Instance1, Token1),
+            [Task2] = WaitingInstance(Task2, Now.AddMinutes(5), PowerAction.Sleep, Instance2, Token2)
+        });
+        var viewModel = CreateViewModel(engine);
+        viewModel.Refresh(engine.Snapshot, Now);
+
+        await viewModel.BulkSnoozeCommand.ExecuteAsync();
+
+        var commands = engine.Commands.OfType<SnoozeTaskCommand>().ToList();
+        Assert.Equal(2, commands.Count);
+        Assert.All(commands, command => Assert.Equal(TimeSpan.FromMinutes(10), command.Duration));
+        Assert.Equal([Instance1, Instance2], commands.Select(command => command.ExpectedInstanceId).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task BulkStop_ConfirmsOnce_AndStopsEveryEligibleTask()
+    {
+        var confirmations = 0;
+        var engine = RunningEngine(new Dictionary<Guid, TaskInstance>
+        {
+            [Task1] = WaitingInstance(Task1, Now.AddMinutes(30), PowerAction.Shutdown, Instance1, Token1),
+            [Task2] = WaitingInstance(Task2, Now.AddMinutes(5), PowerAction.Sleep, Instance2, Token2)
+        });
+        var viewModel = CreateViewModel(engine, cancelConfirmation: () =>
+        {
+            confirmations++;
+            return true;
+        });
+        viewModel.Refresh(engine.Snapshot, Now);
+
+        await viewModel.BulkStopCommand.ExecuteAsync();
+
+        Assert.Equal(1, confirmations);
+        Assert.Equal(2, engine.Commands.OfType<CancelTaskCommand>().Count());
+    }
+
+    [Fact]
+    public async Task BulkClear_ClearsOnlyTerminalRecords()
+    {
+        var terminal = WaitingInstance(Task2, Now.AddMinutes(5), PowerAction.Sleep, Instance2, Token2) with
+        {
+            State = TaskInstanceState.Executed,
+            HasExecuted = true
+        };
+        var engine = RunningEngine(new Dictionary<Guid, TaskInstance>
+        {
+            [Task1] = WaitingInstance(Task1, Now.AddMinutes(30), PowerAction.Shutdown, Instance1, Token1),
+            [Task2] = terminal
+        });
+        var viewModel = CreateViewModel(engine);
+        viewModel.Refresh(engine.Snapshot, Now);
+
+        await viewModel.BulkClearCommand.ExecuteAsync();
+
+        var command = Assert.Single(engine.Commands.OfType<ClearTerminalTaskCommand>());
+        Assert.Equal(Instance2, command.ExpectedInstanceId);
+    }
+
     // ---- 强制冲突询问与仲裁结果 ----
 
     [Fact]
@@ -353,7 +416,8 @@ public sealed class S13_T08_TaskListUiTests
 
     private static MainWindowViewModel CreateViewModel(
         FakeSchedulerEngine engine,
-        RecoveryNoticeService? recoveryNotice = null)
+        RecoveryNoticeService? recoveryNotice = null,
+        Func<bool>? cancelConfirmation = null)
     {
         var config = new FakeConfigurationService(new ConfigurationLoadResult
         {
@@ -374,7 +438,7 @@ public sealed class S13_T08_TaskListUiTests
             new NullLogger(),
             new FakeAutoStartService(),
             autoStartConfirmation: () => true,
-            cancelConfirmation: () => true,
+            cancelConfirmation: cancelConfirmation ?? (() => true),
             realPowerConfirmation: () => true,
             recoveryNotice: recoveryNotice);
     }

@@ -771,6 +771,18 @@ public sealed class S_UI2_MultiTaskHomeTests
     }
 
     [Fact]
+    public void Homepage_TimeModeRowsUseFiveDipGap_AndCardContentsStayTopAnchored()
+    {
+        var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+        var controls = ReadAppFile("Themes/Controls.xaml");
+
+        Assert.Contains("<Setter Property=\"Margin\" Value=\"0,0,8,5\" />", controls);
+        Assert.Equal(2, CountOccurrences(home, "<StackPanel VerticalAlignment=\"Top\">"));
+        Assert.Contains("<WrapPanel Margin=\"0,5,0,8\" Width=\"480\" HorizontalAlignment=\"Left\">", home);
+        Assert.Contains("TextWrapping=\"NoWrap\" MinWidth=\"390\" HorizontalAlignment=\"Left\"", home);
+    }
+
+    [Fact]
     public void Homepage_Cards_HaveFifteenDipEdgeMargins()
     {
         // 卡片 15 DIP 间距：由 Grid/Margin 实现，随 WPF DPI 一致缩放。

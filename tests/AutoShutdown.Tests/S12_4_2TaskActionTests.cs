@@ -193,6 +193,23 @@ public sealed class S12_4_2TaskActionTests
         Assert.IsType<GuardedPowerService>(provider.GetRequiredService<IPowerService>());
     }
 
+    [Fact]
+    public void AppendActivity_DisplaysTimeInConfiguredLocalTimeZone()
+    {
+        var chinaTimeZone = TimeZoneInfo.CreateCustomTimeZone(
+            "China Standard Time Test",
+            TimeSpan.FromHours(8),
+            "China Standard Time Test",
+            "China Standard Time Test");
+        var viewModel = CreateViewModel(clock: new FakeClock(Now, chinaTimeZone));
+
+        viewModel.AppendActivity("测试活动");
+
+        var activity = Assert.Single(viewModel.RecentActivities);
+        Assert.Equal("19:00:00", activity.Time);
+        Assert.Equal("测试活动", activity.Text);
+    }
+
     // ---- Helpers ----
 
     private static FakeSchedulerEngine viewModelEngine(MainWindowViewModel viewModel)
@@ -223,7 +240,8 @@ public sealed class S12_4_2TaskActionTests
     private static MainWindowViewModel CreateViewModel(
         TaskInstance? instance = null,
         FakeSchedulerEngine? engine = null,
-        Func<bool>? cancelConfirmation = null)
+        Func<bool>? cancelConfirmation = null,
+        IClock? clock = null)
     {
         engine ??= new FakeSchedulerEngine
         {
@@ -244,7 +262,7 @@ public sealed class S12_4_2TaskActionTests
         return new MainWindowViewModel(
             engine,
             config,
-            new FakeClock(Now),
+            clock ?? new FakeClock(Now),
             new NullLogger(),
             new NoOpAutoStartService(),
             cancelConfirmation: cancelConfirmation);
@@ -365,11 +383,15 @@ public sealed class S12_4_2TaskActionTests
 
     private sealed class FakeClock : IClock
     {
-        public FakeClock(DateTimeOffset utcNow) => UtcNow = utcNow;
+        public FakeClock(DateTimeOffset utcNow, TimeZoneInfo? localTimeZone = null)
+        {
+            UtcNow = utcNow;
+            LocalTimeZone = localTimeZone ?? TimeZoneInfo.Utc;
+        }
 
         public DateTimeOffset UtcNow { get; }
 
-        public TimeZoneInfo LocalTimeZone { get; } = TimeZoneInfo.Utc;
+        public TimeZoneInfo LocalTimeZone { get; }
     }
 
     private sealed class NoOpAutoStartService : IAutoStartService

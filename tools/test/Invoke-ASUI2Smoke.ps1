@@ -55,14 +55,24 @@ if (-not $ReleaseExe) {
     }
 }
 
-# 出错即回收本次冒烟启动的候选进程（按候选 EXE 名精确匹配，绝不波及生产 AutoShutdown.exe）。
-$script:smokeExeBase = [IO.Path]::GetFileNameWithoutExtension($ReleaseExe)
-trap {
-    if ($script:smokeExeBase) {
-        Get-Process -Name $script:smokeExeBase -ErrorAction SilentlyContinue | ForEach-Object {
-            try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
-        }
+# 出错即回收本次冒烟自己启动的候选进程：只按启动时记录的精确 PID 回收，
+# 绝不按进程名杀、绝不误杀生产 AutoShutdown.exe（S-UI2-D1 硬性要求）。
+$script:launchedPids = New-Object System.Collections.Generic.List[int]
+function Add-LaunchedProc($proc) {
+    if ($proc -and -not $proc.HasExited) {
+        try { $script:launchedPids.Add([int]$proc.Id) } catch { }
     }
+}
+function Stop-LaunchedProcs() {
+    foreach ($launchedPid in $script:launchedPids) {
+        try {
+            $lp = Get-Process -Id $launchedPid -ErrorAction SilentlyContinue
+            if ($lp) { Stop-Process -Id $launchedPid -Force -ErrorAction SilentlyContinue }
+        } catch { }
+    }
+}
+trap {
+    Stop-LaunchedProcs
     Write-Host ("TRAP {0} @ {1}: {2}" -f $_.Exception.GetType().Name, $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
     throw
 }
@@ -470,6 +480,7 @@ function Start-SmokeApp([string]$dataRoot) {
     New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
     $env:AUTOSHUTDOWN_DATA_ROOT = $dataRoot
     $proc = Start-Process -FilePath $ReleaseExe -PassThru -WorkingDirectory (Split-Path -Parent $ReleaseExe)
+    Add-LaunchedProc $proc
     $win = $null
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
@@ -512,7 +523,6 @@ function Select-NavPage($win, [string]$needle, [string]$waitFor) {
     if (-not $waitFor) { return $true }
     return ($null -ne (Wait-UiElementLike $win $waitFor 8))
 }
-
 Write-Host "== S-UI2 UI smoke ($expectedVersion) =="
 Write-Host "EXE: $ReleaseExe"
 
@@ -557,7 +567,7 @@ function Invoke-UI2Battery([int]$scale, [string]$tag) {
         Note-Skip 'P1: 1600×900 窗口精确尺寸' ("实际 {0}x{1}（窗口状态/DPI 环境限制，列入人工待验；内容区检查在紧凑档进行）" -f [int]$r.Width, [int]$r.Height)
     }
 
-    # ---- P2：紧凑 900×580（DIP）档——首页左卡内容溢出，验证「无最外层滚动条 + 内部滚动可用」 ----
+    # ---- P2：紧凑 900×580（DIP）档——首页两列布局压缩后无任何滚动条；左表单完整显示（创建按钮直接可见） ----
     $compactW = [int][Math]::Round(900 * $scale / 100.0)
     $compactH = [int][Math]::Round(580 * $scale / 100.0)
     Set-WindowSizePhysical $win $compactW $compactH
@@ -606,7 +616,7 @@ function Invoke-UI2Battery([int]$scale, [string]$tag) {
     Assert-True 'P1: 首页 当前任务 卡可见' ($null -ne (Wait-UiElementLike $win '当前任务' 6))
     Assert-True 'P1: 首页 最近活动 区可见' ($null -ne (Wait-UiElementLike $win '最近活动' 6))
 
-    # ---- P2：首页无最外层滚动条（无整页滚动条；左卡内部滚动可用；创建按钮可经内部滚动到达） ----
+    # ---- P2：首页两列布局无任何滚动条（紧凑 900×580 档；左表单压缩后完整显示） ----
     $panes = Get-ScrollablePanes $win
     $actuallyScrollable = @($panes | Where-Object { $_.Scrollable }).Count
     $outerViolation = $false
@@ -621,11 +631,13 @@ function Invoke-UI2Battery([int]$scale, [string]$tag) {
             $outerDetail = "pane {0}×{1} (ratios {2:F2}/{3:F2})" -f [int]$vr.Width, [int]$vr.Height, $wRatio, $hRatio
         }
     }
-    Assert-True 'P2: 首页内部滚动可用(左卡紧凑档溢出可滚)' ($actuallyScrollable -ge 1) ("count={0}" -f $actuallyScrollable)
+    Assert-True 'P2: 首页无可滚动面板(左表单完整显示/最近活动未溢出)' ($actuallyScrollable -eq 0) ("count={0}" -f $actuallyScrollable)
     Assert-True 'P2: 首页无整页(最外层)滚动条' (-not $outerViolation) $outerDetail
-    Assert-ReachableViaInternalScroll $win $contentRect '创建任务' '首页创建任务按钮(内部滚动可达)'
+    # 左表单完整显示：创建按钮直接可见（不依赖任何内部滚动/不截断）
+    $createBtnP2 = Wait-UiElementLike $win '创建任务' 8 'Button'
+    Assert-True 'P2: 首页「创建任务」按钮直接可见(左表单完整显示)' ($null -ne $createBtnP2 -and -not $createBtnP2.Current.IsOffscreen)
 
-    # ---- P3：每周指定星期（周一~周日 7 项） ----
+    # ---- P3：每周指定星期（周一~周日 7 项，直接在当前首页左表单操作） ----
     $wkRb = Find-DescendantLike $win '每周指定星期' 'RadioButton'
     Assert-True 'P3: 时间模式「每周指定星期」存在' ($null -ne $wkRb)
     if ($wkRb) {
@@ -730,7 +742,7 @@ function Invoke-UI2Battery([int]$scale, [string]$tag) {
         Assert-True 'P5: 创建任务2(每周指定星期) 可点击' (Invoke-Click $createBtn2)
         Start-Sleep -Milliseconds 1500
     }
-    # 首页：当前任务计数出现「共 2 个任务」
+    # 当前任务卡在首页右列直接可见（两列布局无独立创建视图，无需返回导航）
     $countText = Wait-UiElementLike $win '共 2 个任务' 12
     Assert-True 'P5: 首页当前任务卡显示「共 2 个任务」' ($null -ne $countText)
     $shotHome = Join-Path $EvidenceDir ('home-{0}percent.png' -f $scale)
