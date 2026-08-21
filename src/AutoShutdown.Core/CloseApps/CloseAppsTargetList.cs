@@ -6,6 +6,7 @@ namespace AutoShutdown.Core.CloseApps;
 /// CloseApps 目标清单校验与规范化（S18）。稳定标识只能为「可执行路径」或「进程 ID」，
 /// 二者恰取其一；不得只按模糊标题匹配。强杀逐目标显式 opt-in（ForceKillAllowed 默认 false）。
 /// 校验失败绝不静默回退为可能触发关闭/强杀的默认值。
+/// S-CLOSEUI1-D3：路径目标必须是完整绝对路径，相对路径在配置校验阶段拒绝（fail-closed）。
 /// </summary>
 public static class CloseAppsTargetList
 {
@@ -70,6 +71,20 @@ public static class CloseAppsTargetList
 
             if (hasPath)
             {
+                // S-CLOSEUI1-D3：可执行路径目标必须是完整绝对路径。相对/drive-relative/
+                // 根相对路径依赖当前工作目录，绝不作为可执行关闭目标，在配置校验阶段
+                // 拒绝（fail-closed），不等到执行时才处理；完整绝对路径仍按既有语义校验。
+                var trimmedPath = target.ExecutablePath!.Trim();
+                if (!Path.IsPathFullyQualified(trimmedPath))
+                {
+                    errors.Add($"{prefix}.ExecutablePath must be a fully qualified absolute path.");
+                }
+                else if (ExecutablePathKey.Normalize(trimmedPath) is null)
+                {
+                    // 完整绝对路径但含 NUL / 非法字符 / 无法规范化：同样 fail-closed。
+                    errors.Add($"{prefix}.ExecutablePath must be a valid absolute path.");
+                }
+
                 if (!seenPaths.Add(target.ExecutablePath!))
                 {
                     errors.Add($"{prefix}.ExecutablePath is duplicated.");

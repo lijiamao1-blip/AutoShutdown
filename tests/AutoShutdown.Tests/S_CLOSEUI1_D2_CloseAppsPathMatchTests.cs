@@ -505,17 +505,91 @@ public sealed class S_CLOSEUI1_D2_ExecutablePathKeyNormalizationTests
         Assert.False(ExecutablePathKey.EqualsNormalized(NotepadPath, nulPath));
     }
 
-    [Fact]
-    public void EqualsNormalized_ExistingShort8Dot3Segment_ExpandedByGetFullPath_OnThisWindows()
+    [SkippableFact]
+    public void EqualsNormalized_RealShortAndLongAlias_ObservesGetFullPathBehavior_OnThisEnvironment()
     {
-        // 如实记录当前环境（Windows 11 / .NET 8.0.30 / net8.0-windows）：Path.GetFullPath 会对
-        // 真实存在的 8.3 短名段调用 Win32 展开（GetLongPathName），故 C:\PROGRA~1\App\app.exe
-        // 与 C:\Program Files\App\app.exe 归一化后相等。这并非本阶段手工 8.3 展开，而是既有
-        // ExecutablePathKey.Normalize 在 Windows 上的既有行为；保存端与执行端因此自动一致，
-        // 原「8.3 与长路径必然匹配不到」的假设在当前环境不成立（详见结果记录 §5/§7）。
-        Assert.True(ExecutablePathKey.EqualsNormalized(
-            @"C:\PROGRA~1\App\app.exe",
-            @"C:\Program Files\App\app.exe"));
+        // S-CLOSEUI1-D3 环境感知：不硬编码假定 PROGRA~1 必然存在。先只读确认目标目录真实
+        // 存在，且系统能通过 GetShortPathName 获得真实短路径别名；只有真实拿到一对「短路径/
+        // 长路径」时才断言现有规范化函数的实际行为。拿不到（卷未启用 8.3 短名或候选目录无
+        // 短名）则明确 SKIP 并写明原因，绝不为了测试创建目录/系统目录/管理员资源，也不修改
+        // 注册表或卷配置来启用 8.3。行为描述：环境相关能力；能真实解析时按现有 Windows/.NET
+        // 行为处理，不能解析时安全不匹配，不作为跨环境承诺。
+        if (!TryGetRealShortPathPair(out var shortPath, out var longPath))
+        {
+            Skip.If(true,
+                "本机无法通过只读 GetShortPathName 获得真实「短路径/长路径」别名对（卷未启用 8.3 短名或候选目录无短名），测试明确 SKIP 而非假通过。");
+            return;
+        }
+
+        // 现有规范化函数只是委托 Path.GetFullPath(Trim) + 大小写不敏感比较，不含任何手工 8.3
+        // 展开；因此短/长路径对的比较结果必须与 GetFullPath 的真实结果完全一致。
+        var expected = string.Equals(
+            Path.GetFullPath(shortPath),
+            Path.GetFullPath(longPath),
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(expected, ExecutablePathKey.EqualsNormalized(shortPath, longPath));
+        Assert.Equal(expected, ExecutablePathKey.EqualsNormalized(longPath, shortPath));
+    }
+
+    /// <summary>只读探测真实「短路径/长路径」别名对；无真实别名时返回 false（测试 SKIP）。</summary>
+    private static bool TryGetRealShortPathPair(out string shortPath, out string longPath)
+    {
+        shortPath = string.Empty;
+        longPath = string.Empty;
+
+        // 候选目录均为系统既有目录（不创建任何目录/管理员资源）；GetShortPathName 只读探测。
+        foreach (var candidate in new[]
+        {
+            @"C:\Windows\System32",
+            @"C:\Windows",
+            @"C:\Program Files",
+            @"C:\Users",
+            @"C:\ProgramData"
+        })
+        {
+            if (!Directory.Exists(candidate))
+            {
+                continue;
+            }
+
+            var shortName = NativeShortPath.TryGet(candidate);
+            if (shortName is null
+                || string.Equals(shortName, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // 该目录无真实短名别名，换下一个候选。
+            }
+
+            shortPath = shortName + @"\app.exe";
+            longPath = candidate + @"\app.exe";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static class NativeShortPath
+    {
+        [System.Runtime.InteropServices.DllImport(
+            "kernel32.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode,
+            SetLastError = true)]
+        private static extern uint GetShortPathNameW(
+            string lpszLongPath,
+            char[] lpszShortPath,
+            uint cchBuffer);
+
+        public static string? TryGet(string longPath)
+        {
+            var buffer = new char[512];
+            var length = GetShortPathNameW(longPath, buffer, (uint)buffer.Length);
+            if (length == 0 || length >= buffer.Length)
+            {
+                return null;
+            }
+
+            return new string(buffer, 0, (int)length);
+        }
     }
 }
 
@@ -527,14 +601,17 @@ public sealed class S_CLOSEUI1_D2_ExecutablePathKeyNormalizationTests
 public sealed class S_CLOSEUI1_D2_SourceContractTests
 {
     [Fact]
-    public void Resolve_Source_UsesEqualsNormalized_NoLegacyOrdinalIgnoreCaseNoNameFallback()
+    public void Resolve_Source_UsesEqualsNormalizedAbsolute_NoLegacyOrdinalIgnoreCaseNoNameFallback()
     {
         var source = File.ReadAllText(Path.Combine(CoreSourceRoot(), "CloseApps", "CloseAppsService.cs"));
 
-        Assert.Contains("ExecutablePathKey.EqualsNormalized(process.ExecutablePath, path)", source);
+        // S-CLOSEUI1-D3：执行端路径匹配统一经 EqualsNormalizedAbsolute（完整绝对路径门槛）。
+        Assert.Contains("ExecutablePathKey.EqualsNormalizedAbsolute(process.ExecutablePath, path)", source);
+        // 不再直接调用普通 EqualsNormalized 做执行匹配（相对路径可能被 CWD 解析）。
+        Assert.DoesNotContain("ExecutablePathKey.EqualsNormalized(process.ExecutablePath, path)", source);
         // 旧实现（原始路径 OrdinalIgnoreCase 直比）已移除；Resolve 不做任何名称兜底。
         Assert.DoesNotContain("string.Equals(process.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)", source);
-        Assert.Contains("// S-CLOSEUI1-D2", source);
+        Assert.Contains("// S-CLOSEUI1-D3", source);
     }
 
     [Fact]
