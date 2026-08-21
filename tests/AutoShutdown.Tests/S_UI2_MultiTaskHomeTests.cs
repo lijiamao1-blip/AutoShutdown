@@ -779,6 +779,8 @@ public sealed class S_UI2_MultiTaskHomeTests
         Assert.Contains("<Setter Property=\"Margin\" Value=\"0,0,8,5\" />", controls);
         Assert.Equal(2, CountOccurrences(home, "<StackPanel VerticalAlignment=\"Top\">"));
         Assert.Contains("<WrapPanel Margin=\"0,5,0,8\" Width=\"480\" HorizontalAlignment=\"Left\">", home);
+        // 480 DIP 固定宽恰好 2 处：时间模式 WrapPanel 与时间输入区 Border；无重复、无冲突、无第三处误配。
+        Assert.Equal(2, CountOccurrences(home, "Width=\"480\" HorizontalAlignment=\"Left\">"));
         Assert.Contains("TextWrapping=\"NoWrap\" MinWidth=\"390\" HorizontalAlignment=\"Left\"", home);
     }
 

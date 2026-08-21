@@ -32,6 +32,7 @@
   <ItemGroup>
     <!-- 同一份多尺寸 ICO：作为 WPF 资源嵌入，供主窗口/提醒窗口/托盘共用；EXE 图标由 ApplicationIcon 嵌入 -->
     <Resource Include="..\..\assets\icon.ico">
+      <Link>assets\icon.ico</Link>
       <LogicalName>assets/icon.ico</LogicalName>
     </Resource>
   </ItemGroup>

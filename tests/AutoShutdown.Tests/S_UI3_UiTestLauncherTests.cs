@@ -5,6 +5,32 @@ namespace AutoShutdown.Tests;
 
 public sealed class S_UI3_UiTestLauncherTests
 {
+    [Fact]
+    public void AppProject_LinksSharedIconIntoWpfResourcePath()
+    {
+        var project = File.ReadAllText(Path.Combine(Root, "src", "AutoShutdown.App", "AutoShutdown.App.csproj"));
+
+        // 图标资源仅一条 Resource 条目：Link 归一化项目内路径 + LogicalName 固定清单名，
+        // 不会产生重复资源、重复输出或路径冲突（同一份 ICO 供主窗口/提醒窗口/托盘/EXE 图标共用）。
+        Assert.Equal(1, CountOccurrences(project, "<Resource Include=\"..\\..\\assets\\icon.ico\">"));
+        Assert.Contains("<Resource Include=\"..\\..\\assets\\icon.ico\">", project, StringComparison.Ordinal);
+        Assert.Contains("<Link>assets\\icon.ico</Link>", project, StringComparison.Ordinal);
+        Assert.Contains("<LogicalName>assets/icon.ico</LogicalName>", project, StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string text, string needle)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+
+        return count;
+    }
+
     private static readonly string Root = FindRepositoryRoot();
 
     [Fact]

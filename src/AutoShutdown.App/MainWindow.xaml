@@ -118,7 +118,8 @@
                                 <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                             </WrapPanel>
                             <StackPanel>
-                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8">
+                                    <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8"
+                                            Width="480" HorizontalAlignment="Left">
                                         <Grid>
                                             <StackPanel Visibility="{Binding ModeIsCountdown, Converter={StaticResource BoolToVisibility}}">
                                                 <WrapPanel>
