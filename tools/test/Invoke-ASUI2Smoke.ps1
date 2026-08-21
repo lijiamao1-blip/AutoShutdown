@@ -81,7 +81,8 @@ if (-not $ReleaseExe -or -not (Test-Path -LiteralPath $ReleaseExe)) {
     exit 1
 }
 $expectedVersion = $null
-if ($ReleaseExe -match 'AutoShutdown-(v[\d.]+-S-UI2\.[0-9a-f]+)\.exe$') { $expectedVersion = $Matches[1] }
+# S-PKG2：最终候选标签改为 S-PKG2.e50afcb（保留 S-UI2 兼容，供既有候选回归）。
+if ($ReleaseExe -match 'AutoShutdown-(v[\d.]+-S-(?:UI2|PKG2)\.[0-9a-f]+)\.exe$') { $expectedVersion = $Matches[1] }
 if (-not $expectedVersion) {
     Write-Host "FAIL  无法从 EXE 名解析版本：$ReleaseExe"
     exit 1
