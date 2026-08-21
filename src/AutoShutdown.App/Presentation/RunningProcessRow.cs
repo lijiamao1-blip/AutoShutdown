@@ -47,6 +47,9 @@ public sealed class RunningProcessRow : ObservableObject
 
     public string CompanyDisplay => string.IsNullOrWhiteSpace(Info.CompanyName) ? string.Empty : Info.CompanyName;
 
+    /// <summary>是否有可确认的主窗口（S-CLOSEUI1-D1）：探测层确认的窗口句柄或非空窗口标题。</summary>
+    public bool HasWindow => Info.HasMainWindow || !string.IsNullOrWhiteSpace(Info.WindowTitle);
+
     /// <summary>状态/不可选原因列：可选用「可添加」，否则用原因。</summary>
     public string StatusText => Selectable ? "可添加" : (UnselectableReason ?? "不可选择");
 

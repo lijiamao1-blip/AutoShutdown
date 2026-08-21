@@ -2113,13 +2113,19 @@ public sealed class MainWindowViewModel : ObservableObject
             CurrentProcessId = _processInfoProvider.CurrentProcessId,
             CurrentSessionId = _processInfoProvider.CurrentSessionId,
             CurrentExecutablePath = _processInfoProvider.CurrentExecutablePath,
+            // 已添加判断统一走规范化规则：把既有路径规范化后交给资格评估器（自身不再重复规范化）。
             ExistingTargetPaths = CloseAppsTargets
                 .Where(row => !ReferenceEquals(row, replaceRow) && !string.IsNullOrWhiteSpace(row.ExecutablePath))
-                .Select(row => row.ExecutablePath!.Trim())
+                .Select(row => ExecutablePathKey.Normalize(row.ExecutablePath) ?? row.ExecutablePath!.Trim())
                 .ToList()
         };
 
-        return _processPickerLauncher(new ProcessPickerViewModel(_processInfoProvider, context));
+        // S-CLOSEUI1-D1：重新选择模式只允许确认一个新程序；摘要显示原路径/新路径/确认替换。
+        return _processPickerLauncher(new ProcessPickerViewModel(
+            _processInfoProvider,
+            context,
+            isReSelectMode: replaceRow is not null,
+            reselectOriginalPath: replaceRow?.ExecutablePath));
     }
 
     /// <summary>合并选择结果到目标列表；取消（null）不改动任何目标。</summary>
@@ -2150,11 +2156,20 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// 把复核通过的运行中进程加入目标列表：按规范化完整路径去重；从进程选择添加绝不授予强杀、
     /// 不持久化 PID 作为长期目标。
+    /// S-CLOSEUI1-D1：重新选择模式（replaceRow 非空）下，只有至少一个新目标通过复核确认时才允许
+    /// 移除旧目标——空确认、全部复核失败或取消一律保持不变；新目标加入后再原子式替换旧目标。
     /// </summary>
     private void AddConfirmedProcesses(IReadOnlyList<RunningProcessInfo> confirmed, CloseAppsTargetRow? replaceRow)
     {
+        if (replaceRow is not null && confirmed.Count == 0)
+        {
+            // 重新选择：空确认 / 全部复核失败 → 原目标必须保持不变（绝不误删）。
+            return;
+        }
+
         if (replaceRow is not null)
         {
+            // 原子替换：确认的新目标已通过复核并去重后才移除旧目标（重新选择模式仅一个）。
             CloseAppsTargets.Remove(replaceRow);
         }
 
@@ -2178,6 +2193,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private CloseAppsTargetRow CreateRowFromRunningProcess(RunningProcessInfo info)
     {
+        // S-CLOSEUI1-D1：保存规范化的完整路径（大小写/相对段统一）。调用方已保证规范化成功——
+        // 规范化失败不得添加（fail-closed），不会退化为按进程名兜底。
         var normalized = ExecutablePathKey.Normalize(info.ExecutablePath);
         var identifier = normalized is not null
             ? Path.GetFileName(normalized)
@@ -2185,7 +2202,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return new CloseAppsTargetRow(
             identifier,
-            info.ExecutablePath?.Trim(),
+            normalized ?? info.ExecutablePath?.Trim(), // 仅当调用方未规范化成功时的兜底（正常不会走到）。
             processId: null, // 不持久化 PID：仅展示当前 PID，长期目标只按完整路径。
             gracefulTimeoutSeconds: null,
             forceKillAllowed: false, // 从进程选择添加绝不授予强杀。

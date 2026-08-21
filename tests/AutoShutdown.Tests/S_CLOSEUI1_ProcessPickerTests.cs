@@ -125,7 +125,7 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void Guard_JunctionPath_NotSelectable_FailClosed()
     {
         var baseDir = Path.Combine(Path.GetTempPath(), "as-closeui1-junction-" + Guid.NewGuid().ToString("N"));
@@ -148,7 +148,8 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
             psi.ArgumentList.Add(realDir);
             using var process = Process.Start(psi)!;
             process.WaitForExit(5000);
-            Assert.True(process.ExitCode == 0, "mklink /J should succeed without elevation on this machine");
+            // S-CLOSEUI1-D1：无法创建 junction 时明确 SKIP，绝不假通过。
+            Skip.IfNot(process.ExitCode == 0, "无法创建 junction（本机环境不支持 mklink /J），测试跳过而非假通过");
 
             var decision = ProcessSelectionGuard.Evaluate(
                 RunningProcess("app.exe", link, pid: 10, sessionId: 1),
@@ -339,9 +340,11 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         await picker.RefreshAsync();
 
         picker.Rows[0].IsSelected = true;
-        var result = picker.ConfirmSelection();
+        var preview = picker.BuildPreview();
+        Assert.NotNull(preview); // 复核通过 → 显示摘要（测试替身下同步返回）。
+        var result = picker.Commit(preview!);
 
-        Assert.Single(result!.ConfirmedProcesses);
+        Assert.Single(result.ConfirmedProcesses);
         Assert.Equal(101, result.ConfirmedProcesses[0].ProcessId);
         Assert.Equal(1, provider.GetByIdCalls);
         Assert.Empty(result.Warnings);
@@ -361,12 +364,12 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         await picker.RefreshAsync();
 
         picker.Rows[0].IsSelected = true;
-        var result = picker.ConfirmSelection();
+        // 全部复核失败（进程已退出）→ 摘要为 null，停留窗口并给出警告。
+        var preview = picker.BuildPreview();
 
-        Assert.NotNull(result);
-        Assert.Empty(result.ConfirmedProcesses);
+        Assert.Null(preview);
         Assert.True(picker.HasWarnings);
-        Assert.Contains("已退出", result.Warnings);
+        Assert.Contains("已退出", picker.WarningText);
     }
 
     [Fact]
@@ -384,15 +387,15 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         await picker.RefreshAsync();
 
         picker.Rows[0].IsSelected = true;
-        var result = picker.ConfirmSelection();
+        // 复核时路径已变化 → 该行被排除，摘要为 null，停留窗口。
+        var preview = picker.BuildPreview();
 
-        Assert.NotNull(result);
-        Assert.Empty(result.ConfirmedProcesses);
-        Assert.Contains("路径已变化", result.Warnings);
+        Assert.Null(preview);
+        Assert.Contains("路径已变化", picker.WarningText);
     }
 
     [Fact]
-    public async Task Picker_Confirm_NothingChecked_ReturnsEmptyNoWarnings()
+    public async Task Picker_Confirm_NothingChecked_StaysInWindowWithWarning()
     {
         var provider = new FakeProcessInfoProvider(
             [RunningProcess("good.exe", CreateTempFile(), pid: 101, sessionId: 1)],
@@ -400,11 +403,11 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         var picker = new ProcessPickerViewModel(provider, Context(sessionId: 1));
         await picker.RefreshAsync();
 
-        var result = picker.ConfirmSelection();
+        // 空选择：不显示摘要、不添加任何目标，给出明确提示并停留窗口。
+        var preview = picker.BuildPreview();
 
-        Assert.NotNull(result);
-        Assert.Empty(result.ConfirmedProcesses);
-        Assert.False(picker.HasWarnings);
+        Assert.Null(preview);
+        Assert.Contains("未选择任何程序", picker.WarningText);
     }
 
     // ==================== MainWindowViewModel 接入 ====================
@@ -435,7 +438,7 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
                     row.IsSelected = true;
                 }
 
-                return pickerVm.ConfirmSelection();
+                return ConfirmViaPreview(pickerVm);
             });
         await viewModel.InitializeAsync();
 
@@ -478,7 +481,9 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
             {
                 captured = pickerVm;
                 RefreshSynchronously(pickerVm);
-                return pickerVm.ConfirmSelection();
+                // S-CLOSEUI1-D1：默认「仅显示可选项」会隐藏已添加行；本测试需验证已添加原因，故关闭该筛选。
+                pickerVm.ShowSelectableOnly = false;
+                return ConfirmViaPreview(pickerVm);
             });
         await viewModel.InitializeAsync();
         Assert.Single(viewModel.CloseAppsTargets);
@@ -526,7 +531,7 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
             {
                 RefreshSynchronously(pickerVm);
                 pickerVm.Rows[0].IsSelected = true;
-                return pickerVm.ConfirmSelection();
+                return ConfirmViaPreview(pickerVm);
             });
         await viewModel.InitializeAsync();
 
@@ -560,7 +565,7 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
             {
                 RefreshSynchronously(pickerVm);
                 pickerVm.Rows[0].IsSelected = true;
-                return pickerVm.ConfirmSelection();
+                return ConfirmViaPreview(pickerVm);
             });
         await viewModel.InitializeAsync();
 
@@ -593,7 +598,7 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
                 RefreshSynchronously(pickerVm);
                 var row = pickerVm.Rows.Single(r => r.Selectable);
                 row.IsSelected = true;
-                return pickerVm.ConfirmSelection();
+                return ConfirmViaPreview(pickerVm);
             });
         await viewModel.InitializeAsync();
 
@@ -662,7 +667,9 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         int sessionId,
         string windowTitle = "",
         string productName = "",
-        string companyName = "") => new()
+        string companyName = "",
+        bool hasMainWindow = true,
+        DateTimeOffset? startTimeUtc = null) => new()
         {
             ProcessId = pid,
             ProcessName = processName,
@@ -670,7 +677,11 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
             SessionId = sessionId,
             WindowTitle = windowTitle,
             ProductName = productName,
-            CompanyName = companyName
+            CompanyName = companyName,
+            // S-CLOSEUI1-D1：默认视为有主窗口（避免窗口筛选默认隐藏行，干扰既有行测试）；
+            // 启动时间默认固定值，使身份复核默认通过。测试需单独构造无窗口/启动时间未知场景。
+            HasMainWindow = hasMainWindow,
+            StartTimeUtc = startTimeUtc ?? Now
         };
 
     private static ProcessSelectionContext Context(int sessionId = 1)
@@ -678,6 +689,13 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
 
     private static void RefreshSynchronously(ProcessPickerViewModel picker)
         => picker.RefreshAsync().GetAwaiter().GetResult();
+
+    /// <summary>S-CLOSEUI1-D1：确定流程 = 先构建复核摘要（null → 停留窗口，等同取消），确认后提交。</summary>
+    private static ProcessPickerResult? ConfirmViaPreview(ProcessPickerViewModel picker)
+    {
+        var preview = picker.BuildPreview();
+        return preview is null ? null : picker.Commit(preview);
+    }
 
     private static AppConfig ConfigWithoutCloseApps() => new()
     {
@@ -843,6 +861,12 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
 
         public string? GetByIdPathOverride { get; set; }
 
+        /// <summary>复核时把启动时间改成该值（模拟 PID 复用/受保护进程启动时间不可读等身份不一致）。</summary>
+        public DateTimeOffset? GetByIdStartTimeOverride { get; set; }
+
+        /// <summary>复核时把启动时间置为 default（模拟受保护进程无法确认启动时间）。</summary>
+        public bool GetByIdStartTimeUnknown { get; set; }
+
         public IReadOnlyList<RunningProcessInfo> EnumerateProcesses()
         {
             if (ThrowOnEnumerate)
@@ -867,7 +891,17 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
                 return null;
             }
 
-            return GetByIdPathOverride is null ? info : info with { ExecutablePath = GetByIdPathOverride };
+            var fresh = GetByIdPathOverride is null ? info : info with { ExecutablePath = GetByIdPathOverride };
+            if (GetByIdStartTimeOverride is { } startTime)
+            {
+                fresh = fresh with { StartTimeUtc = startTime };
+            }
+            else if (GetByIdStartTimeUnknown)
+            {
+                fresh = fresh with { StartTimeUtc = default };
+            }
+
+            return fresh;
         }
     }
 }

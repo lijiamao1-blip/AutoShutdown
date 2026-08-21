@@ -8,11 +8,14 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
-    <PackageReference Include="xunit" Version="2.8.1" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.1">
+    <!-- S-CLOSEUI1-D1：xunit 2.9.2 + Xunit.SkippableFact 提供运行时 Skip（junction 无法创建时
+         诚实跳过而非假通过）。xunit v2 无内置 Assert.Skip（属 v3），故用标准 SkippableFact 扩展。 -->
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\AutoShutdown.Core\AutoShutdown.Core.csproj" />

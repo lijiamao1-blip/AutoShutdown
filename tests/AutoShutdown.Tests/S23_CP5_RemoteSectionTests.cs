@@ -286,7 +286,7 @@ public sealed class S23_CP5_RemoteSectionTests
 
         Assert.Null(response.Error);
         await WaitUntilAsync(() => harness.Notifications.Any(n => n.Kind == RemoteServerNotificationKind.TriggerShutdown));
-        Assert.Single(harness.Notifications.Where(n => n.Kind == RemoteServerNotificationKind.TriggerShutdown));
+        Assert.Single(harness.Notifications, n => n.Kind == RemoteServerNotificationKind.TriggerShutdown);
         var notification = harness.Notifications.Single(n => n.Kind == RemoteServerNotificationKind.TriggerShutdown);
         Assert.False(string.IsNullOrEmpty(notification.SourceIp));
     }
@@ -354,7 +354,7 @@ public sealed class S23_CP5_RemoteSectionTests
 
         Assert.Null(response.Error);
         await WaitUntilAsync(() => harness.Notifications.Any(n => n.Kind == RemoteServerNotificationKind.CancelShutdown));
-        Assert.Single(harness.Notifications.Where(n => n.Kind == RemoteServerNotificationKind.CancelShutdown));
+        Assert.Single(harness.Notifications, n => n.Kind == RemoteServerNotificationKind.CancelShutdown);
     }
 
     // ================= 分区 VM 夹具 =================

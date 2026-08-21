@@ -146,15 +146,22 @@ public static class ProcessSelectionGuard
     }
 
     /// <summary>
-    /// 校验规范化路径指向「现有普通文件」。非普通文件 / reparse / 无法确认 → 返回不可选决策；
-    /// 全部通过返回 null。
+    /// 校验规范化路径指向「现有普通文件」且整条祖先链不经过 reparse。非普通文件 / reparse /
+    /// 祖先 reparse / 无法确认 → 返回不可选决策；全部通过返回 null。
+    /// 只读属性检查，绝不删除、创建或修改任何路径，绝不跟随链接判断真实目标。
     /// </summary>
-    private static ProcessSelectionDecision? CheckOrdinaryFile(string key)
+    private static ProcessSelectionDecision? CheckOrdinaryFile(
+        string key,
+        Func<string, bool>? existsReader = null,
+        Func<string, FileAttributes>? attributeReader = null)
     {
+        existsReader ??= File.Exists;
+        attributeReader ??= File.GetAttributes;
+
         bool exists;
         try
         {
-            exists = File.Exists(key);
+            exists = existsReader(key);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
         {
@@ -169,12 +176,12 @@ public static class ProcessSelectionGuard
         FileAttributes attributes;
         try
         {
-            attributes = File.GetAttributes(key);
+            attributes = attributeReader(key);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
         {
             // 无法确认路径状态：fail-closed，绝不当作普通文件。
-            return ProcessSelectionDecision.NotSelectable("无法确认路径状态（访问拒绝）");
+            return ProcessSelectionDecision.NotSelectable("无法确认路径安全状态");
         }
 
         if ((attributes & FileAttributes.ReparsePoint) != 0)
@@ -192,6 +199,56 @@ public static class ProcessSelectionGuard
             return ProcessSelectionDecision.NotSelectable("路径不是普通文件");
         }
 
+        // S-CLOSEUI1-D1：完整祖先链 reparse 检查。EXE 文件自身不带 ReparsePoint 不代表路径安全——
+        // 若 EXE 位于 junction/symlink 目录内部，文件本身可能不带 ReparsePoint 而被错误允许。
+        // 逐级只读检查每一级父目录：任一级是 reparse（junction/symlink）或状态无法读取/访问被拒
+        // 一律 fail-closed 不可选择；不跟随链接判断真实目标后再放行。
+        var ancestor = Path.GetDirectoryName(key);
+        var depth = 0;
+        while (!string.IsNullOrEmpty(ancestor) && depth < 64)
+        {
+            FileAttributes ancestorAttributes;
+            try
+            {
+                ancestorAttributes = attributeReader(ancestor);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
+            {
+                // 祖先状态无法确认：fail-closed，绝不当作安全普通路径。
+                return ProcessSelectionDecision.NotSelectable("路径祖先目录状态无法确认，安全起见不可选择");
+            }
+
+            if ((ancestorAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                return ProcessSelectionDecision.NotSelectable("路径祖先目录为符号链接/联接，安全起见不可选择");
+            }
+
+            if ((ancestorAttributes & FileAttributes.Directory) == 0)
+            {
+                // 祖先不是目录：路径结构异常 / 无法确认 → fail-closed。
+                return ProcessSelectionDecision.NotSelectable("路径祖先目录状态无法确认，安全起见不可选择");
+            }
+
+            var parent = Path.GetDirectoryName(ancestor);
+            if (string.IsNullOrEmpty(parent))
+            {
+                break; // 已到根（如 C:\）。
+            }
+            ancestor = parent;
+            depth++;
+        }
+
         return null;
     }
+
+    /// <summary>
+    /// 测试专用检查入口（S-CLOSEUI1-D1）：注入 exists/attributes 读取器，确定性验证祖先链
+    /// fail-closed 分支（如祖先属性读取失败），不必依赖真实不可访问目录。生产调用走
+    /// <see cref="File.Exists"/> / <see cref="File.GetAttributes"/>。
+    /// </summary>
+    internal static ProcessSelectionDecision? CheckOrdinaryFileForTest(
+        string key,
+        Func<string, bool> existsReader,
+        Func<string, FileAttributes> attributeReader)
+        => CheckOrdinaryFile(key, existsReader, attributeReader);
 }

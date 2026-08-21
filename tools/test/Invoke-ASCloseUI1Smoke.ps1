@@ -335,6 +335,15 @@ function Invoke-ClickCheckbox($picker, $el) {
     Start-Sleep -Milliseconds 150
     return (Invoke-RealClick $el)
 }
+function Invoke-RealClickOn($hostEl, $el) {
+    # 真实鼠标点击（不阻塞）：点「确定」会弹出模态确认摘要窗（其内 ShowDialog），此时若用
+    # UIA InvokePattern.Invoke()，提供程序会同步等待 OnOkClick 返回，脚本会卡住直到摘要被关闭。
+    # 真实点击只注入输入事件并立即返回，脚本可继续与摘要窗交互（返回修改/取消/确认添加）。
+    if (-not $el) { return $false }
+    [void](Bring-ToFront $hostEl)
+    Start-Sleep -Milliseconds 150
+    return (Invoke-RealClick $el)
+}
 function Find-DescendantExact($win, [string]$name, [string]$controlType = '') {
     # 精确匹配（区别于 Find-DescendantLike 的子串匹配）：用于「取消」按钮，避免被「全部取消」截胡。
     if (-not $win) { return $null }
@@ -465,13 +474,65 @@ function Close-PickerByCancel($picker) {
     $cancelBtn = Find-DescendantExact $picker '取消' 'Button'
     if ($cancelBtn) { [void](Invoke-Click $cancelBtn); Start-Sleep -Milliseconds 600 }
 }
+function Get-CheckBoxToggled($el) {
+    # 返回 $null（无法读取）或 [bool]（On=$true/Off=$false）。
+    $ts = Get-ToggleState $el
+    if ($null -eq $ts) { return $null }
+    return ($ts -eq [System.Windows.Automation.ToggleState]::On)
+}
+function Find-TextByRegex($win, [string]$pattern) {
+    # 按 UIA Name 正则匹配文本元素（用于「已选择 N 项」这类动态文本）。
+    if (-not $win) { return $null }
+    try {
+        foreach ($e in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition)) {
+            $n = $e.Current.Name
+            if ($n -and $n -match $pattern) { return $e }
+        }
+    } catch { }
+    return $null
+}
+function Get-CountSelected($picker) {
+    $el = Find-TextByRegex $picker '^已选择 \d+ 项$'
+    if (-not $el) { return $null }
+    if ($el.Current.Name -match '^已选择 (\d+) 项$') { return [int]$Matches[1] }
+    return $null
+}
+function Find-SummaryWindow($picker, $mainWin, [int]$timeoutSeconds = 12) {
+    # 确认摘要窗是选择窗的 owned 窗口（Owner=ProcessPickerWindow），标题固定
+    # 「确认添加运行中的程序目标」（重选模式仅按钮/正文文案变化）。依次在
+    # 选择窗子级、主窗口子级、桌面根子级查找，容错 UIA 首次查询超时。
+    $title = '确认添加运行中的程序目标'
+    $tc = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty, $title)
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        foreach ($host_ in @($picker, $mainWin)) {
+            if (-not $host_) { continue }
+            foreach ($scope in @([System.Windows.Automation.TreeScope]::Children,
+                                  [System.Windows.Automation.TreeScope]::Descendants)) {
+                try {
+                    $w = $host_.FindFirst($scope, $tc)
+                    if ($w) { return $w }
+                } catch { }
+            }
+        }
+        try {
+            $w = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                [System.Windows.Automation.TreeScope]::Children, $tc)
+            if ($w) { return $w }
+        } catch { }
+        Start-Sleep -Milliseconds 300
+    }
+    return $null
+}
 
 Write-Host "== S-CLOSEUI1 UI smoke =="
 Write-Host "EXE: $ReleaseExe"
 
 $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("as-closeui1-" + [guid]::NewGuid().ToString('N'))
 $dataRoot = Join-Path $sandbox 'data'
-$evidence = if ($EvidenceDir) { $EvidenceDir } else { Join-Path $root 'S-PKG-work包\S-CLOSEUI1-截图证据' }
+$evidence = if ($EvidenceDir) { $EvidenceDir } else { Join-Path $root 'S-PKG-work包\S-CLOSEUI1-D1-截图证据' }
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
 $winverExe  = Join-Path (${env:SystemRoot}) 'System32\winver.exe'
@@ -523,6 +584,16 @@ foreach ($h in @('选择','进程名','PID','可执行文件完整路径','窗�
     Assert-True ("A3: 列头可见: {0}" -f $h) ($null -ne (Find-HeaderItem $picker $h))
 }
 Assert-True 'A3: 底部只读声明可见' ($null -ne (Find-DescendantLike $picker '这里只读取当前进程信息'))
+# S-CLOSEUI1-D1：顶栏两个筛选开关默认开启；工具栏三按钮；已选择数量初始 0。
+$filterWin = Find-Descendant $picker '仅显示有窗口'
+$filterSel = Find-Descendant $picker '仅显示可选项'
+Assert-True 'A3: 筛选「仅显示有窗口」默认开启' (($null -ne $filterWin) -and (Get-CheckBoxToggled $filterWin) -eq $true)
+Assert-True 'A3: 筛选「仅显示可选项」默认开启' (($null -ne $filterSel) -and (Get-CheckBoxToggled $filterSel) -eq $true)
+$countSel0 = Get-CountSelected $picker
+Assert-True 'A3: 已选择数量可见(初始 0 项)' ($null -ne $countSel0 -and $countSel0 -eq 0) ("count={0}" -f $countSel0)
+Assert-True 'A3: 工具栏「全选当前可用项」存在' ($null -ne (Find-DescendantExact $picker '全选当前可用项' 'Button'))
+Assert-True 'A3: 工具栏「取消当前选择」存在' ($null -ne (Find-DescendantExact $picker '取消当前选择' 'Button'))
+Assert-True 'A3: 工具栏「取消全部选择」存在' ($null -ne (Find-DescendantExact $picker '取消全部选择' 'Button'))
 $shotPicker = Join-Path $evidence 'picker.png'
 [void](Bring-ToFront $picker); Start-Sleep -Milliseconds 200
 [void](Save-WindowScreenshot $picker $shotPicker)
@@ -554,7 +625,35 @@ if ($refreshBtn) {
     Assert-True 'A4: 刷新后状态更新' ($null -ne (Wait-Like $picker '个进程' 12))
 }
 
+# ---- D1：工具栏交互（已选数量实时更新 / 全选当前可用项 / 取消当前选择 / 取消全部选择） ----
+$toolAll = Find-DescendantExact $picker '全选当前可用项' 'Button'
+$toolCur = Find-DescendantExact $picker '取消当前选择' 'Button'
+$toolAllClear = Find-DescendantExact $picker '取消全部选择' 'Button'
+if ($toolAll) {
+    Assert-True 'D1: 全选当前可用项(可点击)' (Invoke-Click $toolAll)
+    Start-Sleep -Milliseconds 800
+    $countAll = Get-CountSelected $picker
+    Assert-True 'D1: 全选后已选择数量>0' ($null -ne $countAll -and $countAll -gt 0) ("count={0}" -f $countAll)
+}
+if ($toolCur) {
+    $beforeCur = Get-CountSelected $picker
+    Assert-True 'D1: 取消当前选择(可点击)' (Invoke-Click $toolCur)
+    Start-Sleep -Milliseconds 600
+    $afterCur = Get-CountSelected $picker
+    # 全选只勾可见+可选行，取消当前只清可见行；本环境无可隐藏的可选项，故归零或减少。
+    Assert-True 'D1: 取消当前只清可见行(数量减少或归零)' ($null -ne $afterCur -and $afterCur -lt $beforeCur) ("{0}->{1}" -f $beforeCur, $afterCur)
+}
+if ($toolAllClear) {
+    Assert-True 'D1: 取消全部选择(可点击)' (Invoke-Click $toolAllClear)
+    Start-Sleep -Milliseconds 600
+    $countClear = Get-CountSelected $picker
+    Assert-True 'D1: 取消全部后已选择数量=0' ($null -ne $countClear -and $countClear -eq 0) ("count={0}" -f $countClear)
+}
+
 # ---- A5：不可选行（AutoShutdown 自身）标灰且复选框禁用；可选行可勾选 ----
+# 默认「仅显示可选项」开启会隐藏所有不可选行（含自身进程）：先关闭该筛选才能看到自身进程行。
+$filterSel = Find-Descendant $picker '仅显示可选项'
+if ($filterSel -and (Get-CheckBoxToggled $filterSel)) { [void](Invoke-Click $filterSel); Start-Sleep -Milliseconds 500 }
 # 通过搜索框定位目标行（DataGrid 行虚拟化：未过滤时仅实例化视口内行，无法直接按内容定位）。
 $selfName = [IO.Path]::GetFileNameWithoutExtension($ReleaseExe)
 $selfRow = Find-RowBySearch $picker $selfName $selfName
@@ -564,6 +663,8 @@ if ($selfRow) {
     Assert-True 'A5: 自身进程复选框禁用（不可勾选）' ($null -ne $selfCheck -and -not $selfCheck.Current.IsEnabled)
     Assert-True 'A5: 自身进程行显示不可选原因' (Row-HasCellLike $selfRow '自身进程')
 }
+# 恢复「仅显示可选项」：后续搜索可选行不依赖该筛选。
+if ($filterSel -and -not (Get-CheckBoxToggled $filterSel)) { [void](Invoke-Click $filterSel); Start-Sleep -Milliseconds 400 }
 # 搜索过滤会虚拟化掉其它行：必须在当前搜索存活时立即定位并断言该行及其复选框，
 # 再切换下一个搜索（避免对陈旧元素断言）。
 $winverRow  = Find-RowBySearch $picker 'winver' $winverExe
@@ -575,17 +676,37 @@ Assert-True 'A5: charmap 行可选' ($null -ne $charmapRow)
 $charmapCheck = Get-CheckBoxInRow $charmapRow
 Assert-True 'A5: charmap 复选框可用' ($null -ne $charmapCheck -and $charmapCheck.Current.IsEnabled)
 
-# ---- A6：勾选 winver + charmap → 确定 → 入列表 ----
+# ---- A6：勾选 winver + charmap → 确定 → 确认摘要 → 确认添加 → 入列表 ----
 # 搜索过滤会虚拟化掉其它行，勾选前必须重新定位当前行。
 $wCheck2 = Get-CheckBoxInRow (Find-RowBySearch $picker 'winver' $winverExe)
 Assert-True 'A6: 勾选 winver' ($null -ne $wCheck2 -and $wCheck2.Current.IsEnabled -and (Invoke-ClickCheckbox $picker $wCheck2))
 $cCheck2 = Get-CheckBoxInRow (Find-RowBySearch $picker 'charmap' $charmapExe)
 Assert-True 'A6: 勾选 charmap' ($null -ne $cCheck2 -and $cCheck2.Current.IsEnabled -and (Invoke-ClickCheckbox $picker $cCheck2))
+$countSel2 = Get-CountSelected $picker
+Assert-True 'A6: 已选择数量=2（实时更新）' ($null -ne $countSel2 -and $countSel2 -eq 2) ("count={0}" -f $countSel2)
 $okBtn = Find-DescendantLike $picker '确定' 'Button'
 Assert-True 'A6: 确定按钮存在' ($null -ne $okBtn)
-if ($okBtn) { [void](Invoke-Click $okBtn) }
-Start-Sleep -Milliseconds 900
-Assert-True 'A6: 确定后窗口关闭' ($null -eq (Find-PickerWindow $win 2))
+if ($okBtn) { [void](Invoke-RealClickOn $picker $okBtn) }
+# S-CLOSEUI1-D1：确定后不立即返回，先出现确认摘要窗口（程序名 / PID / 完整路径 / 去重数）。
+$summary = Find-SummaryWindow $picker $win
+Assert-True 'A6: 确认摘要窗口出现' ($null -ne $summary)
+if ($summary) {
+    Assert-True 'A6: 摘要只按完整路径匹配提示' ($null -ne (Find-DescendantLike $summary '只按以下完整路径匹配'))
+    Assert-True 'A6: 摘要不按进程名自动兜底提示' ($null -ne (Find-DescendantLike $summary '不会按进程名自动兜底'))
+    Assert-True 'A6: 摘要不强杀权限提示' ($null -ne (Find-DescendantLike $summary '不会自动授予强制结束权限'))
+    Assert-True 'A6: 摘要显示去重后新增数量(2 个目标)' ($null -ne (Find-DescendantLike $summary '最终将新增 2 个目标'))
+    Assert-True 'A6: 摘要显示当前 PID(仅本次展示)' ($null -ne (Find-DescendantLike $summary 'PID '))
+    Assert-True 'A6: 摘要显示窗口标题(仅展示)' ($null -ne (Find-DescendantLike $summary '窗口标题：'))
+    $shotSummary = Join-Path $evidence 'summary-add.png'
+    [void](Bring-ToFront $summary); Start-Sleep -Milliseconds 150
+    [void](Save-WindowScreenshot $summary $shotSummary)
+    Assert-True 'D: 截图 确认添加摘要 已保存' (Test-Path -LiteralPath $shotSummary)
+    $confirmAdd = Find-DescendantExact $summary '确认添加' 'Button'
+    Assert-True 'A6: 摘要「确认添加」按钮' ($null -ne $confirmAdd)
+    if ($confirmAdd) { [void](Invoke-RealClickOn $summary $confirmAdd) }
+    Start-Sleep -Milliseconds 900
+}
+Assert-True 'A6: 确认添加后窗口关闭' ($null -eq (Find-PickerWindow $win 2))
 
 $pageScroll2 = Get-PageScrollViewer $win
 $added1 = Assert-Reachable $win $pageScroll2 'winver.exe' '目标: winver.exe 已入列表' 'CheckBox'
@@ -607,15 +728,37 @@ if ($picker2) {
     Assert-True 'A7: mstsc 行可选' ($null -ne $mstscRow)
     $mstscCheck = Get-CheckBoxInRow $mstscRow
     if ($mstscCheck -and $mstscCheck.Current.IsEnabled) {
-        Assert-True 'A7: 勾选 mstsc（随后取消）' (Invoke-ClickCheckbox $picker2 $mstscCheck)
+        Assert-True 'A7: 勾选 mstsc（随后返回修改/取消）' (Invoke-ClickCheckbox $picker2 $mstscCheck)
     } else {
-        Assert-True 'A7: 勾选 mstsc（随后取消）' $false 'mstsc 复选框不可用'
+        Assert-True 'A7: 勾选 mstsc（随后返回修改/取消）' $false 'mstsc 复选框不可用'
     }
-    $cancelBtn2 = Find-DescendantExact $picker2 '取消' 'Button'
-    Assert-True 'A7: 取消按钮存在' ($null -ne $cancelBtn2)
-    if ($cancelBtn2) { [void](Invoke-Click $cancelBtn2) }
-    Start-Sleep -Milliseconds 700
-    Assert-True 'A7: 取消后窗口关闭' ($null -eq (Find-PickerWindow $win 2))
+    # D1：确定 → 摘要 → 返回修改 → 选择窗保留，勾选保留。
+    $okBtn2 = Find-DescendantLike $picker2 '确定' 'Button'
+    if ($okBtn2) { [void](Invoke-RealClickOn $picker2 $okBtn2) }
+    $summary2 = Find-SummaryWindow $picker2 $win
+    Assert-True 'A7: 摘要窗口出现(返回修改流程)' ($null -ne $summary2)
+    if ($summary2) {
+        $backBtn = Find-DescendantExact $summary2 '返回修改' 'Button'
+        Assert-True 'A7: 摘要「返回修改」按钮' ($null -ne $backBtn)
+        if ($backBtn) { [void](Invoke-RealClickOn $summary2 $backBtn) }
+        Start-Sleep -Milliseconds 700
+        Assert-True 'A7: 返回修改后选择窗未关闭' ($null -ne (Find-PickerWindow $win 2))
+        $mRow2 = Find-RowBySearch $picker2 'mstsc' $mstscExe
+        $mCheck2 = Get-CheckBoxInRow $mRow2
+        Assert-True 'A7: 返回修改后 mstsc 勾选保留' ($null -ne $mCheck2 -and (Get-ToggleState $mCheck2) -eq [System.Windows.Automation.ToggleState]::On)
+    }
+    # D1：再走取消流程：确定 → 摘要 → 取消 → 集合不变。
+    $okBtn3 = Find-DescendantLike $picker2 '确定' 'Button'
+    if ($okBtn3) { [void](Invoke-RealClickOn $picker2 $okBtn3) }
+    $summary3 = Find-SummaryWindow $picker2 $win
+    Assert-True 'A7: 摘要窗口出现(取消流程)' ($null -ne $summary3)
+    if ($summary3) {
+        $sumCancel = Find-DescendantExact $summary3 '取消' 'Button'
+        Assert-True 'A7: 摘要「取消」按钮' ($null -ne $sumCancel)
+        if ($sumCancel) { [void](Invoke-RealClickOn $summary3 $sumCancel) }
+    }
+    Start-Sleep -Milliseconds 800
+    Assert-True 'A7: 摘要取消后窗口关闭' ($null -eq (Find-PickerWindow $win 2))
     $still2 = ($null -ne (Assert-Reachable $win (Get-PageScrollViewer $win) 'winver.exe' 'winver 仍在' 'CheckBox'))
     $noMstsc = $null -eq (Find-DescendantLike $win 'mstsc.exe')
     Assert-True 'A7: 取消后列表不变(winver 仍在)' $still2
@@ -650,6 +793,9 @@ if ($picker3) {
     $null = Wait-Like $picker3 '个进程' 12
     $refreshBtn4 = Find-DescendantLike $picker3 '刷新' 'Button'
     if ($refreshBtn4) { [void](Invoke-Click $refreshBtn4); Start-Sleep -Milliseconds 800 }
+    # 默认「仅显示可选项」开启会隐藏已添加（不可选）行：先关闭该筛选才能看到「已添加」标灰。
+    $filterSelA9 = Find-Descendant $picker3 '仅显示可选项'
+    if ($filterSelA9 -and (Get-CheckBoxToggled $filterSelA9)) { [void](Invoke-Click $filterSelA9); Start-Sleep -Milliseconds 500 }
     $wRow = Find-RowBySearch $picker3 'winver' $winverExe
     Assert-True 'A9: winver 行显示「已添加」' (($null -ne $wRow) -and (Row-HasCellLike $wRow '已添加'))
     $wCheckA9 = Get-CheckBoxInRow $wRow
@@ -703,7 +849,31 @@ $shotInvalid = Join-Path $evidence 'invalid-hint.png'
 [void](Save-WindowScreenshot $win $shotInvalid)
 Assert-True 'D: 截图 失效路径提示 已保存' (Test-Path -LiteralPath $shotInvalid)
 
-# B2：重新选择 → charmap → 确定 → 失效行被替换，失效提示消失。
+# B2a：重新选择 空确认（不勾选任何进程）不得删除旧目标（D1 修复回归）。
+$reselectBtnA = Assert-Reachable $win (Get-PageScrollViewer $win) '重新选择' '重新选择 按钮(空确认回归)' 'Button'
+Assert-True 'B2a: 「重新选择」按钮可达(空确认回归)' ($null -ne $reselectBtnA)
+if ($reselectBtnA) {
+    [void](Invoke-Click $reselectBtnA)
+    $pickerE = Find-PickerWindow $win 12
+    Assert-True 'B2a: 重新选择 打开选择窗(空确认回归)' ($null -ne $pickerE)
+    if ($pickerE) {
+        $null = Wait-Like $pickerE '个进程' 12
+        $okBtnE = Find-DescendantLike $pickerE '确定' 'Button'
+        Assert-True 'B2a: 确定按钮存在(空确认回归)' ($null -ne $okBtnE)
+        if ($okBtnE) { [void](Invoke-RealClickOn $pickerE $okBtnE) }
+        Start-Sleep -Milliseconds 700
+        # 空确认：摘要必须不出现、选择窗必须仍在（原目标绝不被删除）。
+        Assert-True 'B2a: 空确认后选择窗仍在(未误删旧目标)' ($null -ne (Find-PickerWindow $win 2))
+        Assert-True 'B2a: 空确认后未出现确认摘要' ($null -eq (Find-SummaryWindow $pickerE $win 3))
+        Assert-True 'B2a: 空确认提示「未选择任何程序，原目标保持不变」' ($null -ne (Find-DescendantLike $pickerE '未选择任何程序，原目标保持不变'))
+        Close-PickerByCancel $pickerE
+        Start-Sleep -Milliseconds 700
+        Assert-True 'B2a: 空确认取消后选择窗关闭' ($null -eq (Find-PickerWindow $win 2))
+    }
+    Assert-True 'B2a: 空确认后原失效目标仍保留' ($null -ne (Find-DescendantLike $win '原程序路径已失效'))
+}
+
+# B2：重新选择 → mstsc → 确定 → 确认替换 → 失效行被替换，失效提示消失。
 $reselectBtn = Assert-Reachable $win (Get-PageScrollViewer $win) '重新选择' '重新选择 按钮(点击)' 'Button'
 Assert-True 'B2: 「重新选择」按钮可达' ($null -ne $reselectBtn)
 if ($reselectBtn) {
@@ -719,9 +889,23 @@ if ($reselectBtn) {
         $cCheck = Get-CheckBoxInRow $cRow
         Assert-True 'B2: 勾选 mstsc' ($null -ne $cCheck -and $cCheck.Current.IsEnabled -and (Invoke-ClickCheckbox $picker4 $cCheck))
         $okBtn4 = Find-DescendantLike $picker4 '确定' 'Button'
-        if ($okBtn4) { [void](Invoke-Click $okBtn4) }
-        Start-Sleep -Milliseconds 900
-        Assert-True 'B2: 确定后选择窗关闭' ($null -eq (Find-PickerWindow $win 2))
+        if ($okBtn4) { [void](Invoke-RealClickOn $picker4 $okBtn4) }
+        # D1：确定后先出现确认摘要（重选模式显示原路径/新路径/确认替换），确认替换后才替换旧行。
+        $summaryB = Find-SummaryWindow $picker4 $win
+        Assert-True 'B2: 确认摘要窗口出现(重选模式)' ($null -ne $summaryB)
+        if ($summaryB) {
+            Assert-True 'B2: 摘要显示原路径' ($null -ne (Find-DescendantLike $summaryB '原路径：'))
+            Assert-True 'B2: 摘要显示新路径' ($null -ne (Find-DescendantLike $summaryB '新路径：'))
+            Assert-True 'B2: 摘要含「确认替换」按钮' ($null -ne (Find-DescendantExact $summaryB '确认替换' 'Button'))
+            $shotReselectSummary = Join-Path $evidence 'reselect-summary.png'
+            [void](Bring-ToFront $summaryB); Start-Sleep -Milliseconds 150
+            [void](Save-WindowScreenshot $summaryB $shotReselectSummary)
+            Assert-True 'D: 截图 重新选择确认摘要 已保存' (Test-Path -LiteralPath $shotReselectSummary)
+            $replaceBtn = Find-DescendantExact $summaryB '确认替换' 'Button'
+            if ($replaceBtn) { [void](Invoke-RealClickOn $summaryB $replaceBtn) }
+            Start-Sleep -Milliseconds 900
+        }
+        Assert-True 'B2: 确认替换后选择窗关闭' ($null -eq (Find-PickerWindow $win 2))
     }
     $pageScroll3 = Get-PageScrollViewer $win
     $hasMstsc = ($null -ne (Assert-Reachable $win $pageScroll3 'mstsc.exe' '目标: mstsc.exe 已入列表' 'CheckBox'))

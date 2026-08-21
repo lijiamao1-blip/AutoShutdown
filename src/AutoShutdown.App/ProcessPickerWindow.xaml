@@ -29,25 +29,52 @@
     </Window.Resources>
 
     <DockPanel Margin="16,14,16,14">
-        <!-- 顶栏：搜索 + 刷新 -->
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+        <!-- 顶栏（S-CLOSEUI1-D1）：搜索 + 两个筛选开关 + 刷新 + 已选择数量 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
             <TextBlock Text="搜索：" VerticalAlignment="Center" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" />
-            <TextBox Width="360" Margin="6,0,10,0" VerticalContentAlignment="Center"
+            <TextBox Width="330" Margin="6,0,10,0" VerticalContentAlignment="Center"
                      Style="{StaticResource InputBoxStyle}"
                      AutomationProperties.Name="搜索进程"
                      Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="按进程名、路径、窗口标题、产品名称或公司名称搜索" />
-            <Button Content="刷新" Style="{StaticResource SecondaryButtonStyle}" Padding="18,7"
+            <CheckBox Content="仅显示有窗口" VerticalAlignment="Center" FontSize="13" Margin="0,0,14,0"
+                      IsChecked="{Binding ShowWindowedOnly}" Foreground="{StaticResource TextPrimaryBrush}"
+                      AutomationProperties.Name="仅显示有窗口"
+                      ToolTip="开启时只显示具有非空窗口标题或可确认主窗口的普通进程（默认开启）"/>
+            <CheckBox Content="仅显示可选项" VerticalAlignment="Center" FontSize="13" Margin="0,0,14,0"
+                      IsChecked="{Binding ShowSelectableOnly}" Foreground="{StaticResource TextPrimaryBrush}"
+                      AutomationProperties.Name="仅显示可选项"
+                      ToolTip="开启时隐藏所有不可选项；关闭后可查看系统进程/路径不可读/已添加等项目及其不可用原因（默认开启）"/>
+            <Button Content="刷新" Style="{StaticResource SecondaryButtonStyle}" Padding="16,7"
                     Command="{Binding RefreshCommand}" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolConverter}}" />
+            <!-- S-CLOSEUI1-D1：不设 AutomationProperties.Name 覆盖，UIA Name 即可见文本「已选择 N 项」，
+                 供 UI 冒烟按实时数量断言。 -->
+            <TextBlock VerticalAlignment="Center" Margin="12,0,0,0"
+                       FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
+                       Text="{Binding SelectedCount, StringFormat=已选择 {0} 项}" />
             <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="14,0,0,0"
                        FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
+        </DockPanel>
+
+        <!-- 工具行（S-CLOSEUI1-D1）：全选当前可用项 / 取消当前选择 / 取消全部选择 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Button Content="全选当前可用项" Style="{StaticResource SecondaryButtonStyle}" Padding="16,7"
+                    Command="{Binding SelectAllVisibleCommand}"
+                    AutomationProperties.Name="全选当前可用项"
+                    ToolTip="只选择当前搜索及筛选结果中可选的可见行；重新选择模式下禁用"/>
+            <Button Content="取消当前选择" Style="{StaticResource SecondaryButtonStyle}" Padding="16,7" Margin="10,0,0,0"
+                    Command="{Binding ClearCurrentCommand}"
+                    AutomationProperties.Name="取消当前选择"
+                    ToolTip="只取消当前搜索及筛选结果中可见行的勾选；不影响被筛选隐藏的选择"/>
+            <Button Content="取消全部选择" Style="{StaticResource SecondaryButtonStyle}" Padding="16,7" Margin="10,0,0,0"
+                    Command="{Binding ClearAllCommand}"
+                    AutomationProperties.Name="取消全部选择"
+                    ToolTip="清除所有筛选范围内外的勾选"/>
         </DockPanel>
 
         <!-- 底栏：说明 + 操作 -->
         <DockPanel DockPanel.Dock="Bottom">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="全部取消" Style="{StaticResource SecondaryButtonStyle}" Padding="18,8"
-                        Command="{Binding ClearAllCommand}" Margin="0,0,10,0" />
                 <Button Content="确定" Style="{StaticResource PrimaryButtonStyle}" Padding="22,8" Margin="0,0,10,0"
                         Click="OnOkClick" />
                 <Button Content="取消" Style="{StaticResource SecondaryButtonStyle}" Padding="18,8"

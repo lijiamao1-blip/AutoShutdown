@@ -23,6 +23,9 @@ public sealed record RunningProcessInfo
     /// <summary>主窗口标题；无窗口或读取失败为空串。</summary>
     public string WindowTitle { get; init; } = string.Empty;
 
+    /// <summary>是否有可确认的主窗口（MainWindowHandle 非零 或 窗口标题非空）。只读探测。</summary>
+    public bool HasMainWindow { get; init; }
+
     /// <summary>产品名称（来自可执行文件版本信息）；无法读取为空串。</summary>
     public string ProductName { get; init; } = string.Empty;
 

@@ -64,6 +64,7 @@ public sealed class DiagnosticProcessInfoProvider : IProcessInfoProvider
             ExecutablePath = ReadExecutablePath(process),
             SessionId = ReadSessionId(process),
             WindowTitle = ReadWindowTitle(process),
+            HasMainWindow = ReadHasMainWindow(process),
             StartTimeUtc = ReadStartTime(process)
         };
 
@@ -126,6 +127,19 @@ public sealed class DiagnosticProcessInfoProvider : IProcessInfoProvider
         catch
         {
             return string.Empty;
+        }
+    }
+
+    private static bool ReadHasMainWindow(Process process)
+    {
+        try
+        {
+            return process.MainWindowHandle != 0
+                || !string.IsNullOrWhiteSpace(process.MainWindowTitle);
+        }
+        catch
+        {
+            return false; // 无法确认窗口状态：不因此误判为可选。
         }
     }
 

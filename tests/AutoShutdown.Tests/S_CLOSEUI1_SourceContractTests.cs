@@ -129,8 +129,10 @@ public sealed class S_CLOSEUI1_SourceContractTests
         {
             Path.Combine(AppSourceRoot(), "Presentation", "ProcessPickerViewModel.cs"),
             Path.Combine(AppSourceRoot(), "Presentation", "ProcessPickerResult.cs"),
+            Path.Combine(AppSourceRoot(), "Presentation", "ProcessPickerPreview.cs"),
             Path.Combine(AppSourceRoot(), "Presentation", "RunningProcessRow.cs"),
-            Path.Combine(AppSourceRoot(), "ProcessPickerWindow.xaml.cs")
+            Path.Combine(AppSourceRoot(), "ProcessPickerWindow.xaml.cs"),
+            Path.Combine(AppSourceRoot(), "ProcessPickerSummaryWindow.xaml.cs") // S-CLOSEUI1-D1 确认摘要。
         };
         return sources;
     }
