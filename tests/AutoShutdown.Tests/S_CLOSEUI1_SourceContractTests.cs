@@ -122,6 +122,19 @@ public sealed class S_CLOSEUI1_SourceContractTests
         }
     }
 
+    [Fact]
+    public void SummaryWindow_LongTargetList_UsesBoundedVerticalScrollArea_WithFixedButtons()
+    {
+        var xaml = File.ReadAllText(Path.Combine(AppSourceRoot(), "ProcessPickerSummaryWindow.xaml"));
+
+        Assert.Contains("<RowDefinition Height=\"*\"/>", xaml);
+        Assert.Contains("x:Name=\"SummaryItemsScrollViewer\"", xaml);
+        Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", xaml);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", xaml);
+        Assert.Contains("<DockPanel Grid.Row=\"6\">", xaml);
+        Assert.DoesNotContain("DockPanel.Dock=\"Top\"", xaml);
+    }
+
     private static IEnumerable<string> ProcessSelectionSources()
     {
         var dir = Path.Combine(AppSourceRoot(), "Infrastructure", "ProcessSelection");

@@ -13,9 +13,19 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </Window.Resources>
 
-    <DockPanel Margin="20,18,20,18">
+    <Grid Margin="20,18,20,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
         <!-- 标题 + 提示文字 -->
-        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
                        Text="{Binding TitleText}" />
             <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
@@ -23,7 +33,7 @@
         </StackPanel>
 
         <!-- 重新选择模式：原路径 / 新路径 -->
-        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="{Binding ShowOriginalPath, Converter={StaticResource BoolToVisibility}}">
+        <StackPanel Grid.Row="1" Margin="0,0,0,12" Visibility="{Binding ShowOriginalPath, Converter={StaticResource BoolToVisibility}}">
             <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,3">
                 <Run Text="原路径："/><Run Text="{Binding OriginalPath, Mode=OneWay}"/>
             </TextBlock>
@@ -34,42 +44,46 @@
         </StackPanel>
 
         <!-- 摘要条目 -->
-        <TextBlock DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"
+        <TextBlock Grid.Row="2" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"
                    Text="{Binding SummaryCountText}" />
-        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Items}" Margin="0,0,0,10">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Style="{StaticResource InnerPanelStyle}" Padding="10,7" Margin="0,0,0,6">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding ProcessNameDisplay}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
-                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
-                                       Text="{Binding ProcessId, StringFormat=PID {0}}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                            <TextBlock Grid.Column="2" Text="{Binding PathDisplay}" FontSize="12" Foreground="{StaticResource TextPrimaryBrush}"
-                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0,0,0"
-                                       ToolTip="{Binding PathDisplay}"/>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <ScrollViewer x:Name="SummaryItemsScrollViewer" Grid.Row="3" Margin="0,0,0,10"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      PanningMode="VerticalOnly" AutomationProperties.Name="待添加程序目标列表">
+            <ItemsControl ItemsSource="{Binding Items}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource InnerPanelStyle}" Padding="10,7" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding ProcessNameDisplay}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+                                           Text="{Binding ProcessId, StringFormat=PID {0}}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                <TextBlock Grid.Column="2" Text="{Binding PathDisplay}" FontSize="12" Foreground="{StaticResource TextPrimaryBrush}"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0,0,0"
+                                           ToolTip="{Binding PathDisplay}"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
 
         <!-- 窗口标题（仅展示） -->
-        <TextBlock DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
+        <TextBlock Grid.Row="4" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
             <Run Text="窗口标题："/><Run Text="{Binding WindowTitlesText, Mode=OneWay}"/>
         </TextBlock>
 
         <!-- 排除项警告 -->
-        <TextBlock DockPanel.Dock="Top" Text="{Binding Warnings}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap"
+        <TextBlock Grid.Row="5" Text="{Binding Warnings}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap"
                    Margin="0,0,0,10" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}"/>
 
         <!-- 底部按钮 -->
-        <DockPanel DockPanel.Dock="Bottom">
+        <DockPanel Grid.Row="6">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="{Binding ConfirmButtonText}" Style="{StaticResource PrimaryButtonStyle}" Padding="20,9" Margin="0,0,10,0"
                         AutomationProperties.Name="{Binding ConfirmButtonText}" Click="OnConfirmClick" />
@@ -79,5 +93,5 @@
                         AutomationProperties.Name="取消" Click="OnCancelClick" />
             </StackPanel>
         </DockPanel>
-    </DockPanel>
+    </Grid>
 </Window>
