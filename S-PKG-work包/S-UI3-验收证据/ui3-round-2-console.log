@@ -1,0 +1,41 @@
+﻿== S-UI3 UIA SMOKE round 2 (2026-08-22 20:12:41) ==
+A: 本轮数据根 = C:\Users\李佳茂\AppData\Local\Temp\as-ui3-round-2-f2208952017e43c88560af983714e948
+PASS  A: 数据根独立于正式数据根
+PASS  主窗口成功出现
+PASS  安全测试模式横幅可见
+PASS  双闸门：不执行真实系统电源提示可见
+  [launcher] 正在准备 AutoShutdown 实时 UI 安全测试界面……
+  [launcher] 工作区：D:\电脑定时关机重建完整版
+  [launcher] Git HEAD：d0c01f327c8774191388c49d0b260474662b857c
+  [launcher] 启动失败：检测到已有 AutoShutdown 实例。请先从托盘正常退出；本入口不会自动关闭它。
+  [launcher] 日志路径：D:\电脑定时关机重建完整版\.build-tmp\S-UI3-logs\start-20260822-201245.log
+PASS  已有实例时入口拒绝启动
+PASS  拒绝启动未结束已有实例
+PASS  创建第一条模拟任务
+PASS  第一条任务创建完成(当前任务卡状态变化)
+PASS  切换每周模式以创建不同任务
+PASS  每周指定星期面板已展开(周日可见)
+PASS  创建第二条模拟任务
+PASS  首页显示两条任务
+PASS  进入任务管理页
+PASS  任务管理显示两条任务
+PASS  保存 UIA 截图证据
+PASS  C1: 关闭窗口后主窗口隐藏
+PASS  C1: 关闭窗口后进程仍存活(隐藏到托盘)
+  [tray] 目标 PID: 38312  名称: AutoShutdown.App
+  [tray] 已调用「退出程序」。
+  [tray] 进程已退出。ExitCode=
+  [tray] 残留 AutoShutdown 进程数(不含目标PID): 0
+PASS  C2: 托盘「退出程序」按精确 PID 完成
+PASS  C2: 进程按托盘退出已结束
+PASS  C2: 无 AutoShutdown 残留进程
+PASS  C2: 日志含 TrayExitRequested
+PASS  C2: 日志含 ApplicationStopping
+PASS  C2: 日志含 ApplicationStopped
+PASS  C2: 日志顺序 TrayExitRequested→ApplicationStopping→ApplicationStopped
+PASS  正式数据目录未改变
+D: 本轮 app 日志已复制到 D:\电脑定时关机重建完整版\S-PKG-work包\S-UI3-验收证据\ui3-round-2-applogs
+第 2/2 轮: PASS  PID=38312  停止按钮数=2  trayExit=0  residual=0  formalUnchanged=True
+S-UI3 UIA SMOKE: pass=50 fail=0 skip=0  rounds=2
+报告: D:\电脑定时关机重建完整版\S-PKG-work包\S-UI3-验收证据\ui3-smoke-20260822-201225.csv
+Evidence: D:\电脑定时关机重建完整版\S-PKG-work包\S-UI3-验收证据
