@@ -73,6 +73,58 @@ public sealed class S_UI3_UiTestLauncherTests
     }
 
     [Fact]
+    public void Smoke_HasPerRoundIsolatedDataRoot_AndDoesNotReuseSharedSandbox()
+    {
+        var smoke = Smoke();
+        // A：每轮独立精确数据根（as-ui3-round-N-<guid>），绝不复用共享 UiTestSandbox。
+        Assert.Contains("as-ui3-round-", smoke, StringComparison.Ordinal);
+        Assert.Contains("$env:AUTOSHUTDOWN_DATA_ROOT = $dataRoot", smoke, StringComparison.Ordinal);
+        Assert.Contains("New-IsolatedRoot", smoke, StringComparison.Ordinal);
+        Assert.Contains("Remove-IsolatedRoot", smoke, StringComparison.Ordinal);
+        // 冒烟不得把数据根指向共享沙箱（共享沙箱只在启动器中由正式 UI 测试使用）。
+        Assert.DoesNotContain("$env:AUTOSHUTDOWN_DATA_ROOT = $sandbox", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Smoke_UsesBoundedConditionalPolling_NotFixedLongSleeps()
+    {
+        var smoke = Smoke();
+        // B：有界条件轮询（显式总超时 + 300ms 间隔），替代固定 1200/1000/600ms 盲等。
+        Assert.Contains("Wait-ButtonCount", smoke, StringComparison.Ordinal);
+        Assert.Contains("Wait-NoIdleState", smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-Sleep -Milliseconds 1200", smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-Sleep -Milliseconds 1000", smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-Sleep -Milliseconds 600", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Smoke_VerifiesCloseToTray_ThenRealTrayExitByExactPid()
+    {
+        var smoke = Smoke();
+        // C1：窗口关闭 → 主窗口隐藏 + 进程仍存活（不把“关闭到托盘”误判为“退出失败”）。
+        Assert.Contains("Close-WindowGracefully", smoke, StringComparison.Ordinal);
+        Assert.Contains("MainWindowHandle -eq 0", smoke, StringComparison.Ordinal);
+        // C2：真实托盘「退出程序」按本轮精确 PID（不按进程名清理、不强杀）。
+        Assert.Contains("-TargetPid $proc.Id", smoke, StringComparison.Ordinal);
+        Assert.Contains("TrayExitRequested", smoke, StringComparison.Ordinal);
+        Assert.Contains("ApplicationStopping", smoke, StringComparison.Ordinal);
+        Assert.Contains("ApplicationStopped", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Smoke_WritesPerRoundEvidence_AndGuardsTempDeletion()
+    {
+        var smoke = Smoke();
+        // D：每轮完整控制台输出落盘 + app 日志保留；正式数据目录前后快照一致。
+        Assert.Contains("ui3-round-{0}-console.log", smoke, StringComparison.Ordinal);
+        Assert.Contains("ui3-round-{0}-applogs", smoke, StringComparison.Ordinal);
+        Assert.Contains("Get-FormalDataSnapshot", smoke, StringComparison.Ordinal);
+        // 清理仅限系统临时目录内、且本脚本创建的精确路径（无无界递归删除、无 Bash/rm）。
+        Assert.Contains("[IO.Path]::GetTempPath()", smoke, StringComparison.Ordinal);
+        Assert.Contains(".StartsWith($tempFull", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void App_RefusesUnsafeUiTestConfig_AndDoesNotForwardSecondaryInstance()
     {
         var guard = File.ReadAllText(Path.Combine(Root, "src", "AutoShutdown.App", "Infrastructure", "UiTestEnvironment.cs"));
@@ -115,6 +167,8 @@ public sealed class S_UI3_UiTestLauncherTests
     }
 
     private static string Launcher() => File.ReadAllText(Path.Combine(Root, "tools", "Start-AutoShutdownUiTest.ps1"));
+
+    private static string Smoke() => File.ReadAllText(Path.Combine(Root, "tools", "test", "Invoke-ASUI3Smoke.ps1"));
 
     private static string FindRepositoryRoot()
     {

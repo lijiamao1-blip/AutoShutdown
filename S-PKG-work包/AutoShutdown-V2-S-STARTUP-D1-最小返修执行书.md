@@ -244,3 +244,51 @@ fail-closed 默认关闭保持不变；真实开关读取移到 `ApplicationLife
 ### 8.5 提交范围（S-STARTUP-D1-D1）
 
 仅精确暂存：`src/AutoShutdown.App/App.xaml.cs`、`AppHost/ApplicationLifetimeCoordinator.cs`、`AppHost/RemoteStartController.cs`（新增）、`Infrastructure/Remote/RemoteServer.cs`、`Infrastructure/IWindowActivationService.cs`、`Infrastructure/WindowActivationService.cs`、`Infrastructure/ActivationPipeServer.cs`、`Infrastructure/Logging/FileApplicationLogger.cs`、`tests/AutoShutdown.Tests/S_STARTUP_D1_StartupLifecycleTests.cs`、`S-PKG-work包/AutoShutdown-V2-S-STARTUP-D1-最小返修执行书.md`。旧截图、历史工件、既有未跟踪文件原样保留。
+
+## 9. S-STARTUP-D1-D2 测试工具最小修正（总顾问 A–D 方案）与最终验收
+
+### 9.1 评审结论（总顾问）
+
+- 实现修正提交 `d0c01f3`（远程启动超时原子中止）通过独立复验；允许对 UIA 测试工具做最小修正与最终验收。
+- **允许修改范围**：`tools/test/Invoke-ASUI3Smoke.ps1`、`tools/test/Invoke-SStartupD1TrayExit.ps1`、本执行书验收补充、对应测试工具契约/回归测试。**不修改应用业务源码**；除非出现可复现、有证据的新发布阻塞缺陷（则停止并等待总顾问裁决）。
+- **纪律**：独立实现提交（精确暂存，不掺旧截图/历史工件/循环临时目录/候选二进制/`.build-tmp`）；全部验收通过后**单独提交** `S-STARTUP-D1-结果记录.md`；完成后**立即停止**——不 git push、不打包、不恢复 S-PKG2、不进入其它阶段；不 amend/重写 `c6e99d0`/`e58d5d4`/`ce434b5`/`d0c01f3`。
+- 启动器（`tools/Start-AutoShutdownUiTest.ps1`，不在修改范围）仍以共享 `UiTestSandbox` 启动正式 UI 测试；冒烟脚本改为**每轮独立隔离根直接启动候选 EXE**，并在每轮用启动器前置检查验证「已有实例时入口拒绝启动」（不触碰共享沙箱）。
+
+### 9.2 测试工具修正（A–D）
+
+| 维度 | 现状缺陷 | 修正 |
+|---|---|---|
+| **A 数据隔离** | 原冒烟经启动器复用共享 `UiTestSandbox`，跨轮复用 tasks.json | 每轮新建**独立精确** `AUTOSHUTDOWN_DATA_ROOT`（`as-ui3-round-N-<guid>` + 安全 config.json：TestMode=true / RealPowerEnabled=false / StartWithWindows=false / RunCommands 空 / CloseApps 空 / MinimizeToTrayOnClose=true）；不复用共享沙箱；**绝不删除/清空/覆盖正式数据目录**；清理仅限本脚本创建、且路径位于系统临时目录内的隔离根（无无界递归删除）；每轮记录隔离根绝对路径并校验其与正式数据根不同 |
+| **B 有界轮询** | 固定 `Start-Sleep 1200/600/1000ms` | 全部替换为**有界条件轮询**（显式总超时 + 300ms 间隔）：当前任务卡离开空态（`Wait-NoIdleState`）、每周面板展开（`周日` CheckBox）、`共 N 个任务`、任务管理「停止」按钮数（`Wait-ButtonCount`）；超时即 FAIL 并输出实际计数；无无限重试/多跑求成功/盲目延长等待 |
+| **C 关闭到托盘 + 真实托盘退出** | 原冒烟把窗口关闭误判为「应用退出」（`Close-WindowGracefully` + `WaitForExit` 后断言 `HasExited`），且未验证真实托盘退出 | 分步验证：**(1)** 窗口关闭 → 主窗口隐藏（有界轮询 `MainWindowHandle=0`）+ 进程仍存活（不误判为“退出失败”）；**(2)** 真实托盘菜单「退出程序」按**本轮精确 PID**（`Invoke-SStartupD1TrayExit.ps1 -TargetPid <pid>`，绝不强制结束进程、绝不按进程名清理），有界等待退出，确认 **0 个 AutoShutdown 残留**，日志含 `TrayExitRequested → ApplicationStopping → ApplicationStopped` 顺序证据 |
+| **D 证据落盘** | 计数仅控制台，无逐轮落盘 | 每轮完整控制台输出落盘 `ui3-round-N-console.log`；app 日志复制到 `ui3-round-N-applogs`；截图与每轮报告 CSV 落盘；临时文件仅经 PowerShell 在已验证精确路径上删除（无 Bash/rm） |
+
+### 9.3 托盘退出工具加固
+
+`Invoke-SStartupD1TrayExit.ps1` 由桌面全量 UIA 检索改为 **Win11 托盘溢出区窗口 scoped 检索**（`TopLevelWindowForOverflowXamlIsland`；ESC 归一化前台 + chevron「显示隐藏的图标」展开；scoped `FindAll` 数毫秒，桌面全量数十秒），保留桌面级精确检索回退（图标直接显示在任务栏时）；仍按精确 PID、有界等待退出、绝不强制结束进程。
+
+### 9.4 契约/回归测试（`S_UI3_UiTestLauncherTests.cs` 新增）
+
+- `Smoke_HasPerRoundIsolatedDataRoot_AndDoesNotReuseSharedSandbox`：冒烟含 `as-ui3-round-` 隔离根命名、`$env:AUTOSHUTDOWN_DATA_ROOT = $dataRoot`、`New-IsolatedRoot`/`Remove-IsolatedRoot`，不含 `= $sandbox` 数据根赋值。
+- `Smoke_UsesBoundedConditionalPolling_NotFixedLongSleeps`：含 `Wait-ButtonCount`/`Wait-NoIdleState` 有界轮询，不含固定 `Start-Sleep 1200/1000/600ms`。
+- `Smoke_VerifiesCloseToTray_ThenRealTrayExitByExactPid`：含关闭后 `MainWindowHandle -eq 0` 且进程存活、`-TargetPid` 调托盘工具、日志 `TrayExitRequested`/`ApplicationStopping`/`ApplicationStopped` 顺序断言。
+- `Smoke_WritesPerRoundEvidence_AndGuardsTempDeletion`：含 `ui3-round-N-console.log`/`ui3-round-N-applogs`、每轮报告 CSV、`Get-FormalDataSnapshot` 前后一致、仅限系统临时目录内删除的守卫。
+- 既有禁止 token 契约（冒烟与启动器文本不得含 `Stop-Process`/`taskkill`/`Kill(`/`git push` 等）继续通过。
+
+### 9.5 最终验收（HEAD `d0c01f3`）
+
+- [ ] Release 构建（App + Tests，TreatWarningsAsErrors）：0 错误 0 警告
+- [ ] 全量测试通过（如实记录真实数量与退出码）
+- [ ] `S_STARTUP_D1` 聚焦通过
+- [ ] S23 远程聚焦通过
+- [ ] S22 task-sync 自动化（仅 Fake + 内存，无真实系统任务写入）
+- [ ] S-UI3 launcher 契约测试通过
+- [ ] **UIA 冒烟 ≥2 连续轮全通过**（关闭到托盘 + 真实托盘退出按精确 PID；不设 `AUTOSHUTDOWN_UI_TEST`）
+- [ ] 20 轮真机循环（`Invoke-SStartupD1Loop.ps1`）：每轮启动 → 二次激活 → 关闭到托盘 → 托盘退出 → 无残留
+- [ ] `git diff --check` 退出码 0
+- [ ] S23 flaky 如实记录：保留失败日志；单独复跑 vs 基线如实记录；**不得**把全量通过写成「flaky 已消除」；不改 Core 调度
+- 任何一轮出现无窗口主实例 / `ActivationForwardFailed` / 托盘退出失败 / 残留进程 → 该轮 FAIL；20 轮与 UIA 冒烟不得以强杀进程作为成功清理手段。
+
+### 9.6 提交范围（测试工具最小修正）
+
+仅精确暂存：`tools/test/Invoke-ASUI3Smoke.ps1`、`tools/test/Invoke-SStartupD1TrayExit.ps1`、`tests/AutoShutdown.Tests/S_UI3_UiTestLauncherTests.cs`、`S-PKG-work包/AutoShutdown-V2-S-STARTUP-D1-最小返修执行书.md`。旧截图、历史工件、既有未跟踪文件、`.build-tmp` 原样保留不入提交。
