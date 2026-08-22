@@ -80,7 +80,11 @@ public sealed class S_UI3_UiTestLauncherTests
         Assert.Contains("as-ui3-round-", smoke, StringComparison.Ordinal);
         Assert.Contains("$env:AUTOSHUTDOWN_DATA_ROOT = $dataRoot", smoke, StringComparison.Ordinal);
         Assert.Contains("New-IsolatedRoot", smoke, StringComparison.Ordinal);
-        Assert.Contains("Remove-IsolatedRoot", smoke, StringComparison.Ordinal);
+        // D3：清理仅经共享边界模块精确校验（删除边界已从旧的 Remove-IsolatedRoot StartsWith 前缀
+        // 改为 Remove-ASUI3IsolatedRoot + Test-ASUI3CleanupRoundDecision，拒绝时判本轮 FAIL）。
+        Assert.Contains("Remove-ASUI3IsolatedRoot", smoke, StringComparison.Ordinal);
+        Assert.Contains("Test-ASUI3CleanupRoundDecision", smoke, StringComparison.Ordinal);
+        Assert.Contains("ASUI3IsolatedRootCleanup.ps1", smoke, StringComparison.Ordinal);
         // 冒烟不得把数据根指向共享沙箱（共享沙箱只在启动器中由正式 UI 测试使用）。
         Assert.DoesNotContain("$env:AUTOSHUTDOWN_DATA_ROOT = $sandbox", smoke, StringComparison.Ordinal);
     }
@@ -119,9 +123,23 @@ public sealed class S_UI3_UiTestLauncherTests
         Assert.Contains("ui3-round-{0}-console.log", smoke, StringComparison.Ordinal);
         Assert.Contains("ui3-round-{0}-applogs", smoke, StringComparison.Ordinal);
         Assert.Contains("Get-FormalDataSnapshot", smoke, StringComparison.Ordinal);
-        // 清理仅限系统临时目录内、且本脚本创建的精确路径（无无界递归删除、无 Bash/rm）。
+        // D3：删除边界经共享模块精确校验，绝不复用旧的 StartsWith 前缀判断。
         Assert.Contains("[IO.Path]::GetTempPath()", smoke, StringComparison.Ordinal);
-        Assert.Contains(".StartsWith($tempFull", smoke, StringComparison.Ordinal);
+        Assert.Contains("Remove-ASUI3IsolatedRoot -Target $dataRoot", smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain(".StartsWith($tempFull", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BoundaryModule_EnforcesStrictDeletionGuard()
+    {
+        var module = BoundaryModule();
+        // D3：共享删除边界模块必须实现全部逐项校验；旧的无界前缀 StartsWith 判断必须不存在。
+        Assert.Contains("^as-ui3-round-\\d+-[0-9a-f]{32}$", module, StringComparison.Ordinal);
+        Assert.Contains("ReparsePoint", module, StringComparison.Ordinal);
+        Assert.Contains("GetDirectoryName($targetFull)", module, StringComparison.Ordinal);
+        Assert.Contains("OrdinalIgnoreCase", module, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartsWith($tempFull", module, StringComparison.Ordinal);
+        Assert.DoesNotContain("Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue", module, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -169,6 +187,8 @@ public sealed class S_UI3_UiTestLauncherTests
     private static string Launcher() => File.ReadAllText(Path.Combine(Root, "tools", "Start-AutoShutdownUiTest.ps1"));
 
     private static string Smoke() => File.ReadAllText(Path.Combine(Root, "tools", "test", "Invoke-ASUI3Smoke.ps1"));
+
+    private static string BoundaryModule() => File.ReadAllText(Path.Combine(Root, "tools", "test", "ASUI3IsolatedRootCleanup.ps1"));
 
     private static string FindRepositoryRoot()
     {

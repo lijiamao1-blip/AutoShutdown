@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # tools/test/Invoke-ASUI3Smoke.ps1
-# S-UI3 UIA 冒烟（≥2 连续轮；S-STARTUP-D1-D2 测试工具最小修正 A–D）。
+# S-UI3 UIA 冒烟（≥2 连续轮；S-STARTUP-D1-D2 测试工具最小修正 A–D；D3 删除边界加固）。
 #
 #   A. 每轮独立精确 AUTOSHUTDOWN_DATA_ROOT：全新临时隔离根（as-ui3-round-N-<guid>）+
 #      安全 config.json（TestMode=true / RealPowerEnabled=false / StartWithWindows=false /
@@ -8,6 +8,12 @@
 #      UiTestSandbox 的 tasks.json；绝不删除/清空/覆盖正式数据目录；清理仅针对本脚本创建、
 #      且路径位于系统临时目录内的隔离根（无无界递归删除）；每轮记录隔离根绝对路径并校验
 #      其与正式数据根不同。
+#   A-D3. 删除边界（ASUI3IsolatedRootCleanup.ps1）：只允许删除本轮创建并登记的精确绝对目录；
+#      目录名严格匹配 ^as-ui3-round-\d+-[0-9a-f]{32}$；GetFullPath 后必须是系统临时目录的
+#      直接子目录（绝不只做 StartsWith 前缀判断）；目标不等于临时目录、驱动器根、用户目录、
+#      正式数据根、仓库目录；目标及从临时目录到目标的路径组件均无 ReparsePoint
+#      （junction/symlink/mount point 一律拒绝）；仅在本轮进程已确认退出、日志证据复制完成后
+#      删除；边界无法确认时保留目录并将本轮判 FAIL，不得静默跳过后仍判通过。
 #   B. 有界条件轮询替代固定 1000ms 等待：任务行数 / 「停止」按钮数 / 当前任务卡状态 /
 #      每周面板展开 / 「共 N 个任务」均为有界轮询（显式总超时 + 300ms 轮询间隔）。
 #      超时即 FAIL 并输出实际计数；无无限重试、无多跑求成功、无盲目延长等待。
@@ -49,10 +55,22 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 
+# D3：删除边界逻辑共享模块（精确绝对路径 / 名称模式 / 受保护根 / reparse point 校验）。
+. (Join-Path $PSScriptRoot 'ASUI3IsolatedRootCleanup.ps1')
+
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $launcher = Join-Path $root 'tools\Start-AutoShutdownUiTest.ps1'
 $trayTool = Join-Path $root 'tools\test\Invoke-SStartupD1TrayExit.ps1'
 $formalRoot = Join-Path $env:LOCALAPPDATA 'AutoShutdown'
+
+# D3：受保护根集合（正式数据根 / 仓库目录 / 用户目录）与系统临时根，供删除边界校验使用。
+$script:tempRootFull = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$script:userDir = [Environment]::GetFolderPath('UserProfile')
+$script:protectedRoots = @(
+    [IO.Path]::GetFullPath($formalRoot),
+    [IO.Path]::GetFullPath($root),
+    [IO.Path]::GetFullPath($script:userDir)
+)
 
 if (-not $EvidenceDirectory) {
     $EvidenceDirectory = Join-Path $root 'S-PKG-work包\S-UI3-验收证据'
@@ -189,15 +207,6 @@ function New-IsolatedRoot([int]$round) {
     }
     $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $d 'config.json') -Encoding UTF8
     return $d
-}
-
-function Remove-IsolatedRoot([string]$d) {
-    # A：仅删除本脚本创建的、路径位于系统临时目录内的隔离根；绝不触碰正式数据目录。
-    $tempFull = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    $targetFull = $null
-    try { $targetFull = [IO.Path]::GetFullPath($d) } catch { return }
-    if (-not $targetFull.StartsWith($tempFull, [StringComparison]::OrdinalIgnoreCase)) { return }
-    try { if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
 }
 
 # ---------- 窗口 / 截图 / 关闭到托盘 ----------
@@ -429,13 +438,22 @@ for ($i = 1; $i -le $Rounds; $i++) {
         Write-Out ('D: 本轮 app 日志已复制到 ' + $appLogDest)
     }
 
-    # ---- 清理：仅本脚本创建的隔离根；残留进程绝不强杀 ----
+    # ---- 清理：仅本脚本创建并登记的隔离根；残留进程绝不强杀 ----
     $env:AUTOSHUTDOWN_DATA_ROOT = $envBackup
     if ($proc -and -not $proc.HasExited) {
         $roundFail = $true
         Write-Out ('FAIL 本轮实例未退出 (pid=' + $proc.Id + ')，保留隔离根证据；绝不强制结束进程。')
     } else {
-        Remove-IsolatedRoot $dataRoot
+        # D3：删除边界逐项确认（直接子目录 / 名称模式 / 非受保护根 / 无 reparse point）。
+        $cleanupStatus = Remove-ASUI3IsolatedRoot -Target $dataRoot -TempRoot $script:tempRootFull -ProtectedRoots $script:protectedRoots
+        $cleanupShouldFail = Test-ASUI3CleanupRoundDecision -Status $cleanupStatus
+        Assert-True 'D: 隔离根删除边界确认并清理' (-not $cleanupShouldFail) ("status={0}" -f $cleanupStatus)
+        if ($cleanupShouldFail) {
+            $roundFail = $true
+            Write-Out ('FAIL  隔离根边界无法确认(status={0})，保留隔离根证据并判本轮 FAIL。' -f $cleanupStatus)
+        } else {
+            Write-Out ('D: 隔离根清理完成 status=' + $cleanupStatus)
+        }
     }
 
     # ---- 本轮结果判定（基于本轮新增失败数） ----
