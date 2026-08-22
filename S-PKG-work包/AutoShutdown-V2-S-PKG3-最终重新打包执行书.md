@@ -3,18 +3,19 @@
 - 阶段：S-PKG3（启动缺陷返修 S-STARTUP-D1 后的最终重新发布候选：全新构建、测试、打包、证据记录与本地提交）
 - 执行：本阶段唯一打包执行 AI；自动化测试 + UIA 冒烟 + 30 轮启动专项全部经隔离数据根
 - 分支：`master`
-- 唯一打包基线 HEAD：`6e3e1243219b663d7a211728589603a3029c01f8`（短哈希 `6e3e124`）
-- 基线提交主题：`S-STARTUP-D1-D4: record junction-link deletion correction + re-verification`
-- 基线提交日期：`2026-08-22T21:26:00+08:00`
+- 阶段开始基线：`6e3e1243219b663d7a211728589603a3029c01f8`（短哈希 `6e3e124`）——仅作 S-PKG3 阶段开始基线及旧预检候选来源，**不是最终正式打包基线**（见 §0）
+- 阶段内提交：`a339f5b`（启动循环工具硬化：有界窗口关闭 + 共享删除模块 + 契约测试初版）；本执行书纠正提交完成后形成**最终正式打包基线**（该完整干净 HEAD 的短哈希/完整哈希在提交后记录，见 §0）
 - 日期：2026-08-22
 
 ## 0. 基线声明
 
-- **唯一打包基线为 `6e3e1243219b663d7a211728589603a3029c01f8`。** 正式候选必须从该提交对应源码**全新构建**；不得从旧候选复制 EXE/DLL/ZIP/manifest，不得复用旧 publish 输出，不得在构建失败后回退旧候选。
-- 本阶段为重新发布候选阶段，只允许基于已经通过总顾问独立验收的 S-STARTUP-D1 最终 HEAD 全新构建、测试、打包和记录；**不得继续使用或覆盖旧候选 S-PKG2-e50afcb**。
-- **打包时序（如实声明）**：为确保 EXE 的 `InformationalVersion`/`ProductVersion` 在 SDK `IncludeSourceRevisionInInformationalVersion` 默认开启下追加的是**基线 6e3e124 的完整哈希**（而非其后追加的脚本提交），正式候选的 `restore/build/publish` 在 **HEAD==6e3e124** 时执行；执行书与打包脚本最小修改在打包完成后作为独立提交追加，两者均不触碰应用业务源码（`src/`、`tests/`、`Directory.Build.props`、`AutoShutdown.sln`）。
-- 候选输出于全新目录 `artifacts\release\v2.0.0\S-PKG3-6e3e124\`，不覆盖 S-PKG2-e50afcb、S-UI2、S-FINALUI1 或 S-STARTUP-D1 任何旧候选。
-- 版本与构建提交统一：**`v2.0.0-S-PKG3.6e3e124`**；产品版本中必须包含完整构建提交 `6e3e1243219b663d7a211728589603a3029c01f8`。不得继续显示 `d0c01f3`、`e50afcb` 或旧 S-PKG2 版本。
+- **阶段开始基线为 `6e3e1243219b663d7a211728589603a3029c01f8`**（短哈希 `6e3e124`，提交主题 `S-STARTUP-D1-D4: record junction-link deletion correction + re-verification`）：只作为 S-PKG3 阶段开始基线及旧预检候选来源，**不得作为最终正式打包基线**。
+- **旧预检候选降级**：`S-PKG3-6e3e124` 明确为预检候选（曾在 HEAD==6e3e124 下构建并用于启动缺陷诊断，见 `.build-tmp\S-PKG3-6e3e124-logs\`），**禁止作为最终候选**；不得以任何形式作为正式版本引用、发布其版本号，不得被最终候选覆盖或回退。
+- **阶段内工具提交**：`a339f5b`（S-PKG3 启动循环工具硬化，见 §3.3）。
+- **最终正式打包基线 = 本执行书纠正提交完成后的完整干净 HEAD**（包含本执行书最终版与契约测试最终版）。提交后记录其短哈希与完整哈希（写入结果记录、`candidate.json`、`build-report`、`version-git`），并作为打包 `-Build` 参数；正式候选必须从该 HEAD 对应源码**全新构建**，不得从旧候选复制 EXE/DLL/ZIP/manifest，不得复用旧 publish 输出，不得在构建失败后回退旧候选。
+- **打包时序（如实声明）**：必须先完成「工具与执行书全部提交 → 核对干净 HEAD（`git rev-parse HEAD` 为最终基线、暂存区为空、`git diff --check` exit 0）→ 从该 HEAD `restore/build/publish` → 验收」。**删除一切「为保留 6e3e124 版本而在脚本提交前先打包」的授权文字**；不得在工具/执行书未提交前抢先打包。工具/执行书提交不触碰应用业务源码（`src/`、`tests/`、`Directory.Build.props`、`AutoShutdown.sln`）。
+- 候选输出于全新目录 `artifacts\release\v2.0.0\S-PKG3-<最终短哈希>\`，不覆盖 S-PKG2-e50afcb、S-UI2、S-FINALUI1、S-STARTUP-D1 或旧预检候选 S-PKG3-6e3e124 任何旧候选。
+- 版本与构建提交统一：**`v2.0.0-S-PKG3.<最终短哈希>`**；EXE 的 `ProductVersion`/`InformationalVersion`、候选目录/文件名、`candidate.txt/candidate.json`、`SHA256SUMS`、`build-report`、`version-git` 全部使用该最终 HEAD 的短哈希与完整哈希。不得继续显示 `6e3e124`、`d0c01f3`、`e50afcb` 或旧 S-PKG2 版本。
 - 当前工作区保留的既有脏文件与历史工件**全部原样保留**（不 reset / checkout / 删除 / 覆盖 / 暂存 / 提交 / 入包），包括但不限于：6 张已跟踪但修改的旧 S-UI2 截图、LibreOffice MSI、历史工作包/执行书/结果记录/提取文件、旧候选及 artifacts 历史目录、`.build-tmp` 历史工件。完整清单见基线 `git status --short`（本文件同级 `S-PKG3-baseline-git-status.txt`）。
 - 已如实记录：`tools/test/diag-btns.ps1`、`diag-fit.ps1` 是阶段前存在但在 S-STARTUP-D1 期间被误删的未跟踪诊断文件，因未被 Git 跟踪无法恢复。**本阶段不得虚构重建。**
 - 本阶段**不得修改产品业务功能**；如需最小调整打包脚本，必须先证明当前脚本不能识别 S-PKG3 版本，只做最小必要修改，单独形成脚本实现提交。
@@ -24,9 +25,9 @@
 
 ## 1. 干净源码构建要求
 
-- 构建前验证：`git rev-parse HEAD` = `6e3e1243219b663d7a211728589603a3029c01f8`、`git branch --show-current` = `master`、暂存区为空、`git diff --check` exit 0。
-- 构建输入与 6e3e124 源码完全一致（打包在 HEAD==6e3e124 执行；工作区中未提交的仅为本阶段执行书与打包脚本最小修改，均不在构建输入清单 `src/ tests/ tools/ Directory.Build.props AutoShutdown.sln` 的应用业务范围内——tools/test 脚本修改不影响 `dotnet build/publish` 的应用产物）。
-- 所有构建输出进入新的独立目录 `artifacts\release\v2.0.0\S-PKG3-6e3e124\`，不得覆盖任何旧候选。
+- 构建前验证：`git rev-parse HEAD` = **最终正式打包基线**（本执行书纠正提交完成后的完整干净 HEAD，见 §0；提交后记录实际短哈希/完整哈希）、`git branch --show-current` = `master`、暂存区为空、`git diff --check` exit 0。
+- 构建输入与最终 HEAD 源码完全一致：工具与执行书（§3）全部提交后才进入打包；打包时工作区不再含本阶段未提交的工具/执行书改动。`tools/test` 脚本修改不影响 `dotnet build/publish` 的应用产物（应用业务源码 `src/`、`tests/`、`Directory.Build.props`、`AutoShutdown.sln` 全程未被修改）。
+- 所有构建输出进入新的独立目录 `artifacts\release\v2.0.0\S-PKG3-<最终短哈希>\`，不得覆盖任何旧候选。
 - 不得：reset / checkout 主工作树、stash 当前用户工件、清理历史文件、下载新依赖、联网、提权、git push。
 
 ## 2. 打包体系
@@ -40,7 +41,7 @@
 - AutoShutdown.OfficeSaveHelper.exe
 - candidate.txt / candidate.json / SHA256SUMS / FILE-MANIFEST / build-report / version-git
 
-所有产物目录、文件名、界面版本、程序集信息和清单必须包含或明确记录最终打包短哈希 `6e3e124` 与完整构建提交 `6e3e1243219b663d7a211728589603a3029c01f8`。采用明确最终候选标签：**S-PKG3-6e3e124**。不得为了改标签修改产品业务逻辑。
+所有产物目录、文件名、界面版本、程序集信息（ProductVersion/InformationalVersion）和清单必须包含或明确记录**最终打包短哈希**（S-PKG3-<最终短哈希>）与该最终 HEAD 的完整构建提交哈希（见 §0，提交后记录）。采用明确最终候选标签：**S-PKG3-<最终短哈希>**。不得为了改标签修改产品业务逻辑。
 
 ## 3. 打包脚本最小修改（如需）
 
@@ -48,7 +49,7 @@
 
 **`tools/test/Invoke-ASUI2Smoke.ps1`（UIA2 冒烟版本解析）：**
 - 现状：第 85 行版本正则 `AutoShutdown-(v[\d.]+-S-(?:UI2|PKG2)\.[0-9a-f]+)\.exe$`。
-- 证明无法识别 S-PKG3：S-PKG3 候选 EXE 名为 `AutoShutdown-v2.0.0-S-PKG3.6e3e124.exe`，其中 `S-PKG3` 不匹配 `S-(?:UI2|PKG2)`，版本解析将失败。
+- 证明无法识别 S-PKG3：S-PKG3 候选 EXE 名为 `AutoShutdown-v2.0.0-S-PKG3.<最终短哈希>.exe`，其中 `S-PKG3` 不匹配 `S-(?:UI2|PKG2)`，版本解析将失败。
 - 最小修改：`S-(?:UI2|PKG2)` → `S-(?:UI2|PKG2|PKG3)`（保留 S-UI2/S-PKG2 兼容供既有候选回归）。
 - 仅此一行 + 说明注释；不改变任何断言、超时或回收逻辑；不放宽版本/HEAD/白名单/安全断言。
 
@@ -61,9 +62,17 @@
 
 ### 3.2 不需要修改的脚本
 
-- `tools/Publish-ReleaseCandidate.ps1`：`-Step`/`-Build` 已参数化，`-Step S-PKG3 -Build 6e3e124` 直接生成 S-PKG3 候选，无需修改。
+- `tools/Publish-ReleaseCandidate.ps1`：`-Step`/`-Build` 已参数化，`-Step S-PKG3 -Build <最终短哈希>` 直接生成 S-PKG3 候选，无需修改。
 - `tools/test/Invoke-ASUI3Smoke.ps1` 及 `ASUI3IsolatedRootCleanup.ps1`：接受 `-Exe` 直指候选、含 C1（关闭到托盘）与 C2（真实托盘退出 + 日志序列 TrayExitRequested→ApplicationStopping→ApplicationStopped）、无强杀；用于 UIA 冒烟 ≥2 连续轮，无需修改。
 - 全部 S-PKG/S-PKG-D harness 与 S-UI3 冒烟、ASUI3 删除边界测试：不解析候选版本号，无需修改。
+
+### 3.3 总顾问复验修正（阶段内工具提交）
+
+**`tools/test/Invoke-SStartupD1Loop.ps1`（a339f5b）**：窗口关闭兜底禁止裸 `SendMessage`（同步等待式投递可能在目标 UI 线程卡住时无限阻塞），改为非阻塞 `PostMessage(WM_CLOSE)` + 有界状态轮询（`Close-WindowToTray` 默认 `$Seconds=10`，deadline 轮询，超时返回 false 判该轮 FAIL，不使用强杀）；每轮隔离根清理复用 S-STARTUP-D1-D3/D4 已验收共享删除模块 `ASUI3IsolatedRootCleanup.ps1`（dot-source），删除前验证进程已退出与日志证据已读取，CSV 记录 `cleanup_status`，Refused/Error 保留目录并判该轮 FAIL、不静默吞掉；隔离根名称改为共享模块登记格式 `as-ui3-round-N-<32hex>`。
+
+**`tools/test/Invoke-SStartupD1LoopContractTests.ps1`（本纠正提交）**：源码契约 + 删除边界集成聚焦测试；非法 `as-d1-round` 样本置于**测试专用、精确登记的沙箱**（`as-ui3-round-99-<32hex>`，系统临时直接子目录）内，证明共享删除边界拒绝该样本（Refused、保留），沙箱最终经共享模块同一边界递归安全删除且零残留；清理 Refused/Error 必须使契约测试失败，禁止自写弱版递归删除。
+
+**`tools/test/Invoke-ASUI2Smoke.ps1`（a339f5b）**：版本解析正则 `S-(?:UI2|PKG2)` → `S-(?:UI2|PKG2|PKG3)`（保留旧候选兼容，不放宽任何断言）。
 
 ## 4. 包内容白名单 / 黑名单
 
@@ -146,17 +155,19 @@ S23 已知排序型 flaky 必须如实记录：若出现失败，保留原始失
 
 ## 13. 提交纪律
 
-只允许显式暂存本阶段文件，禁止 `git add .` / `git add -A`。推荐顺序：
+只允许显式暂存本阶段文件，禁止 `git add .` / `git add -A`。顺序（对应 §0 打包时序，工具/执行书**全部提交后再打包**）：
 
-1. 新建并提交 S-PKG3 阶段执行书（本文件）+ 基线 git status 记录。
-2. 若打包脚本确需修改：只提交最小脚本修改（`Invoke-ASUI2Smoke.ps1` 正则、`Invoke-SStartupD1Loop.ps1` 断言补强）、相应测试与执行书补充；不包含候选二进制或日志。
-3. 从基线 6e3e124 全新打包（打包时序见 §0，先行于本阶段提交）。
-4. 完成全部验收。
-5. 单独提交：`S-PKG3-结果记录.md` + 必要且精确的文本日志、manifest 和验收证据。
-6. 候选 EXE、ZIP、OfficeSaveHelper、publish 目录及 .build-tmp 不得加入 Git（既有仓库规则已 gitignore）。
-7. 旧截图和历史工件不得进入任何提交。
-8. 完成结果记录提交后立即停止。
+1. 阶段开始基线 `6e3e124` 的工作树脏文件/历史工件原样保留；仅显式暂存本阶段工具与执行书。
+2. 工具提交 `a339f5b`：S-PKG3 执行书初版 + `Invoke-ASUI2Smoke.ps1` 版本正则 + `Invoke-SStartupD1Loop.ps1` 断言补强（有界关闭/共享删除/清理门禁）+ `Invoke-SStartupD1LoopContractTests.ps1` 初版。
+3. 本纠正提交：S-PKG3 执行书最终版（正式基线改为纠正提交后的完整干净 HEAD，见 §0）+ `Invoke-SStartupD1LoopContractTests.ps1` 最终版（非法样本沙箱化 + 沙箱经共享模块同一边界安全清理）。
+4. 核对干净 HEAD：`git rev-parse HEAD` = 最终正式打包基线、暂存区为空、`git diff --check` exit 0、分支 master。
+5. 从最终正式打包基线 HEAD 全新 `restore/build/publish` 到 `artifacts\release\v2.0.0\S-PKG3-<最终短哈希>\`。
+6. 完成全部验收（§6、§7）。
+7. 单独提交：`S-PKG3-结果记录.md` + 必要且精确的文本日志、manifest 和验收证据。
+8. 候选 EXE、ZIP、OfficeSaveHelper、publish 目录及 .build-tmp 不得加入 Git（既有仓库规则已 gitignore）。
+9. 旧截图和历史工件不得进入任何提交。
+10. 完成结果记录提交后立即停止。
 
 ## 14. 完成报告
 
-完成后报告：打包基线完整 HEAD、是否修改打包脚本、脚本提交完整哈希（如有）、结果记录提交完整哈希、最终 master HEAD、S-PKG3 候选目录、EXE/ZIP/Helper 的绝对路径/大小/完整 SHA-256、版本与完整构建提交、全部测试真实数量/跳过数/退出码、30 轮逐轮 PID/窗口耗时/次实例退出/激活/托盘退出/残留数、UIA 连续通过轮次、正式数据目录未变证据、unsigned-candidate 状态、Windows 任务计划真机仍为人工待验、git status --short、git push 是否执行（必须为否）。完成后立即停止：不 git push、不上传、不分发、不安装到正式系统、不进入下一阶段，等待总顾问独立复验和用户最终批准。
+完成后报告：**最终正式打包基线完整 HEAD（纠正提交后的干净 HEAD）**、是否修改打包脚本、脚本提交完整哈希（如有）、结果记录提交完整哈希、最终 master HEAD、S-PKG3 候选目录（`S-PKG3-<最终短哈希>`，不使用预检候选 `S-PKG3-6e3e124`）、EXE/ZIP/Helper 的绝对路径/大小/完整 SHA-256、版本与完整构建提交、全部测试真实数量/跳过数/退出码、30 轮逐轮 PID/窗口耗时/次实例退出/激活/托盘退出/残留数、UIA 连续通过轮次、正式数据目录未变证据、unsigned-candidate 状态、Windows 任务计划真机仍为人工待验、git status --short、git push 是否执行（必须为否）。完成后立即停止：不 git push、不上传、不分发、不安装到正式系统、不进入下一阶段，等待总顾问独立复验和用户最终批准。

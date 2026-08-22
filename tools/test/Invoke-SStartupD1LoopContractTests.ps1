@@ -12,7 +12,8 @@
 #   D. 每轮隔离根名称为共享模块登记格式 ^as-ui3-round-\d+-[0-9a-f]{32}$（否则模块拒绝删除）。
 #   E. 删除前门禁：进程已退出 + 日志证据已读取；CSV 含 cleanup_status 列；
 #      Refused/Error ⇒ 保留目录、本轮 FAIL、不静默吞掉。
-#   F. 功能集成：循环使用的名称格式确实经共享模块删除边界可删；旧 as-d1-round 格式被拒绝（边界未放宽）。
+#   F. 功能集成：循环使用的名称格式经共享模块删除边界可删；非法 as-d1-round 样本被共享删除边界拒绝（边界未放宽）；
+#      非法样本置于测试专用、精确登记的沙箱内，沙箱最终经共享模块同一边界递归安全清理且零残留（禁止自写弱版删除）。
 #
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools/test/Invoke-SStartupD1LoopContractTests.ps1
 # 退出：0 = 全部通过；1 = 有失败。
@@ -62,12 +63,13 @@ Assert-True 'E2: 删除前验证进程已退出 (procExitedOk)' ($src -match 'pr
 Assert-True 'E3: 删除前验证日志证据已读取 (LogEvidenceOk)' ($src -match 'LogEvidenceOk') 'log-evidence guard missing'
 Assert-True 'E4: Refused/Error 保留目录并判 FAIL（不静默吞掉）' ($src -match '隔离根清理未确认') 'silent-swallow risk'
 
-# ---- F. 功能集成：循环名称格式可删；旧格式拒绝（边界未放宽） ----
+# ---- F. 功能集成：循环名称格式可删；非法格式被共享边界拒绝；测试专用沙箱最终安全清理零残留 ----
 . $modulePath
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $protected = @((Join-Path $env:LOCALAPPDATA 'AutoShutdown'), $repoRoot, [Environment]::GetFolderPath('UserProfile'))
 
+# 合法格式（循环实际使用）：系统临时直接子目录，经共享模块删除边界可删。
 $sample = Join-Path $tempBase ('as-ui3-round-1-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $sample | Out-Null
 Set-Content -LiteralPath (Join-Path $sample 'config.json') -Value '{}' -Encoding UTF8
@@ -75,24 +77,23 @@ $st = Remove-ASUI3IsolatedRoot -Target $sample -TempRoot $tempBase -ProtectedRoo
 Assert-True 'F1: 循环格式隔离根经共享模块删除(Deleted)' ($st -eq 'Deleted') $st
 Assert-True 'F2: 目录确实被删除' (-not (Test-Path -LiteralPath $sample))
 
-$illegal = Join-Path $tempBase ('as-d1-round-1-' + [guid]::NewGuid().ToString('N'))
+# 测试专用、精确登记的沙箱：本身就是共享模块登记的 as-ui3-round-99-<32hex>（系统临时直接子目录），
+# 最终经共享模块同一边界递归安全删除；禁止自写弱版递归删除。
+$sandbox = Join-Path $tempBase ('as-ui3-round-99-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+
+# 非法 as-d1-round 样本放入沙箱内，不直接污染系统临时目录。
+$illegal = Join-Path $sandbox ('as-d1-round-1-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $illegal | Out-Null
 $stIllegal = Remove-ASUI3IsolatedRoot -Target $illegal -TempRoot $tempBase -ProtectedRoots $protected
-Assert-True 'F3: 旧 as-d1-round 格式仍被共享模块拒绝(Refused)' ($stIllegal -eq 'Refused') $stIllegal
-Assert-True 'F4: 拒绝后目录保留' (Test-Path -LiteralPath $illegal)
-# 清理测试产物（D4 口径）：illegal 为本测试创建的系统临时直接子目录、名称精确匹配，
-# 删除前核对该绝对路径后递归删除。
-$legalPath = [IO.Path]::GetFullPath($illegal)
-$tempTrim = $tempBase.TrimEnd('\')
-$par = [IO.Path]::GetDirectoryName($legalPath)
-if (Test-Path -LiteralPath $legalPath) {
-    if ($par -and $par.TrimEnd('\').Equals($tempTrim, [System.StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path -Leaf $legalPath) -match '^as-d1-round-\d+-[0-9a-f]{32}$') {
-        Remove-Item -LiteralPath $legalPath -Recurse -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Host '  CLEAN-WARN illegal 路径边界确认失败，保留目录'
-    }
-}
+Assert-True 'F3: 非法 as-d1-round 样本被共享删除边界拒绝(Refused)' ($stIllegal -eq 'Refused') $stIllegal
+Assert-True 'F4: 拒绝后非法样本保留（未被动到）' (Test-Path -LiteralPath $illegal)
+
+# 测试专用沙箱最终清理：经共享模块同一边界递归安全删除（删除前验证绝对路径/登记身份/
+# 沙箱边界/无 reparse point 均在共享模块内完成）。清理 Refused/Error 必须使契约测试失败。
+$stSb = Remove-ASUI3IsolatedRoot -Target $sandbox -TempRoot $tempBase -ProtectedRoots $protected
+Assert-True 'F5: 测试专用沙箱经共享模块安全清理(Deleted/NotFound)' (($stSb -eq 'Deleted') -or ($stSb -eq 'NotFound')) $stSb
+Assert-True 'F6: 沙箱最终消失（零残留）' (-not (Test-Path -LiteralPath $sandbox))
 
 Write-Host ""
 Write-Host ("S-STARTUP-D1-LOOP CONTRACT TESTS: pass={0} fail={1}" -f $pass, $fail)
