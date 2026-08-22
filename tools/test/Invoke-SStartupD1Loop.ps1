@@ -10,9 +10,20 @@ param(
     [int]$TrayTimeoutSeconds = 25
 )
 
+Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
+# S-PKG3：复用 S-STARTUP-D1-D3/D4 已验收的共享删除边界模块（ASUI3IsolatedRootCleanup.ps1），
+# 不重复实现较弱删除；dot-source 同时按其契约启用 Set-StrictMode -Version 2.0。
+. (Join-Path $PSScriptRoot 'ASUI3IsolatedRootCleanup.ps1')
+
+# 受保护根：正式数据根 / 仓库目录 / 用户目录（共享模块删除边界拒绝条件）。
+$formalRoot = Join-Path $env:LOCALAPPDATA 'AutoShutdown'
+$repoRoot = $root
+$userDir = [Environment]::GetFolderPath('UserProfile')
+$protectedRoots = @($formalRoot, $repoRoot, $userDir)
 if (-not $Exe) { $Exe = Join-Path $root 'artifacts\release\v2.0.0\S-STARTUP-D1-c6e99d0\AutoShutdown-v2.0.0-S-STARTUP-D1.c6e99d0.exe' }
 if (-not (Test-Path -LiteralPath $Exe)) { Write-Host ("候选 EXE 不存在: " + $Exe); exit 10 }
 
@@ -38,6 +49,7 @@ public static class L32 {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint wpid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }
 "@
 
@@ -155,8 +167,69 @@ function Invoke-TrayExit([int]$TargetPid) {
     return $true
 }
 
+# 窗口关闭 → 隐藏到托盘：经 UIA WindowPattern.Close() 触发应用「最小化到托盘」，
+# 有界轮询主窗口句柄归零（隐藏）且进程仍存活（S-PKG3 专项要求；绝不强杀）。
+# 激活转发后 MainWindowHandle 句柄缓存可能过期，UIA FromHandle+Close 会间歇抛
+# ElementNotAvailableException；采用 ①UIA Close（有限重试）→ ②Win32 PostMessage(WM_CLOSE) 兜底，
+# 仍只触发应用自己的窗口关闭逻辑（等价于点窗口关闭按钮），绝不强杀/按名结束。
+# 兜底禁用同步等待式消息投递（目标 UI 线程卡住时可能无限阻塞），改用非阻塞
+# PostMessage + 下方有界轮询：真实超时边界为 $Seconds 秒，超时即返回 $false 判该轮 FAIL。
+function Close-WindowToTray($proc, [int]$Seconds = 10) {
+    if (-not $proc -or $proc.HasExited) { return $false }
+
+    # ① UIA WindowPattern.Close()，有限重试（每次重新 Refresh 读句柄）
+    $viaUia = $false
+    for ($a = 0; $a -lt 3; $a++) {
+        $proc.Refresh()
+        if ($proc.HasExited) { break }
+        $hwnd = $proc.MainWindowHandle
+        if ($hwnd -eq 0) { return $true }   # 已隐藏到托盘
+        try {
+            $el = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            $pattern = $el.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+            $pattern.Close()
+            $viaUia = $true
+            break
+        } catch {
+            Write-Host ("    [winClose] UIA Close 第 {0} 次失败: {1} (hwnd=0x{2:X})" -f ($a+1), $_.Exception.GetType().Name, $hwnd)
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    # ② UIA 兜底失败则用 Win32 PostMessage(WM_CLOSE)（等价用户点窗口关闭；仍走应用关闭→隐藏到托盘）
+    if (-not $viaUia -and -not $proc.HasExited) {
+        $proc.Refresh()
+        $hwnd = $proc.MainWindowHandle
+        if ($hwnd -ne 0) {
+            Write-Host ("    [winClose] 兜底 PostMessage WM_CLOSE hwnd=0x{0:X}" -f $hwnd)
+            [L32]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+    }
+
+    # 有界轮询窗口隐藏（MainWindowHandle 归零）
+    # 诊断采样：若设置 $env:SPKG3_WINCLOSE_TRACE，则记录每次采样的 hwnd/可见性/进程存活
+    $trace = $env:SPKG3_WINCLOSE_TRACE
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $swT = [System.Diagnostics.Stopwatch]::StartNew()
+    while ((Get-Date) -lt $deadline) {
+        $proc.Refresh()
+        if ($trace) {
+            $curH = $proc.MainWindowHandle
+            $vis = $false
+            if ($curH -ne 0) { try { $vis = [L32]::IsWindowVisible($curH) } catch { } }
+            Add-Content -LiteralPath $trace -Value ("{0,6}ms hwnd=0x{1:X} vis={2} exited={3} pid={4}" -f $swT.ElapsedMilliseconds, $curH, $vis, $proc.HasExited, $proc.Id) -Encoding UTF8
+        }
+        if ($proc.HasExited) { return $false }
+        if ($proc.MainWindowHandle -eq 0) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    return $false
+}
+
 function New-IsolatedRoot([int]$round) {
-    $d = Join-Path ([IO.Path]::GetTempPath()) ("as-d1-round-{0}-{1}" -f $round, [Guid]::NewGuid().ToString('N'))
+    # S-PKG3：每轮隔离根命名为共享删除模块登记格式 as-ui3-round-N-<32hex>，
+    # 使 Remove-ASUI3IsolatedRoot 的名称/位置边界可直接确认（不另设较弱删除）。
+    $d = Join-Path ([IO.Path]::GetTempPath()) ("as-ui3-round-{0}-{1}" -f $round, [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $d | Out-Null
     $config = [ordered]@{
         SchemaVersion = 1; TestMode = $true; RealPowerEnabled = $false; DefaultWarningSeconds = 60
@@ -169,11 +242,17 @@ function New-IsolatedRoot([int]$round) {
     $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $d 'config.json') -Encoding UTF8
     return $d
 }
-function Remove-IsolatedRoot([string]$d) {
-    try { if (Test-Path -LiteralPath $d) { Remove-Item -Recurse -Force -LiteralPath $d } } catch { }
+# S-PKG3：隔离根清理经共享模块 Remove-ASUI3IsolatedRoot（D3/D4 已验收删除边界）。
+# 删除前附加两项门禁：① 进程已退出（主实例已退且无残留）；② 日志证据已读取
+# （log_path 非空；失败轮证据已在判 FAIL 分支复制到 round-N-fail-*）。
+# 返回 'Deleted' | 'NotFound' | 'Refused' | 'Error'；Refused/Error 时调用方保留目录并判该轮 FAIL。
+function Invoke-ASUI3GuardedCleanup([string]$Target, [string[]]$ProtectedRoots, [bool]$ProcessExited, [bool]$LogEvidenceOk) {
+    if (-not $ProcessExited) { return 'Refused' }
+    if (-not $LogEvidenceOk) { return 'Refused' }
+    return (Remove-ASUI3IsolatedRoot -Target $Target -TempRoot ([IO.Path]::GetTempPath()) -ProtectedRoots $ProtectedRoots)
 }
 
-$header = 'round,primary_pid,window_handle,t_window_ms,secondary_pid,t_secondary_ms,secondary_exitcode,foreground_activated,log_forward_ok,tray_ok,t_tray_ms,primary_exited,residual,formal_unchanged,log_path,result'
+$header = 'round,primary_pid,window_handle,t_window_ms,secondary_pid,t_secondary_ms,secondary_exitcode,foreground_activated,window_close_ok,log_forward_ok,tray_ok,t_tray_ms,primary_exited,residual,formal_unchanged,log_tray_seq_ok,cleanup_status,log_path,result'
 Set-Content -LiteralPath $ReportPath -Value $header -Encoding UTF8
 
 $pass = 0
@@ -184,8 +263,8 @@ for ($i = 1; $i -le $Rounds; $i++) {
     $roundResult = 'PASS'
     $primaryPid = ''; $handle = ''; $tWindow = ''
     $secondaryPid = ''; $tSecondary = ''; $secondaryExitCode = ''
-    $activated = 'FALSE'; $forwardOk = 'FALSE'; $trayOk = 'FALSE'; $tTray = ''
-    $primaryExited = 'FALSE'; $residual = ''; $formalUnchanged = 'FALSE'; $logPath = ''
+    $activated = 'FALSE'; $windowCloseOk = 'FALSE'; $forwardOk = 'FALSE'; $trayOk = 'FALSE'; $tTray = ''
+    $primaryExited = 'FALSE'; $residual = ''; $formalUnchanged = 'FALSE'; $logTraySeq = 'FALSE'; $cleanupStatus = 'Pending'; $logPath = ''
     $problems = @()
 
     $dataRoot = New-IsolatedRoot $i
@@ -253,6 +332,14 @@ for ($i = 1; $i -le $Rounds; $i++) {
         }
     }
 
+    # ---- 2.5) 窗口关闭 → 隐藏到托盘（主进程仍存活） ----
+    if ($p1 -and -not $p1.HasExited) {
+        $windowCloseOk = (Close-WindowToTray $p1)
+        if (-not $windowCloseOk) { $problems += '窗口关闭未隐藏到托盘或进程未存活' }
+    } else {
+        $problems += '窗口关闭前主实例已退出'
+    }
+
     # ---- 3) 托盘退出主实例 ----
     if ($p1 -and -not $p1.HasExited) {
         $sw3 = [System.Diagnostics.Stopwatch]::StartNew()
@@ -276,6 +363,17 @@ for ($i = 1; $i -le $Rounds; $i++) {
         if ($logText -match 'ActivationForwardFailed') { $problems += '日志含 ActivationForwardFailed' }
         elseif ($activated -eq 'TRUE') { $forwardOk = 'TRUE' }
         if ($logText -match 'StartupFailed|StartupTimedOut|CrashRecoveryTimeout') { $problems += '日志含启动失败事件' }
+        # S-PKG3 专项：托盘退出日志顺序 TrayExitRequested → ApplicationStopping → ApplicationStopped
+        # 注意副实例启动时也会写一条 ApplicationStopped（在 TrayExitRequested 之前），
+        # 因此必须从 TrayExitRequested 的位置之后搜索后续两条，才命中主实例托盘退出序列。
+        $iTrayExit = $logText.LastIndexOf('TrayExitRequested')
+        $iStopping = -1; $iStopped = -1
+        if ($iTrayExit -ge 0) {
+            $iStopping = $logText.IndexOf('ApplicationStopping', $iTrayExit)
+            if ($iStopping -ge 0) { $iStopped = $logText.IndexOf('ApplicationStopped', $iStopping) }
+        }
+        if ($iTrayExit -ge 0 -and $iStopping -gt $iTrayExit -and $iStopped -gt $iStopping) { $logTraySeq = 'TRUE' }
+        else { $problems += '日志缺 TrayExitRequested→ApplicationStopping→ApplicationStopped 顺序' }
     } else {
         $problems += '未找到隔离根日志'
     }
@@ -311,15 +409,27 @@ for ($i = 1; $i -le $Rounds; $i++) {
             Get-Content -LiteralPath $diagLog.FullName -Encoding UTF8 | Select-Object -Last 25 | ForEach-Object { Write-Host ("      " + $_) }
             Write-Host '    --- 日志结束 ---'
         }
-    } else { $pass++ }
-    Remove-IsolatedRoot $dataRoot
+    }
 
-    $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},"{14}",{15}' -f `
+    # ---- 6.5) 隔离根清理：复用共享删除模块（D3/D4 已验收边界）+ 进程退出/日志证据双门禁 ----
+    #      Refused/Error ⇒ 保留目录、本轮 FAIL、写入 CSV cleanup_status，绝不静默吞掉。
+    $procExitedOk = $true
+    if ($p1 -and -not $p1.HasExited) { $procExitedOk = $false }
+    if ($residual -gt 0) { $procExitedOk = $false }
+    $cleanupStatus = Invoke-ASUI3GuardedCleanup -Target $dataRoot -ProtectedRoots $protectedRoots -ProcessExited $procExitedOk -LogEvidenceOk ($logPath -ne '')
+    if ($cleanupStatus -ne 'Deleted' -and $cleanupStatus -ne 'NotFound') {
+        if ($roundResult -eq 'PASS') { $roundResult = 'FAIL'; $fail++ }
+        $problems += ('隔离根清理未确认 status=' + $cleanupStatus + '（目录保留）')
+    }
+
+    if ($roundResult -eq 'PASS') { $pass++ }
+
+    $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14},{15},{16},"{17}",{18}' -f `
         $i, $primaryPid, $handle, $tWindow, $secondaryPid, $tSecondary, $secondaryExitCode, `
-        $activated, $forwardOk, $trayOk, $tTray, $primaryExited, $residual, $formalUnchanged, $logPath, $roundResult
+        $activated, $windowCloseOk, $forwardOk, $trayOk, $tTray, $primaryExited, $residual, $formalUnchanged, $logTraySeq, $cleanupStatus, $logPath, $roundResult
     Add-Content -LiteralPath $ReportPath -Value $row -Encoding UTF8
-    Write-Host ("第 {0}/{1} 轮: {2}  PID={3}  tWindow={4}ms  tSecondary={5}ms  activated={6}  tTray={7}ms  residual={8}  formalUnchanged={9}" -f `
-        $i, $Rounds, $roundResult, $primaryPid, $tWindow, $tSecondary, $activated, $tTray, $residual, $formalUnchanged)
+    Write-Host ("第 {0}/{1} 轮: {2}  PID={3}  tWindow={4}ms  tSecondary={5}ms  activated={6}  winClose={7}  traySeq={8}  tTray={9}ms  residual={10}  formalUnchanged={11}  cleanup={12}" -f `
+        $i, $Rounds, $roundResult, $primaryPid, $tWindow, $tSecondary, $activated, $windowCloseOk, $logTraySeq, $tTray, $residual, $formalUnchanged, $cleanupStatus)
     foreach ($pb in $problems) { Write-Host ("    ! " + $pb) }
 }
 
