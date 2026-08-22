@@ -1,0 +1,3 @@
+PACKAGE CONTENT CHECK: PASS
+all 37 files are within whitelist; no forbidden names/paths/text
+total files scanned: 37

@@ -1,0 +1,18 @@
+[uia r1] HID at 273ms pid=36136 exited=False
+[uia r2] HID at 212ms pid=28320 exited=False
+[uia r3] HID at 211ms pid=45364 exited=False
+[uia r4] HID at 212ms pid=18668 exited=False
+[uia r5] HID at 211ms pid=27016 exited=False
+[uia r6] HID at 211ms pid=44180 exited=False
+[uia r7] HID at 217ms pid=42444 exited=False
+[uia r8] HID at 212ms pid=29224 exited=False
+[wm r1] HID at 210ms pid=15788 exited=False
+[wm r2] HID at 208ms pid=15312 exited=False
+[wm r3] HID at 208ms pid=15860 exited=False
+[wm r4] HID at 220ms pid=25976 exited=False
+[wm r5] HID at 208ms pid=21036 exited=False
+[wm r6] HID at 219ms pid=40444 exited=False
+[wm r7] HID at 209ms pid=53272 exited=False
+[wm r8] HID at 222ms pid=48504 exited=False
+SUMMARY uia pass=8 fail=0
+SUMMARY wm  pass=8 fail=0

@@ -1,0 +1,90 @@
+第 1/30 轮: PASS  PID=8452  tWindow=1657ms  tSecondary=426ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3522ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 2/30 轮: PASS  PID=18784  tWindow=1641ms  tSecondary=451ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3408ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 3/30 轮: PASS  PID=30372  tWindow=1644ms  tSecondary=429ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3400ms  residual=0  formalUnchanged=True  cleanup=Deleted
+    日志文件: autoshutdown-2026-08-22.log  2697 字节
+    --- 日志尾部 ---
+      2026-08-22T23:11:43.870+08:00 [Information] PrimaryInstanceAcquired 本实例成为主实例。
+      2026-08-22T23:11:43.904+08:00 [Information] ServiceProviderBuilt 服务容器构建完成。
+      2026-08-22T23:11:43.910+08:00 [Information] LifetimeCoordinatorResolving 解析应用生命周期协调器。
+      2026-08-22T23:11:43.965+08:00 [Information] LifetimeCoordinatorResolved 应用生命周期协调器已解析。
+      2026-08-22T23:11:43.970+08:00 [Information] ActivationPipeStarting 激活管道启动中。
+      2026-08-22T23:11:43.983+08:00 [Information] ActivationPipeStarted 激活管道已启动。
+      2026-08-22T23:11:44.008+08:00 [Information] TaskSyncSettingsLoaded 任务计划程序同步开关已加载：关闭（NotFound）。
+      2026-08-22T23:11:44.018+08:00 [Information] SchedulerStarting 调度引擎启动中。
+      2026-08-22T23:11:44.039+08:00 [Information] SchedulerRunning 调度引擎已启动。
+      2026-08-22T23:11:44.046+08:00 [Information] RemoteServer 远程控制未启用或配置无效；不监听。
+      2026-08-22T23:11:44.116+08:00 [Information] MainWindowActivating 主窗口激活中。
+      2026-08-22T23:11:45.508+08:00 [Information] ApplicationStarting 应用启动。
+      2026-08-22T23:11:45.525+08:00 [Information] DataRoot 数据根目录：C:\Users\李佳茂\AppData\Local\Temp\as-ui3-round-4-8bab4303e2bb49b0ab4fbe1ee3e459ec
+      2026-08-22T23:11:45.536+08:00 [Warning] SecondaryInstanceDetected 检测到主实例已在运行，发送激活通知后退出。
+      2026-08-22T23:11:45.557+08:00 [Information] ApplicationStopped 应用已退出。
+      2026-08-22T23:11:45.597+08:00 [Information] MainWindowActivated 主窗口已激活。
+      2026-08-22T23:11:45.599+08:00 [Information] ApplicationStarted 应用启动完成。
+      2026-08-22T23:11:45.658+08:00 [Warning] ConfigurationUnavailable 配置不可用，状态：Invalid
+      2026-08-22T23:11:45.663+08:00 [Information] AutoStartStatusChecked 自启动状态：未启用。
+      2026-08-22T23:11:59.248+08:00 [Information] TrayExitRequested 托盘菜单：退出程序。
+      2026-08-22T23:11:59.253+08:00 [Information] ApplicationStopping 应用正在退出。
+      2026-08-22T23:11:59.260+08:00 [Information] SchedulerStopping 调度引擎正在停止。
+      2026-08-22T23:11:59.284+08:00 [Information] RemoteServer 远程控制已停止。
+      2026-08-22T23:11:59.291+08:00 [Information] SchedulerStopped 调度引擎已停止。
+      2026-08-22T23:11:59.311+08:00 [Information] ApplicationStopped 应用已退出。
+    --- 日志结束 ---
+第 4/30 轮: FAIL  PID=39360  tWindow=1643ms  tSecondary=426ms  activated=TRUE  winClose=False  traySeq=TRUE  tTray=3446ms  residual=0  formalUnchanged=True  cleanup=Deleted
+    ! 窗口关闭未隐藏到托盘或进程未存活
+第 5/30 轮: PASS  PID=38572  tWindow=1622ms  tSecondary=433ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3406ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 6/30 轮: PASS  PID=5940  tWindow=1644ms  tSecondary=431ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3403ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 7/30 轮: PASS  PID=42468  tWindow=1640ms  tSecondary=423ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3425ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 8/30 轮: PASS  PID=38676  tWindow=1639ms  tSecondary=433ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3408ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 9/30 轮: PASS  PID=5704  tWindow=1642ms  tSecondary=439ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3408ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 10/30 轮: PASS  PID=34344  tWindow=1657ms  tSecondary=430ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3400ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 11/30 轮: PASS  PID=51812  tWindow=1640ms  tSecondary=443ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3404ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 12/30 轮: PASS  PID=35748  tWindow=1483ms  tSecondary=414ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3391ms  residual=0  formalUnchanged=True  cleanup=Deleted
+    日志文件: autoshutdown-2026-08-22.log  2699 字节
+    --- 日志尾部 ---
+      2026-08-22T23:13:02.027+08:00 [Information] PrimaryInstanceAcquired 本实例成为主实例。
+      2026-08-22T23:13:02.053+08:00 [Information] ServiceProviderBuilt 服务容器构建完成。
+      2026-08-22T23:13:02.063+08:00 [Information] LifetimeCoordinatorResolving 解析应用生命周期协调器。
+      2026-08-22T23:13:02.114+08:00 [Information] LifetimeCoordinatorResolved 应用生命周期协调器已解析。
+      2026-08-22T23:13:02.119+08:00 [Information] ActivationPipeStarting 激活管道启动中。
+      2026-08-22T23:13:02.134+08:00 [Information] ActivationPipeStarted 激活管道已启动。
+      2026-08-22T23:13:02.160+08:00 [Information] TaskSyncSettingsLoaded 任务计划程序同步开关已加载：关闭（NotFound）。
+      2026-08-22T23:13:02.171+08:00 [Information] SchedulerStarting 调度引擎启动中。
+      2026-08-22T23:13:02.193+08:00 [Information] SchedulerRunning 调度引擎已启动。
+      2026-08-22T23:13:02.202+08:00 [Information] RemoteServer 远程控制未启用或配置无效；不监听。
+      2026-08-22T23:13:02.273+08:00 [Information] MainWindowActivating 主窗口激活中。
+      2026-08-22T23:13:03.547+08:00 [Information] ApplicationStarting 应用启动。
+      2026-08-22T23:13:03.562+08:00 [Information] DataRoot 数据根目录：C:\Users\李佳茂\AppData\Local\Temp\as-ui3-round-13-6d6b5ce3dfb64c0e98017ee8151023a6
+      2026-08-22T23:13:03.576+08:00 [Warning] SecondaryInstanceDetected 检测到主实例已在运行，发送激活通知后退出。
+      2026-08-22T23:13:03.594+08:00 [Information] ApplicationStopped 应用已退出。
+      2026-08-22T23:13:03.726+08:00 [Information] MainWindowActivated 主窗口已激活。
+      2026-08-22T23:13:03.728+08:00 [Information] ApplicationStarted 应用启动完成。
+      2026-08-22T23:13:03.786+08:00 [Warning] ConfigurationUnavailable 配置不可用，状态：Invalid
+      2026-08-22T23:13:03.791+08:00 [Information] AutoStartStatusChecked 自启动状态：未启用。
+      2026-08-22T23:13:17.354+08:00 [Information] TrayExitRequested 托盘菜单：退出程序。
+      2026-08-22T23:13:17.359+08:00 [Information] ApplicationStopping 应用正在退出。
+      2026-08-22T23:13:17.370+08:00 [Information] SchedulerStopping 调度引擎正在停止。
+      2026-08-22T23:13:17.391+08:00 [Information] RemoteServer 远程控制已停止。
+      2026-08-22T23:13:17.399+08:00 [Information] SchedulerStopped 调度引擎已停止。
+      2026-08-22T23:13:17.421+08:00 [Information] ApplicationStopped 应用已退出。
+    --- 日志结束 ---
+第 13/30 轮: FAIL  PID=24104  tWindow=1499ms  tSecondary=435ms  activated=TRUE  winClose=False  traySeq=TRUE  tTray=3434ms  residual=0  formalUnchanged=True  cleanup=Deleted
+    ! 窗口关闭未隐藏到托盘或进程未存活
+第 14/30 轮: PASS  PID=53972  tWindow=1628ms  tSecondary=441ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3390ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 15/30 轮: PASS  PID=21024  tWindow=1626ms  tSecondary=430ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3413ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 16/30 轮: PASS  PID=26388  tWindow=1644ms  tSecondary=439ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3412ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 17/30 轮: PASS  PID=1812  tWindow=1626ms  tSecondary=421ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3382ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 18/30 轮: PASS  PID=27868  tWindow=1782ms  tSecondary=441ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3442ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 19/30 轮: PASS  PID=30444  tWindow=1752ms  tSecondary=435ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3396ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 20/30 轮: PASS  PID=37512  tWindow=1621ms  tSecondary=420ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3386ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 21/30 轮: PASS  PID=42352  tWindow=1596ms  tSecondary=415ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3386ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 22/30 轮: PASS  PID=54068  tWindow=1598ms  tSecondary=402ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3387ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 23/30 轮: PASS  PID=49508  tWindow=1613ms  tSecondary=401ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3390ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 24/30 轮: PASS  PID=3744  tWindow=1608ms  tSecondary=391ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3389ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 25/30 轮: PASS  PID=3476  tWindow=1594ms  tSecondary=424ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3379ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 26/30 轮: PASS  PID=44864  tWindow=1607ms  tSecondary=397ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3374ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 27/30 轮: PASS  PID=48612  tWindow=1609ms  tSecondary=414ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3393ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 28/30 轮: PASS  PID=51892  tWindow=1610ms  tSecondary=418ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3377ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 29/30 轮: PASS  PID=49588  tWindow=1630ms  tSecondary=407ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3399ms  residual=0  formalUnchanged=True  cleanup=Deleted
+第 30/30 轮: PASS  PID=29812  tWindow=1629ms  tSecondary=398ms  activated=TRUE  winClose=True  traySeq=TRUE  tTray=3406ms  residual=0  formalUnchanged=True  cleanup=Deleted
+==== 完成: 通过 28 / 失败 2 / 共 30 ====
+报告: D:\电脑定时关机重建完整版\.build-tmp\S-PKG3-4af4b6f-logs\loop-s-pkg3-4af4b6f.csv

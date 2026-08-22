@@ -1,0 +1,12 @@
+reparse points in candidate: 0
+SHA256 OK [AutoShutdown-v2.0.0-S-PKG3.4af4b6f.exe]
+SHA256 OK [AutoShutdown-v2.0.0-S-PKG3.4af4b6f-win-x64-framework-dependent.zip]
+independent recompute verified entries: 2
+Helper sha256: 33ea44138e908f71ea20e9f1d06becbc14765bda653bab9824268eb9ca4e374e
+Helper size:   67987734
+EXE ProductVersion: v2.0.0-S-PKG3.4af4b6f+4af4b6f03ab9a993bebdf8c24abec5df9171eed0
+HELPER ProductVersion: v2.0.0-S-PKG3.4af4b6f+4af4b6f03ab9a993bebdf8c24abec5df9171eed0
+manifest candidate.txt OK
+manifest candidate.json OK
+git HEAD: 4af4b6f03ab9a993bebdf8c24abec5df9171eed0
+FINAL HASH/VERSION VERIFY: PASS
