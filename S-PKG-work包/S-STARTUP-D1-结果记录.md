@@ -1,10 +1,10 @@
 # S-STARTUP-D1 结果记录
 
-> 阶段：S-STARTUP-D1 / S-STARTUP-D1-D1 / S-STARTUP-D1-D2 / S-STARTUP-D1-D3
+> 阶段：S-STARTUP-D1 / S-STARTUP-D1-D1 / S-STARTUP-D1-D2 / S-STARTUP-D1-D3 / S-STARTUP-D1-D4
 > 记录日期：2026-08-22
-> 验收基线：app 候选源码提交 `d0c01f3` + 测试工具提交 `a795b53`（D3 边界加固提交 `5ea96aa` 在 1576391 之上独立追加）
+> 验收基线：app 候选源码提交 `d0c01f3` + 测试工具提交 `a795b53`（D3 边界加固提交 `5ea96aa`、D4 删除纪律修正提交 `537b147` 均在 1576391 之上独立追加）
 >
-> **本文件为补正后的最终结果记录**：在 `1576391`（`S-STARTUP-D1: record implementation and validation results`）所载初版记录的基础上，依总顾问 S-STARTUP-D1 最终复验要求对**最终轮数据根、提交身份、诊断脚本处置、launcher 数量、全量套件数量**等处作了如实更正（D3）。更正内容见 §4 更正说明、§6、§7。
+> **本文件为补正后的最终结果记录**：在 `1576391`（`S-STARTUP-D1: record implementation and validation results`）所载初版记录的基础上，依总顾问 S-STARTUP-D1 最终复验要求对**最终轮数据根、提交身份、诊断脚本处置、launcher 数量、全量套件数量**等处作了如实更正（D3）；并依总顾问 D4 复验要求对**删除纪律**（junction 链接删除仅经 PowerShell，删除前核对绝对目标）作了如实补正（D4）。更正内容见 §4、§6、§7、§7.5。
 
 ## 1. 提交清单（完整哈希）
 
@@ -29,7 +29,13 @@
 |---|---|
 | `5ea96aa5c24fb4a3b77f5b0218c90351847d7f0e` | S-STARTUP-D1-D3: harden ASUI3 isolated-root deletion boundary + focused tests（在 `1576391` 之上新增独立提交，不 amend、不重写历史） |
 
-### 1.4 结果记录（本文件）
+### 1.4 D4 删除纪律修正（S-STARTUP-D1-D4，总顾问 D4 复验）
+
+| 完整哈希 | 说明 |
+|---|---|
+| `537b1470f2d3fbfa57be374bd95dc451a603e858` | S-STARTUP-D1-D4: PowerShell-only junction-link deletion + guarded cleanup（在 `5ea96aa` 之上独立提交，不 amend、不重写历史） |
+
+### 1.5 结果记录（本文件）
 
 | 完整哈希 | 说明 |
 |---|---|
@@ -64,7 +70,7 @@
 - **20 轮真机循环**（`tools/test/Invoke-SStartupD1Loop.ps1 -Exe .build-tmp/S-UI3-d0c01f3/AutoShutdown.App.exe -Rounds 20`）：**20/20 PASS**。
   - 无窗口主实例 / `ActivationForwardFailed` / 托盘退出失败 / 残留进程 → 均未出现。
   - 成功清理全部为真实托盘菜单「退出程序」，**未使用强杀/按进程名清理**。
-- UIA 冒烟与 20 轮循环均以真实托盘退出作为成功退出路径；临时文件仅经 PowerShell 在已验证精确路径删除（无 Bash/rm）。
+- UIA 冒烟与 20 轮循环均以真实托盘退出作为成功退出路径；临时文件仅经 PowerShell 在已验证精确路径删除（无 Bash/rm）。此「仅经 PowerShell」范围指冒烟/循环的临时数据根清理；D3 边界聚焦测试的 junction 链接清理曾用 `cmd /c rmdir` 与「全部删除仅经 PowerShell」整体表述不一致，已由 D4 修正提交 `537b147` 改为纯 PowerShell 删除（见 §6.4、§7.5）。
 
 ### 2.4 S23 flaky 如实记录
 
@@ -132,7 +138,7 @@
 ### 6.2 D3（删除边界加固）
 
 - 新增共享边界模块 `tools/test/ASUI3IsolatedRootCleanup.ps1`，`Invoke-ASUI3Smoke.ps1` 的隔离根清理改经该模块逐项校验（直接子目录 / 名称模式 / 非受保护根 / 无 reparse point / 删除前复检）；删除边界无法确认时保留目录并判本轮 FAIL。
-- 新增聚焦测试 `tools/test/Invoke-ASUI3RemoveBoundaryTests.ps1`（30 项真实文件系统断言）。
+- 新增聚焦测试 `tools/test/Invoke-ASUI3RemoveBoundaryTests.ps1`（D3 起 30 项真实文件系统断言；D4 起 34 项）。
 - 更新 `tests/AutoShutdown.Tests/S_UI3_UiTestLauncherTests.cs` 契约以匹配 D3 边界契约。
 - **未修改任何应用业务源码**。
 
@@ -141,6 +147,13 @@
 > 更正说明：初版记录称「`tools/test/diag-btns.ps1`、`tools/test/diag-fit.ps1` 未进入任何提交，且已按 D 要求经 PowerShell 在已验证精确路径上删除」。此为**误述**。
 > 实情：`diag-btns.ps1` / `diag-fit.ps1` 在阶段开始前即以**未跟踪文件**存在于工作区，属前置遗留诊断脚本；阶段过程中被**误删**，现工作区中已不存在，且因其从未被 Git 跟踪，**无法从版本历史恢复**。
 > 因此如实记为：**阶段误删的前置未跟踪诊断脚本**；不得视为「原样保留 / 未改动」，其内容亦无法还原，故不声称任何内容。此更正不影响测试工具或应用源码的任何提交内容。
+
+### 6.4 D4（删除纪律修正）
+
+- D3 边界聚焦测试 `tools/test/Invoke-ASUI3RemoveBoundaryTests.ps1` 的 junction 链接清理曾使用 `& cmd /c rmdir $junc`（非 PowerShell 删除），与「全部删除仅经 PowerShell」的整体表述不一致。D4 修正提交 `537b147` 将其替换为纯 PowerShell 的 `DirectoryInfo.Delete()`（非递归，只删链接不删目标），并在删除前逐项核对（绝对路径 / 本测试登记精确链接路径 / 目录名严格匹配 `^as-ui3-round-\d+-[0-9a-f]{32}$` / Get-Item 显示 ReparsePoint / 解析目标内哨兵存在）、删除后核对（链接不存在、目标目录与哨兵仍存在）。
+- junction 创建仍允许 `cmd /c mklink /J`（创建操作，D4 不禁止）；测试自身其余递归清理一律在删除前核对绝对目标处于本轮精确测试 sandbox 内或已登记的临时测试路径后才递归删除（`Remove-ASUI3BoundaryCleanupTarget`）。
+- 修改仅限：`tools/test/Invoke-ASUI3RemoveBoundaryTests.ps1`（新增 `Remove-ASUI3JunctionLink`、`Remove-ASUI3BoundaryCleanupTarget`，case 8 与最终清理改经 D4 路径）。
+- **未修改任何应用业务源码**。
 
 ## 7. D3 复验结果（总顾问最终复验 三）
 
@@ -160,6 +173,19 @@
 - D3 冒烟最终两轮数据根（`ui3-smoke-20260822-204438.csv`）：round 1 `%TEMP%\as-ui3-round-1-29f12c1ee7f846d5a65830e738dc3f9e`、round 2 `%TEMP%\as-ui3-round-2-8b96322ba99b4fcca3c7a10bbdfdbd57`；round 2 PID=27060，trayExit=0，residual=0，formalUnchanged=True。两轮隔离根均在边界确认后清理（`D: 隔离根删除边界确认并清理` PASS，status=Deleted）。
 - 正式数据目录 `%LOCALAPPDATA%\AutoShutdown` 前后快照一致（formalUnchanged=True），实测 0 个 AutoShutdown 进程残留。
 - D3 复验证据文件：`d3-smoke-run.log`、`ui3-smoke-20260822-204438.csv`、`ui3-round-{1,2}-console.log`、`ui3-round-{1,2}-applogs/`、`S-UI3-uia-two-tasks-round-{1,2}.png`、`ui3-build-1576391.log`、`d3-remove-boundary-tests.log`、`d3-launcher-tests.log`、`d3-full-tests.log`、`d3-focus-startupd1.log`、`d3-focus-s23.log`、`d3-focus-s22-tasksync.log`、`d3-git-diff-check.log`。
+
+### 7.5 D4 复验结果（总顾问 D4 复验）
+
+复验均在 `537b147`（D4 修正提交）基础上进行；全部证据见 `S-PKG-work包/S-UI3-D4复验证据/`。
+
+| 复验项 | 命令/范围 | 真实数量 | 结果 |
+|---|---|---|---|
+| 删除边界聚焦测试 | `Invoke-ASUI3RemoveBoundaryTests.ps1` | 34 通过 / 0 失败 | PASS（`d4-remove-boundary-tests.log`；运行后系统临时目录实测无 `as-ui3-*` 残留） |
+| S-UI3 launcher 契约 | `FullyQualifiedName~S_UI3_UiTestLauncherTests` | 12 通过 / 0 失败 | PASS（`d4-launcher-tests.log`） |
+| git diff --check | 工作区 | 退出码 0 | PASS（`d4-git-diff-check.log`，仅 LF→CRLF 归一化提示，无空白错误） |
+
+- D4 删除纪律要点：junction 创建仍用 `cmd /c mklink /J`（创建操作，允许）；junction 链接删除仅经 PowerShell `DirectoryInfo.Delete()`（删除前核对绝对路径 / 登记精确链接路径 / 名称严格匹配 / ReparsePoint / 解析目标哨兵存在，删除后核对链接消失、目标目录与哨兵仍在）。修正后脚本内已无任何 `cmd /c rmdir` 调用。
+- D4 复验证据文件：`d4-remove-boundary-tests.log`、`d4-launcher-tests.log`、`d4-git-diff-check.log`。
 
 ## 8. 收尾承诺
 

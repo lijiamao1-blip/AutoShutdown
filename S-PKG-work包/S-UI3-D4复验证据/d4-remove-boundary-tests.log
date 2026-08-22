@@ -1,0 +1,37 @@
+﻿== S-STARTUP-D1-D3/D4 ASUI3 remove-boundary focused tests ==
+  PASS  1: 合法本轮目录允许删除(Deleted)
+  PASS  1: 合法本轮目录确实被删除
+  PASS  2.1: 名称近似但不匹配拒绝(Refused) [as-ui3-round-1-0e6d576da0d14ebf9f3788bf4a2F]
+  PASS  2.1: 拒绝后目录仍保留 [as-ui3-round-1-0e6d576da0d14ebf9f3788bf4a2F]
+  PASS  2.2: 名称近似但不匹配拒绝(Refused) [as-ui3-round-1-0e5e576da0d14ebf9f3788bf4a]
+  PASS  2.2: 拒绝后目录仍保留 [as-ui3-round-1-0e5e576da0d14ebf9f3788bf4a]
+  PASS  2.3: 名称近似但不匹配拒绝(Refused) [as-ui3-round-1-0e5d676da0d14ebf9f3788bf4a216cd2-extra]
+  PASS  2.3: 拒绝后目录仍保留 [as-ui3-round-1-0e5d676da0d14ebf9f3788bf4a216cd2-extra]
+  PASS  2.4: 名称近似但不匹配拒绝(Refused) [as-ui3-round-X-0e5d586da0d14ebf9f3788bf4a216cd2]
+  PASS  2.4: 拒绝后目录仍保留 [as-ui3-round-X-0e5d586da0d14ebf9f3788bf4a216cd2]
+  PASS  3: TEMP 前缀碰撞路径拒绝(Refused)
+  PASS  3: 前缀碰撞路径未被删除
+  PASS  4: 正式数据根拒绝(Refused)
+  PASS  4: 正式数据根未被删除
+  PASS  5: 仓库目录拒绝(Refused)
+  PASS  5: 仓库目录未被删除
+  PASS  6: 驱动器根拒绝(Refused)
+  PASS  6: 用户目录拒绝(Refused)
+  PASS  6: 用户目录未被删除
+  PASS  7: 目标等于受保护根(ProtectedRoot)拒绝
+  PASS  7: 受保护根目标未被删除
+  PASS  8: 前置 junction 已创建且为 ReparsePoint
+  PASS  8: junction/reparse point 拒绝删除(Refused)
+  PASS  8: junction 链接仍保留
+  PASS  8: junction 目标哨兵未被删除
+  PASS  8: junction 链接经 PowerShell 只删链接(Deleted)
+  PASS  8: 删除后 junction 链接不存在
+  PASS  8: 删除后 junction 目标目录仍存在
+  PASS  8: 删除后 junction 目标哨兵仍存在
+  PASS  9: 目标等于临时目录拒绝(Refused)
+  PASS  10: 清理状态 Refused ? 本轮判 FAIL
+  PASS  10: 清理状态 Error ? 本轮判 FAIL
+  PASS  10: 清理状态 Deleted ? 不判 FAIL
+  PASS  10: 清理状态 NotFound ? 不判 FAIL
+
+AS-UI3 REMOVE BOUNDARY TESTS: pass=34 fail=0
