@@ -184,7 +184,11 @@ public sealed class WinTaskSchedulerAdapter : ITaskSchedulerAdapter
     {
         try
         {
-            return service.GetFolder(TaskSyncNaming.DedicatedFolderPath);
+            // TaskScheduler 2.x 在目标目录不存在时，依运行环境可能返回 null，
+            // 也可能抛 FileNotFoundException。两种形态都必须进入同一创建路径；
+            // 否则首次同步会在调用 folder.Tasks 时触发 NullReferenceException。
+            return service.GetFolder(TaskSyncNaming.DedicatedFolderPath)
+                ?? service.RootFolder.CreateFolder(TaskSyncNaming.DedicatedFolderPath, null, false);
         }
         catch (System.IO.FileNotFoundException)
         {

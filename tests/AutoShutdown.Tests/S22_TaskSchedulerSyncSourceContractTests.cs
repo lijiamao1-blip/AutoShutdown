@@ -149,6 +149,22 @@ public sealed class S22_TaskSchedulerSyncSourceContractTests
         Assert.Contains("Refusing to delete a task that is not owned by this application.", adapter);
     }
 
+    [Fact]
+    public void WinAdapter_FirstRun_NullFolderResultCreatesDedicatedFolder()
+    {
+        var adapter = File.ReadAllText(Path.Combine(
+            AppSourceRoot(),
+            "Infrastructure",
+            "TaskScheduler",
+            "WinTaskSchedulerAdapter.cs"));
+
+        // TaskScheduler 2.x 在目录不存在时可能返回 null 而不是抛异常。
+        // 首次同步必须同时覆盖 null 返回和 FileNotFoundException 两种形态。
+        Assert.Contains("service.GetFolder(TaskSyncNaming.DedicatedFolderPath)", adapter);
+        Assert.Contains("?? service.RootFolder.CreateFolder(TaskSyncNaming.DedicatedFolderPath, null, false)", adapter);
+        Assert.Contains("catch (System.IO.FileNotFoundException)", adapter);
+    }
+
     private static IEnumerable<string> CoreSyncSources()
         => Directory.GetFiles(SyncRoot(), "*.cs");
 
