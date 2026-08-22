@@ -98,7 +98,10 @@ public sealed class ActivationPipeServer : IAsyncDisposable
                 string response;
                 if (string.Equals(line, ActivateCommand, StringComparison.Ordinal))
                 {
-                    _windowActivation.ActivateMainWindow();
+                    // S-STARTUP-D1-D1 启动未就绪协议：先快速应答「已接收」，激活在 UI 就绪后执行；
+                    // 绝不在此同步等待被主实例启动步骤阻塞的 UI 线程（否则次实例会
+                    // ActivationForwardFailed / 永久卡住）。主实例启动完成前有界确认，启动完成后再激活。
+                    _windowActivation.ActivateMainWindowDeferred();
                     response = OkResponse;
                 }
                 else if (line is not null && line.StartsWith(TriggerCommandPrefix, StringComparison.Ordinal))

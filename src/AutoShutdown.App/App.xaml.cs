@@ -26,6 +26,12 @@ public partial class App : System.Windows.Application
     private ApplicationLifetimeCoordinator? _coordinator;
     private IApplicationLogger? _bootstrapLogger;
 
+    // S-STARTUP-D1-D1：启动超时卫兵作为字段持有（不再用 using 局部）。失败路径在 Shutdown 前
+    // 绝不解除武装——卫兵必须穿越 OnExit 的失败清理（协调器/DI Dispose），若清理卡死，卫兵仍
+    // 会在超时后以非零退出码终止进程（进程退出即释放单实例互斥体，不留半启动后台进程）。
+    // 只在「确认进程已退出 / 正常启动完成」后解除。
+    private StartupTimeoutGuard? _startupGuard;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -116,8 +122,11 @@ public partial class App : System.Windows.Application
         // OS 释放命名单实例互斥体，绝不留无窗口后台进程、不阻塞后续实例成为主实例。正常完成
         // 必须在 ApplicationStarted 后 Disarm。仅作为启动卡死的兜底，不替代各启动步骤自身的
         // 超时/失败处理。
-        using var startupGuard = new StartupTimeoutGuard(logger);
-        startupGuard.Arm();
+        // S-STARTUP-D1-D1：卫兵持有于字段并在「确认退出/正常完成」后才解除——失败路径（catch）
+        // 绝不在 Shutdown 前 Disarm，否则 OnExit 的 DI Dispose 若卡死，卫兵已失效仍会留下半启动
+        // 后台进程。OnExit 在清理完成后解除。
+        _startupGuard = new StartupTimeoutGuard(logger);
+        _startupGuard.Arm();
 
         try
         {
@@ -134,7 +143,7 @@ public partial class App : System.Windows.Application
             {
                 // 外部触发回调的无界面模式：不打开主窗口，仅把触发交回本地 Workflow 后退出。
                 HandleExternalTriggerAndExit(primaryTriggerId, logger);
-                startupGuard.Disarm();
+                _startupGuard.Disarm();
                 return;
             }
 
@@ -142,14 +151,16 @@ public partial class App : System.Windows.Application
             _coordinator = _serviceProvider.GetRequiredService<ApplicationLifetimeCoordinator>();
             logger.Info("LifetimeCoordinatorResolved", "应用生命周期协调器已解析。");
             _coordinator.Start();
-            startupGuard.Disarm();
+            // 正常启动完成：此处才解除武装（卫兵在启动失败路径保持武装直至进程退出）。
+            _startupGuard.Disarm();
         }
         catch (Exception exception)
         {
             // S-STARTUP-D1：主实例获得互斥体后关键初始化失败——写入明确错误、释放已创建资源
             // 与单实例所有权（OnExit 会 Dispose 协调器/容器），以非零退出码结束，绝不留半启动
             // 的无窗口后台进程；不执行任何真实电源/远程/任务计划同步写。
-            startupGuard.Disarm();
+            // S-STARTUP-D1-D1：此处不 Disarm——卫兵保持武装并穿越 OnExit 的失败清理；若清理卡死，
+            // 卫兵超时后以非零退出码终止进程（进程退出即释放互斥体），绝不留半启动后台进程。
             logger.Error("StartupFailed", "启动生命周期失败；将释放单实例所有权并无窗口退出。", exception);
             Shutdown(StartupFailureExitCode);
         }
@@ -178,6 +189,10 @@ public partial class App : System.Windows.Application
         {
             // Best-effort cleanup must never throw an unhandled exception.
         }
+
+        // S-STARTUP-D1-D1：失败清理已（成功）结束，进程即将正常退出——此时才解除启动卫兵，
+        // 避免它误触发；若上述清理卡死，卫兵在超时后已以非零退出码终止进程（本行不会到达）。
+        _startupGuard?.Disarm();
 
         _bootstrapLogger?.Dispose();
 

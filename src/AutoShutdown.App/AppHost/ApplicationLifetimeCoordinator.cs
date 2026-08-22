@@ -191,20 +191,12 @@ public sealed class ApplicationLifetimeCoordinator : IDisposable
     /// <summary>
     /// 远程控制启动（S23）：线程池执行 + 限时。失败/超时保持不监听（fail-closed），
     /// 且绝不让 UI 线程在启动阶段无限等待（远程默认关闭，不属关键初始化）。
+    /// S-STARTUP-D1-D1：超时使用独立可取消的 linked CTS 并确认停止/回收——即使底层阻塞随后
+    /// 解除也绝不进入监听（见 <see cref="RemoteStartController"/>）。
     /// </summary>
     private void StartRemoteServer()
     {
-        try
-        {
-            Task.Run(() => _remoteServer.StartAsync(_appCts.Token))
-                .WaitAsync(StartupStepTimeout)
-                .GetAwaiter()
-                .GetResult();
-        }
-        catch (Exception exception)
-        {
-            _logger.Warning("RemoteStartFailed", "远程控制启动失败或超时（" + exception.Message + "），保持不监听。");
-        }
+        RemoteStartController.StartBounded(_remoteServer, _logger, _appCts.Token, StartupStepTimeout);
     }
 
     /// <summary>

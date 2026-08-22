@@ -1,10 +1,15 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
+using System.Text.Json;
+using AutoShutdown.App;
 using AutoShutdown.App.AppHost;
 using AutoShutdown.App.Infrastructure;
 using AutoShutdown.App.Infrastructure.Logging;
+using AutoShutdown.App.Infrastructure.Remote;
 using AutoShutdown.Core.Abstractions;
+using AutoShutdown.Core.Remote;
 using AutoShutdown.Core.Scheduling.TaskSchedulerSync;
 using AutoShutdown.Core.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,6 +73,8 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
         {
             var elapsed = RunSta(() =>
             {
+                // DashboardRefreshService 依赖 Application.Current.Dispatcher，
+                // 协调器解析必须运行在 STA 线程并持有 WPF Application（同真实启动形态）。
                 // DashboardRefreshService 依赖 Application.Current.Dispatcher，
                 // 协调器解析必须运行在 STA 线程并持有 WPF Application（同真实启动形态）。
                 var app = new System.Windows.Application();
@@ -272,6 +279,295 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
         }
     }
 
+    // ===== (8) S-STARTUP-D1-D1 实现修正回归 =====
+    // 总顾问裁决后新增：远程启动超时不监听；激活管道启动未就绪协议；日志跨进程临界区。
+
+    // --- 缺口 #2：远程启动超时 → 独立可取消 CTS + 确认不监听（即使底层阻塞随后解除） ---
+
+    [Fact]
+    public async Task RemoteStart_OnTimeout_EvenIfBlockLaterResolves_NeverListens()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var gate = new TaskCompletionSource();
+            var settings = JsonSerializer.SerializeToElement(new RemoteSettingsDocument
+            {
+                Enabled = true,
+                ListenAddress = "127.0.0.1",
+                ListenPort = 48732,
+                RequireTls = false
+            });
+            var storage = new BlockingRemoteSettingsStorage(gate.Task, settings);
+
+            var services = new ServiceCollection();
+            services.AddAutoShutdownServices(root);
+            // 覆盖远程设置存储为「读取永久阻塞直到放行」：模拟启动阶段磁盘停滞。
+            services.AddSingleton(new RemoteSettingsStore(storage));
+            await using var provider = services.BuildServiceProvider();
+
+            var server = provider.GetRequiredService<RemoteServer>();
+            var logger = new RecordingLogger();
+
+            // 超时很短：StartBounded 必须在有界时间内返回并确认不监听。
+            RemoteStartController.StartBounded(server, logger, CancellationToken.None, TimeSpan.FromMilliseconds(200));
+
+            Assert.False(server.IsRunning, "远程启动超时后必须保持不监听。");
+            Assert.Contains(logger.Entries, e => e == "RemoteStartTimedOut");
+
+            // 即使底层阻塞随后解除（磁盘恢复），StartAsync 的取消检查点也保证绝不进入监听。
+            gate.SetResult();
+            await storage.Released.WaitAsync(TimeSpan.FromSeconds(5));
+            // 有界轮询确认：从阻塞返回后的数秒内从未进入监听（fail-closed）。
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                Assert.False(server.IsRunning, "底层阻塞解除后也绝不进入监听（fail-closed）。");
+                await Task.Delay(50);
+            }
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    // --- 缺口 #3：激活管道启动未就绪协议——UI 线程被启动步骤阻塞时，管道仍快速应答、绝不挂起 ---
+
+    [Fact]
+    public async Task ActivationPipe_Activate_WhilePrimaryUiBlocked_RespondsBounded_NoResidual()
+    {
+        var pipeName = @"AutoShutdown.Activation.Test." + Guid.NewGuid().ToString("N");
+
+        var appCreated = new TaskCompletionSource();
+        var releaseUi = new TaskCompletionSource();
+        var uiExited = new TaskCompletionSource();
+        Exception? uiError = null;
+        // 记录工厂 Create 调用：激活「先应答后执行」时，UI 未就绪阶段应为 0。
+        var factory = new RecordingMainWindowFactory();
+
+        // STA 线程承载真实 WPF Application：Dispatcher 已创建但「启动步骤」被阻塞（未泵消息），
+        // 精确模拟主实例 UI 线程卡在启动步骤时的状态。
+        var uiThread = new Thread(() =>
+        {
+            System.Windows.Application? app = null;
+            try
+            {
+                app = new System.Windows.Application();
+                appCreated.SetResult();
+                releaseUi.Task.Wait(); // UI 线程阻塞在启动步骤：不泵消息
+            }
+            catch (Exception exception)
+            {
+                uiError = exception;
+            }
+            finally
+            {
+                try
+                {
+                    if (app is not null)
+                    {
+                        // 必须显式关闭 Application：否则 Application.Current 泄漏到后续测试，
+                        // 使下一个 new Application() 抛「Cannot create more than one
+                        // System.Windows.Application instance in the same AppDomain」。
+                        // InvokeShutdown 同步触发 Dispatcher.ShutdownStarted，Application 的
+                        // 清理回调随之清空 Application.Current；同时中止排队中的激活延迟执行
+                        // 回调（UI 未就绪阶段窗口不会被创建）。绝不能用 app.Shutdown() +
+                        // Dispatcher.Run()：Shutdown 只排入 Send 队列且其回调依赖泵消息，
+                        // 在当前测试形态下会让 UI 线程永久卡在 Run()（实测超时）。
+                        app.Dispatcher.InvokeShutdown();
+                    }
+                }
+                catch (Exception exception)
+                {
+                    uiError ??= exception;
+                }
+
+                uiExited.SetResult();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "SStartupD1BlockedUiThread"
+        };
+        uiThread.SetApartmentState(ApartmentState.STA);
+        uiThread.Start();
+        await appCreated.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(uiError);
+
+        var service = new WindowActivationService(factory);
+        var server = new ActivationPipeServer(service, pipeName: pipeName);
+        server.Start();
+        try
+        {
+            await using var client = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            await client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+            var request = Encoding.UTF8.GetBytes("ACTIVATE\n");
+            await client.WriteAsync(request, 0, request.Length, CancellationToken.None);
+            await client.FlushAsync(CancellationToken.None);
+
+            // 关键断言：UI 线程被启动步骤阻塞时，管道仍必须快速应答「已接收」——绝不无限等待
+            // 被阻塞的 UI 线程（否则次实例会 ActivationForwardFailed / 永久卡住）。
+            var responseTask = ReadLineAsync(client);
+            var completed = await Task.WhenAny(
+                responseTask,
+                Task.Delay(TimeSpan.FromSeconds(2))) == responseTask;
+            Assert.True(completed, "主实例 UI 线程被阻塞时，激活管道必须在有界时间内应答，不得挂起。");
+            Assert.Equal("OK", await responseTask);
+
+            // 先应答后执行：UI 未就绪时激活回调尚未执行（窗口尚未创建）。
+            Assert.Equal(0, factory.CreateCount);
+        }
+        finally
+        {
+            await server.DisposeAsync();
+        }
+
+        // 放行 UI 线程并确认其干净退出（无残留后台线程/进程）。
+        releaseUi.SetResult();
+        await uiExited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(uiError);
+
+        // InvokeShutdown 只关调度器、不清 Application.Current：必须显式清空，否则后续创建
+        // Application 的测试（如 CompositionRoot_Resolves…）会抛「Cannot create more than one
+        // System.Windows.Application instance in the same AppDomain」。
+        ClearApplicationCurrent();
+    }
+
+    // --- 缺口 #4：日志跨进程临界区——两进程并发逼近轮转阈值，无覆盖/无丢行/无轮转冲突 ---
+
+    [Fact]
+    public async Task FileLogger_TwoConcurrentWriters_ApproachingRotationThreshold_NoOverwriteNoDropNoConflict()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            // 两个独立 logger 实例模拟两个进程：共享同一命名单实例互斥锁与同一日志目录。
+            // 阈值取真实尺寸（每文件约 26 行）：仍反复逼近并跨越轮转阈值（140 行 × ~76B
+            // ≈ 10.6KB，将产生约 5 次轮转），但临界区（移动 + 写入 + 落盘）短，绝不触发
+            // 500ms 互斥锁超时退化的无锁追加——测试验证的是临界区修复本身（无覆盖/无丢行/
+            // 无轮转冲突），而非无锁降级路径（有文档声明的尽力而为语义）。
+            using var loggerA = new FileApplicationLogger(
+                root,
+                minLevel: ApplicationLogLevel.Information,
+                maxFileBytes: 2048);
+            using var loggerB = new FileApplicationLogger(
+                root,
+                minLevel: ApplicationLogLevel.Information,
+                maxFileBytes: 2048);
+
+            const int linesPerWriter = 70;
+            var markers = new ConcurrentBag<string>();
+
+            var writerA = Task.Run(() => WriteMarkedLines(loggerA, "A", linesPerWriter, markers));
+            var writerB = Task.Run(() => WriteMarkedLines(loggerB, "B", linesPerWriter, markers));
+            await Task.WhenAll(writerA, writerB);
+
+            // 阈值极小，必须发生轮转（否则测试没逼近轮转，无验证意义）。
+            Assert.True(
+                Directory.GetFiles(root).Any(f => f.EndsWith(".1.log")),
+                "逼近轮转阈值应产生轮转文件。");
+
+            var allLines = ReadAllLogLines(root);
+            foreach (var marker in markers)
+            {
+                var matches = allLines.Where(l => l.Contains(marker)).ToArray();
+                Assert.True(
+                    matches.Length == 1,
+                    $"marker {marker} 应恰出现一次，实际 {matches.Length}（覆盖或丢行）。");
+                Assert.True(
+                    matches[0].EndsWith("#SENTINEL"),
+                    $"marker {marker} 所在行必须完整（未被截断/交错）。");
+            }
+
+            Assert.Equal(markers.Count, allLines.Count(l => l.Contains("#SENTINEL")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    [Fact]
+    public async Task FileLogger_WhenCrossProcessLockUnavailable_DoesNotRotateLockFree_AndLineNotLost()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            using var logger = new FileApplicationLogger(
+                root,
+                minLevel: ApplicationLogLevel.Information,
+                maxFileBytes: 50);
+
+            // 模拟另一进程持有跨进程写锁：命名单实例互斥体按线程递归，同一线程 WaitOne 会
+            // 直接成功，因此必须用独立线程持有，才能让 logger 的 WaitOne(500ms) 真正超时。
+            var lockHeld = new TaskCompletionSource();
+            var releaseLock = new TaskCompletionSource();
+            var holderExited = new TaskCompletionSource();
+            var holder = new Thread(() =>
+            {
+                try
+                {
+                    // 同名内核对象已由静态 _writeMutex 创建；对已存在的命名单实例互斥体，
+                    // ctor 的 initiallyOwned 无效，必须显式 WaitOne 获取。
+                    using var externalLock = new Mutex(
+                        initiallyOwned: false,
+                        @"Local\AutoShutdown.Desktop.LogWriter.v1");
+                    Assert.True(
+                        externalLock.WaitOne(TimeSpan.FromSeconds(5)),
+                        "外部持有线程必须获得跨进程写锁。");
+                    lockHeld.SetResult();
+                    releaseLock.Task.Wait(); // 保持持有，直到测试放行
+                    externalLock.ReleaseMutex();
+                }
+                finally
+                {
+                    holderExited.SetResult();
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "ExternalLogLockHolder"
+            };
+            holder.Start();
+            await lockHeld.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // 第一行超阈值且锁不可用：必须退化为无锁追加，且绝不无锁 Rotate。
+            logger.Log(ApplicationLogLevel.Information, "E", "first-line-payload-#SENTINEL");
+
+            // 锁不可用期间不得创建轮转文件（无锁 Rotate 被禁止）。
+            Assert.False(
+                Directory.GetFiles(root).Any(f => f.EndsWith(".1.log")),
+                "获取跨进程写锁失败时不得无锁 Rotate（否则两进程同时轮转会互相移动对方文件）。");
+
+            // 行不得丢失：base 文件包含第一行。
+            Assert.Contains(ReadAllLogLines(root), l => l.Contains("first-line-payload-#SENTINEL"));
+
+            // 放行外部持有线程并确认其已释放锁后，再执行后续写。
+            releaseLock.SetResult();
+            await holderExited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // 后续写：锁可用 → 正常触发轮转。
+            logger.Log(ApplicationLogLevel.Information, "E", "second-line-payload-#SENTINEL");
+            Assert.True(
+                Directory.GetFiles(root).Any(f => f.EndsWith(".1.log")),
+                "锁可用后应正常轮转。");
+
+            var allAfter = ReadAllLogLines(root);
+            Assert.Contains(allAfter, l => l.Contains("first-line-payload-#SENTINEL"));
+            Assert.Contains(allAfter, l => l.Contains("second-line-payload-#SENTINEL"));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
     // ===== (7) 源码契约：检查点日志 + 无构造期同步读取 + 干净非零失败 =====
 
     [Fact]
@@ -399,7 +695,48 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
             throw new InvalidOperationException("STA 工作失败：", error);
         }
 
+        // STA 线程的 InvokeShutdown 只关调度器、不清 Application.Current；不显式清空会
+        // 泄漏到后续创建 Application 的测试（见 ClearApplicationCurrent 注释）。
+        ClearApplicationCurrent();
+
         return result;
+    }
+
+    /// <summary>
+    /// WPF 不公开 Application.Current 的 setter；Application.Shutdown() 的清理回调依赖泵消息
+    /// （阻塞 UI 形态下会让线程挂起），Dispatcher.InvokeShutdown() 只关调度器、不清 Current。
+    /// 因此测试直接清空私有静态字段：_appInstance 承载 Current，_appCreatedInThisAppDomain 是
+    /// Application 构造器的「只能创建一个」守卫（.NET 8 实测：即使 Current 已为 null，该守卫
+    /// 仍为 true 时 new Application() 会抛）。两者都清空，保证创建 Application 的线程退出后
+    /// 后续（可能换序运行的）Application 测试可正常创建新实例。
+    /// </summary>
+    private static void ClearApplicationCurrent()
+    {
+        var type = typeof(System.Windows.Application);
+        var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+
+        var instanceField = type.GetField("_appInstance", flags);
+        if (instanceField is not null)
+        {
+            instanceField.SetValue(null, null);
+        }
+
+        var guardField = type.GetField("_appCreatedInThisAppDomain", flags);
+        if (guardField is not null)
+        {
+            var defaulted = guardField.FieldType == typeof(bool)
+                ? (object)false
+                : guardField.FieldType == typeof(int)
+                    ? (object)0
+                    : null;
+            if (defaulted is not null)
+            {
+                guardField.SetValue(null, defaulted);
+            }
+        }
+
+        Assert.True(System.Windows.Application.Current is null,
+            "ClearApplicationCurrent 后 Application.Current 仍非空。");
     }
 
     private static string ReadAppFile(params string[] relativeParts)
@@ -511,8 +848,98 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
 
         public void ActivateMainWindow() => Activated = true;
 
+        public void ActivateMainWindowDeferred() => Activated = true;
+
         public void MarkExiting()
         {
         }
+    }
+
+    private sealed class RecordingMainWindowFactory : IMainWindowFactory
+    {
+        public int CreateCount { get; private set; }
+
+        public MainWindow Create()
+        {
+            CreateCount++;
+            // 测试下不真正创建主窗口：若激活回调在 UI 就绪前被错误执行，CreateCount 递增，
+            // 且返回 null 会在 ActivateMainWindowCore 上暴露（测试失败而非静默通过）。
+            return null!;
+        }
+    }
+
+    /// <summary>
+    /// 远程设置读取「永久阻塞直到放行」：模拟启动阶段磁盘停滞。放行后返回有效 enabled 设置，
+    /// 用于验证「超时后即使底层阻塞解除也绝不监听」（fail-closed）。
+    /// </summary>
+    private sealed class BlockingRemoteSettingsStorage : IStorage
+    {
+        private readonly Task _gate;
+        private readonly JsonElement _settings;
+        private readonly TaskCompletionSource _released = new();
+
+        public BlockingRemoteSettingsStorage(Task gate, JsonElement settings)
+        {
+            _gate = gate;
+            _settings = settings;
+        }
+
+        /// <summary>底层阻塞已解除且读取已返回（供测试有界等待）。</summary>
+        public Task Released => _released.Task;
+
+        public async Task<StorageReadResult<T>> ReadAsync<T>(
+            string relativePath,
+            CancellationToken cancellationToken)
+        {
+            await _gate; // 磁盘停滞：阻塞直到测试放行（忽略取消——正是超时场景的阻塞形态）
+            _released.TrySetResult();
+            if (typeof(T) == typeof(JsonElement))
+            {
+                return new StorageReadResult<T>
+                {
+                    Status = StorageReadStatus.Success,
+                    Value = (T)(object)_settings
+                };
+            }
+
+            return new StorageReadResult<T> { Status = StorageReadStatus.IoFailure };
+        }
+
+        public Task<StorageWriteResult> WriteAsync<T>(
+            string relativePath,
+            T value,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new StorageWriteResult { Status = StorageWriteStatus.IoFailure });
+    }
+
+    private static void WriteMarkedLines(
+        FileApplicationLogger logger,
+        string prefix,
+        int count,
+        ConcurrentBag<string> markers)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var marker = $"{prefix}-{i:000000}";
+            markers.Add(marker);
+            logger.Log(ApplicationLogLevel.Information, "E", $"payload-{marker}-#SENTINEL");
+        }
+    }
+
+    private static IReadOnlyList<string> ReadAllLogLines(string directory)
+    {
+        var lines = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.log"))
+        {
+            foreach (var line in File.ReadAllLines(file))
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    lines.Add(line);
+                }
+            }
+        }
+
+        return lines;
     }
 }

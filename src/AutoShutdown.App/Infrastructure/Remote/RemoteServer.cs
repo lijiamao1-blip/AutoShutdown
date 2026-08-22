@@ -131,6 +131,14 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         }
 
         var settings = await LoadCurrentSettingsAsync(cancellationToken).ConfigureAwait(false);
+        // S-STARTUP-D1-D1：晚到取消检查点。启动若已被取消（如启动步骤超时后独立 CTS 被取消），
+        // 即使底层阻塞（磁盘停滞等）随后解除并返回了设置，也绝不继续进入监听（fail-closed）。
+        if (cancellationToken.IsCancellationRequested)
+        {
+            _logger.Info("RemoteServer", "远程控制启动已被取消；不监听。");
+            return;
+        }
+
         if (settings is null)
         {
             _logger.Info("RemoteServer", "远程控制未启用或配置无效；不监听。");
@@ -166,6 +174,14 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
         catch (SocketException exception)
         {
             _logger.Error("RemoteServer", "无法监听指定端口，远程控制不启动。", exception);
+            return;
+        }
+
+        // S-STARTUP-D1-D1：发布前最后检查点——已取消则回收已启动的 socket，绝不进入监听。
+        if (cancellationToken.IsCancellationRequested)
+        {
+            listener.Stop();
+            _logger.Info("RemoteServer", "远程控制启动已被取消；不监听。");
             return;
         }
 

@@ -47,18 +47,19 @@
 - 两次双击产生的次实例均因激活管道不可达而 `ActivationForwardFailed`，激活现有窗口失败。
 - 事件日志佐证：正常实例从 `PrimaryInstanceAcquired` 到 `ApplicationStarted` 仅约 85 ms（如 23:36:14.014 → 23:36:14.103，及 23:41:52.518 → 23:41:53.976），说明该卡点不是正常耗时，而是**异常停滞**。
 
-### 1.2 根因（确认）
+### 1.2 卡点区间（已确认）与根因口径（S-STARTUP-D1-D1 修正：主要嫌疑，非唯一已确认）
 
-- 卡点区间 = `PrimaryInstanceAcquired` 之后 → `SchedulerStarting` 之前 = **DI 服务容器构建阶段**（`App.xaml.cs` 主路径中 `services.BuildServiceProvider()`，其后才 `LifetimeCoordinatorResolving`、`_coordinator.Start()`）。
-- 该阶段唯一**无界同步等待**位于 `src/AutoShutdown.App/AppHost/ServiceRegistration.cs` 的 `TaskSyncCoordinator` factory：
+**已确认事实（检查点证据）**：卡点区间 = `PrimaryInstanceAcquired` 之后 → `SchedulerStarting` 之前 = **DI 服务容器构建阶段**（`App.xaml.cs` 主路径中 `services.BuildServiceProvider()`，其后才 `LifetimeCoordinatorResolving`、`_coordinator.Start()`）。原始卡点只能确认到 `LifetimeCoordinatorResolving` 阶段。
+
+**根因口径**：`TaskSyncSettingsStore` 的同步读取是**确认的无界阻塞风险 / 主要嫌疑**，修复方向合理；但当时**没有线程栈或二分检查点直接证明**它就是卡住的那一行，因此本阶段不写成「唯一已确认根因」：
 
   ```csharp
   var load = provider.GetRequiredService<TaskSyncSettingsStore>()
       .LoadAsync(CancellationToken.None)
-      .GetAwaiter().GetResult();   // ← UI 线程上无界同步文件 I/O
+      .GetAwaiter().GetResult();   // ← UI 线程上无界同步文件 I/O（主要嫌疑）
   ```
 
-- 真实数据根 `C:\Users\李佳茂\AppData\Local\AutoShutdown` 存在 `task-sync.json`（72 字节，`Enabled:true`），构造阶段读取它即发生一次真实文件 I/O；FileStorage 是磁盘存储，任何文件系统停滞（磁盘/杀软/网络重定向）都会让 `.GetResult()` **无限期挂起 UI 线程**，与「互斥体已获取、管道未起、调度未起」的卡点完全吻合。此等待是该阶段唯一能把 UI 线程永久卡死的同步阻塞点。
+- 真实数据根 `C:\Users\李佳茂\AppData\Local\AutoShutdown` 存在 `task-sync.json`（72 字节，`Enabled:true`），构造阶段读取它即发生一次真实文件 I/O；FileStorage 是磁盘存储，任何文件系统停滞（磁盘/杀软/网络重定向）都会让 `.GetResult()` **无限期挂起 UI 线程**，与「互斥体已获取、管道未起、调度未起」的卡点吻合——这是该阶段能把 UI 线程永久卡死的高度可疑点（主要嫌疑，非唯一）。
 - 由于激活管道在 `coordinator.Start()` 内（且在崩溃恢复之后）才启动，主实例卡死时管道从未监听 → 次实例转发必然失败 → 缺陷闭环。
 
 ### 1.3 排除的假设
@@ -88,7 +89,7 @@
 
 | 文件 | 修改内容 |
 |---|---|
-| `src/AutoShutdown.App/AppHost/ServiceRegistration.cs` | **根因修复**：TaskSyncCoordinator factory 移除构造期同步 `LoadAsync().GetAwaiter().GetResult()`，改为 fail-closed `coordinator.Enabled = false`（开关读取移入启动步骤） |
+| `src/AutoShutdown.App/AppHost/ServiceRegistration.cs` | **主要嫌疑修复**：TaskSyncCoordinator factory 移除构造期同步 `LoadAsync().GetAwaiter().GetResult()`，改为 fail-closed `coordinator.Enabled = false`（开关读取移入启动步骤；口径见 §1.2） |
 | `src/AutoShutdown.App/AppHost/ApplicationLifetimeCoordinator.cs` | 新增 `TaskSyncSettingsStore` 依赖 + `StartupStepTimeout=20s`；`Start()` 重构：激活管道最先启动（`ActivationPipeStarting/Started`）→ 日志保留有界（`LogRetentionFailed`）→ `LoadTaskSyncSettings()`（`StartupTaskSyncSettingsGate`，`TaskSyncSettingsLoaded/LoadFailed`）→ `SchedulerStarting` → `RecoverFromCrash()` 有界（`CrashRecoveryTimeout` 中止启动）→ `SchedulerRunning` → `StartRemoteServer()` 有界（`RemoteStartFailed`，fail-closed 不监听）→ 托盘/仪表盘/通知 → `MainWindowActivating/Activated` → `ApplicationStarted`；启动步骤一律 `WaitAsync(StartupStepTimeout)` |
 | `src/AutoShutdown.App/App.xaml.cs` | 新增 `StartupFailureExitCode=5`、`HeadlessStepTimeoutSeconds=20`；主路径 `using var startupGuard = new StartupTimeoutGuard(logger); startupGuard.Arm();` + try/catch：`ServiceProviderBuilt` → headless 分支 / `LifetimeCoordinatorResolving/Resolved` → `_coordinator.Start()` → `Disarm()`；catch → `StartupFailed` 日志 + `Shutdown(5)`；`HandleExternalTriggerAndExit` 失败也非零退出；`RunHeadlessCrashRecovery` `WaitAsync(20s)`，超时 `CrashRecoveryTimeout` + rethrow |
 | `src/AutoShutdown.App/Infrastructure/StartupTimeoutGuard.cs`（新增） | 看门狗：Arm/Disarm；默认 30s；触发记 `StartupTimedOut` 并 `Environment.Exit(4)`（进程退出 → OS 释放互斥体） |
@@ -163,7 +164,7 @@ fail-closed 默认关闭保持不变；真实开关读取移到 `ApplicationLife
 
 | 测试 | 验证点 |
 |---|---|
-| `TaskSyncCoordinatorFactory_WithHangingSettingsStore_ResolvesBounded_AndFailClosed` | (1) 根因回归：工厂不得在构造期同步读取（挂起）存储；解析有界；fail-closed 关闭 |
+| `TaskSyncCoordinatorFactory_WithHangingSettingsStore_ResolvesBounded_AndFailClosed` | (1) 主要嫌疑回归：工厂不得在构造期同步读取（挂起）存储；解析有界；fail-closed 关闭 |
 | `CompositionRoot_ResolvesApplicationLifetimeCoordinator_WithoutBlocking` | (2) 协调器在启动前可从组合根有界解析（STA + WPF Application，与真实启动同形态） |
 | `StartupTimeoutGuard_Fires_ExitsNonZero_WhenStartupNeverCompletes` | (3) 卫兵触发非零退出（timeout=4）、记 `StartupTimedOut` |
 | `StartupTimeoutGuard_DoesNotFire_WhenDisarmedBeforeDeadline` | (3) 正常完成 Disarm 后不误触发 |
@@ -202,3 +203,44 @@ fail-closed 默认关闭保持不变；真实开关读取移到 `ApplicationLife
 5. 残留检查：确认无任何 AutoShutdown.App 进程残留；
 6. 记录每轮：PID、窗口出现时间、副实例退出时间、托盘退出时间、残留进程数、正式数据目录前后状态、日志路径与检查点证据（`PrimaryInstanceAcquired`/`ApplicationStarted`/`MainWindowActivated`、无 `ActivationForwardFailed`/`StartupFailed`/`StartupTimedOut`）；
 7. 每轮使用全新/已验证隔离目录，绝不用正式数据根，**不 taskkill、不按名称清理**。
+
+## 8. S-STARTUP-D1-D1 实现修正（总顾问评审后的最小返修补充）
+
+### 8.1 评审结论（总顾问）
+
+- 20/20 启动/二次激活/托盘退出循环证据**认可**；三个 UIA 问题的归因**原则上认可**；
+- 提出 5 项**必须修复的实现缺口**（见 §8.2），修复通过后方允许对测试工具做最小修正（UIA A–D）与重新验证；
+- **纪律**：不 reset/checkout/amend 既有提交；在 `e58d5d4` 之上形成独立 **S-STARTUP-D1-D1 实现修正提交**，仅精确暂存本次源码、测试与执行书补充；完成后停止，等待总顾问复验；**不得创建最终结果记录、不得打包、不得 push**。
+
+### 8.2 五项实现缺口与修复
+
+| # | 缺口 | 修复 |
+|---|---|---|
+| 1 | **HIGH**：`App.xaml.cs` 启动异常 catch 在 `Shutdown(StartupFailureExitCode)` 前调用 `startupGuard.Disarm()`，失败清理期间看门狗失效 | 改为字段 `_startupGuard`；catch 内**不解除**，失败清理期间看门狗保持武装；仅正常完成/确认退出/`OnExit` 收尾时 `Disarm()` |
+| 2 | **HIGH**：`StartRemoteServer` 的 `WaitAsync` 超时只让等待方返回，底层 `RemoteServer.StartAsync` 仍继续，超时后可能晚到监听，违反 fail-closed | 新增 `RemoteStartController.StartBounded`：独立 linked CTS；`WaitAsync(timeout)` 超时 → `Cancel()` + 有界 `ConfirmStopped` + 延迟释放 CTS；`RemoteServer.StartAsync` 增加两处取消检查点（读设置后、发布监听前），超时后即使阻塞解除也绝不进入监听 |
+| 3 | **MEDIUM**：`ActivationPipeServer` 提前启动后 ACTIVATE 仍 `Dispatcher.Invoke` 同步等待被阻塞的 UI 线程 | 启动未就绪协议：`ActivateMainWindowDeferred()` 先应答「已接收」（`OkResponse`），激活经 `InvokeAsync` 排队到 UI 就绪后执行，绝不阻塞调用方 |
+| 4 | **MEDIUM**：`FileApplicationLogger` 在互斥锁外做 `FileInfo.Length` 与 `Rotate`，锁获取失败时可能无锁 Rotate | 长度检查 + Rotate + 打开 + Seek + Write + Flush **全部纳入同一跨进程临界区**；获取锁失败绝不无锁 Rotate；写打开增加 `FileShare.Delete`，使并发时 Rotate 的 `File.Move` 不被另一进程正持有的文件阻塞（消除超时退化下的丢行） |
+| 5 | **口径**：不得把 `TaskSyncSettingsStore` 同步读取写成「唯一已确认根因」 | §1.2 已修正为「确认的无界阻塞风险 / 主要嫌疑」，并注明无线程栈/二分检查点直接证明 |
+
+### 8.3 新增/修改的聚焦测试（S_STARTUP_D1 类，12 → 15 个）
+
+| 测试 | 验证点 |
+|---|---|
+| `RemoteStart_TimedOut_Cancelled_AndNeverListens_EvenAfterBlockLifts` | (缺口2) 模拟远程设置读取永久阻塞→超时取消→确认不监听→阻塞解除后**仍不监听**（fail-closed，有界轮询） |
+| `ActivationPipe_Activate_WhilePrimaryUiBlocked_RespondsBounded_NoResidual` | (缺口3) 真实 WPF Application 在独立 STA 线程阻塞（不泵消息）时，管道在**有界时间内应答 OK**、窗口未被提前创建、UI 线程放行后干净退出、`Application.Current` 显式清空不泄漏 |
+| `FileLogger_TwoConcurrentWriters_ApproachingRotationThreshold_NoOverwriteNoDropNoConflict` | (缺口4) 两个 logger 并发逼近轮转阈值（真实尺寸阈值、约 5 次轮转）：每行恰出现一次、完整、无覆盖/无丢行/无轮转冲突 |
+| `FileLogger_WhenCrossProcessLockUnavailable_DoesNotRotateLockFree_AndLineNotLost` | (缺口4) 独立线程持有跨进程写锁使 `WaitOne(500ms)` 真超时：退化为无锁追加、**绝不无锁 Rotate**、行不丢失；锁释放后正常轮转 |
+| 既有 `CompositionRoot_ResolvesApplicationLifetimeCoordinator_WithoutBlocking` | 回归：阻塞 UI 测试不再泄漏 `Application.Current`（`_appInstance` + `_appCreatedInThisAppDomain` 显式清空），换序运行也稳定 |
+
+### 8.4 自动化验证（实现修正提交时点）
+
+- [x] Release 构建（App + Tests，TreatWarningsAsErrors）：**0 错误 0 警告**
+- [x] Release 全量测试：**1761/1761 通过**（第二次复跑全绿；首次全量中出现 1 例 `S17_OfficeSaveHelperLauncherTests.SaveAll_ExternalCancelCleanupFailure_PropagatesOce` 单独复跑 2 次均通过——Office 子系统既有时序型 flaky，不在本阶段范围，未触碰）
+- [x] S_STARTUP_D1 类聚焦：**15/15 通过**；本阶段聚焦（含远程超时、阻塞 UI、日志并发轮转）**5/5 连续 3 次全绿**
+- [x] `git diff --check` 退出码 0（见 §8.5 之后执行）
+- [ ] 20 轮真机循环（§7）：20/20 证据已在评审时认可；实现修正后候选按总顾问复验结果决定是否以修复后候选重跑
+- [ ] UIA 冒烟 ≥2 连续轮全通过 + UIA 工具最小修正（A–D：每轮独立 `AUTOSHUTDOWN_DATA_ROOT`、有界条件轮询替代固定 1000ms、真实托盘退出路径验证、原始输出落盘）——**仅在总顾问对实现修正复验通过后进行**
+
+### 8.5 提交范围（S-STARTUP-D1-D1）
+
+仅精确暂存：`src/AutoShutdown.App/App.xaml.cs`、`AppHost/ApplicationLifetimeCoordinator.cs`、`AppHost/RemoteStartController.cs`（新增）、`Infrastructure/Remote/RemoteServer.cs`、`Infrastructure/IWindowActivationService.cs`、`Infrastructure/WindowActivationService.cs`、`Infrastructure/ActivationPipeServer.cs`、`Infrastructure/Logging/FileApplicationLogger.cs`、`tests/AutoShutdown.Tests/S_STARTUP_D1_StartupLifecycleTests.cs`、`S-PKG-work包/AutoShutdown-V2-S-STARTUP-D1-最小返修执行书.md`。旧截图、历史工件、既有未跟踪文件原样保留。

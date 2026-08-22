@@ -12,7 +12,9 @@ namespace AutoShutdown.App.Infrastructure.Logging;
 ///   yyyy-MM-ddTHH:mm:ss.fffzzz [Level] EventName Message
 ///
 /// Files are written as UTF-8 without BOM. Every write opens the target file
-/// with FileShare.ReadWrite so users can copy log files while the app runs.
+/// with FileShare.ReadWrite so users can copy log files while the app runs,
+/// and FileShare.Delete so a concurrent cross-process rotation's File.Move
+/// never fails against an in-flight writer (S-STARTUP-D1-D1).
 /// A single lock serializes all writers so lines never interleave.
 /// When the primary file exceeds the size limit it is rotated to .1.log
 /// (shifting existing numbered files up so existing files are never overwritten).
@@ -105,12 +107,6 @@ public sealed class FileApplicationLogger : IApplicationLogger
             // 并发追加时因陈旧 EOF 位置导致的行级覆盖/交错（见 _writeMutex 注释）。
             var lineBytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
 
-            var currentLength = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
-            if (currentLength + lineBytes.Length > _maxFileBytes)
-            {
-                Rotate(filePath);
-            }
-
             var acquired = false;
             try
             {
@@ -129,11 +125,27 @@ public sealed class FileApplicationLogger : IApplicationLogger
 
             try
             {
+                // S-STARTUP-D1-D1：文件长度检查 + Rotate + 打开 + Seek + Write + Flush 全部纳入
+                // 同一跨进程临界区（互斥锁内）。两进程并发逼近轮转阈值时轮转互斥、互不冲突；
+                // 获取锁失败时绝不无锁 Rotate（否则两进程同时轮转会互相移动对方的文件）。
+                if (acquired)
+                {
+                    var currentLength = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
+                    if (currentLength + lineBytes.Length > _maxFileBytes)
+                    {
+                        Rotate(filePath);
+                    }
+                }
+
+                // S-STARTUP-D1-D1：FileShare.Delete 使跨进程并发时 Rotate 的 File.Move 不会因
+                // 另一进程（超时退化的无锁追加写）正持有 base 文件而抛 IOException —— 否则该
+                // 临界区内写者的行会因移动失败被静默丢弃。共享 Delete 权限下移动仍成功，无锁
+                // 写者的行落入被移动后的文件，绝不覆盖、绝不丢行。
                 using var stream = new FileStream(
                     filePath,
                     FileMode.Append,
                     FileAccess.Write,
-                    FileShare.ReadWrite);
+                    FileShare.ReadWrite | FileShare.Delete);
                 stream.Seek(0, SeekOrigin.End); // 写前重锚定到真实 EOF，缩小跨进程覆盖窗口
                 stream.Write(lineBytes, 0, lineBytes.Length);
                 stream.Flush(true); // 落盘，保证退出后日志可立即可靠读取
