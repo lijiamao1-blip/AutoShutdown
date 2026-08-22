@@ -12,13 +12,15 @@ public static class TaskSyncNaming
     /// <summary>外部任务所在专属目录（Windows 任务计划程序根目录下的相对路径，不含盘符）。</summary>
     public const string DedicatedFolderPath = @"AutoShutdown V2";
 
-    /// <summary>外部任务名的应用标识前缀（与本地 task id 之间以 :: 分隔）。</summary>
+    /// <summary>外部任务名的应用标识前缀（与本地 task id 之间以 -- 分隔）。</summary>
     public const string AppIdentifier = "AutoShutdownV2";
 
-    private const string Separator = "::";
+    // Windows Task Scheduler 的任务名最终受 Windows 文件名规则约束；':' 会使
+    // RegisterTaskDefinition 返回 E_INVALIDARG。仅使用合法的普通连字符。
+    private const string Separator = "--";
 
-    /// <summary>稳定任务名：AutoShutdownV2::&lt;taskId:D&gt;。仅由 Guid 组成，天然不含 Windows
-    /// 任务名禁止字符（\ /），无需转义即可安全注册；构建后仍做一次解析回验（fail-closed）。</summary>
+    /// <summary>稳定任务名：AutoShutdownV2--&lt;taskId:D&gt;。名称仅含字母、数字和连字符，
+    /// 不含 Windows 任务名禁止字符；构建后仍做一次解析回验（fail-closed）。</summary>
     public static string BuildTaskName(Guid taskId)
     {
         if (taskId == Guid.Empty)

@@ -31,8 +31,9 @@ public sealed class S22_TaskSchedulerMapperTests
         var id = Guid.NewGuid();
         var name = TaskSyncNaming.BuildTaskName(id);
 
-        Assert.StartsWith(TaskSyncNaming.AppIdentifier + "::", name);
+        Assert.StartsWith(TaskSyncNaming.AppIdentifier + "--", name);
         Assert.Contains(id.ToString("D"), name);
+        Assert.DoesNotContain(name, character => "\\/:*?\"<>|".Contains(character));
 
         Assert.True(TaskSyncNaming.TryParseOwnedTaskName(name, out var parsed));
         Assert.Equal(id, parsed);
@@ -44,9 +45,10 @@ public sealed class S22_TaskSchedulerMapperTests
     [InlineData("   ")]
     [InlineData("SomeOtherApp::task")]
     [InlineData("AutoShutdownV2")]
-    [InlineData("AutoShutdownV2::not-a-guid")]
-    [InlineData("AutoShutdownV2::00000000-0000-0000-0000-000000000000")]
-    [InlineData("AutoShutdownV2::3FA85F64-5717-4562-B3FC-2C963F66AFA6-extra")]
+    [InlineData("AutoShutdownV2::3fa85f64-5717-4562-b3fc-2c963f66afa6")]
+    [InlineData("AutoShutdownV2--not-a-guid")]
+    [InlineData("AutoShutdownV2--00000000-0000-0000-0000-000000000000")]
+    [InlineData("AutoShutdownV2--3FA85F64-5717-4562-B3FC-2C963F66AFA6-extra")]
     public void TryParseOwnedTaskName_RejectsForeignOrMalformedNames(string? name)
     {
         Assert.False(TaskSyncNaming.TryParseOwnedTaskName(name, out _));
