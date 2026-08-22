@@ -15,6 +15,14 @@ public interface IRemoteServerControl
 
     /// <summary>停止监听并关闭所有在途连接。</summary>
     Task StopAsync();
+
+    /// <summary>
+    /// 原子中止当前启动尝试（S-STARTUP-D1-D2）：与监听器发布共享同一同步状态机（临界区，
+    /// 线性化点）。若监听器已发布则立即停止并回收；若尚未发布则记录中止标记，晚到恢复的
+    /// 启动线程在发布临界区内看到标记即放弃发布。保证本方法返回后，被中止的启动尝试绝不
+    /// 可能再发布监听器（fail-closed），且不触碰应用主 CTS。
+    /// </summary>
+    Task AbortStartAsync();
 }
 
 /// <summary>远程活动提示分类（托盘气泡分级：连接为低危、触发/取消为高危）。</summary>

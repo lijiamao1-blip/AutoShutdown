@@ -425,6 +425,12 @@ public sealed class S23_CP5_RemoteSectionTests
             IsRunning = false;
             return Task.CompletedTask;
         }
+
+        public Task AbortStartAsync()
+        {
+            IsRunning = false;
+            return Task.CompletedTask;
+        }
     }
 
     // ================= 服务器通知夹具（真实 TCP/TLS） =================

@@ -53,6 +53,12 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     private CancellationTokenSource? _cts;
     private Task? _acceptLoop;
 
+    // S-STARTUP-D1-D2：启动尝试生成号 + 中止标记。与 _listener 的发布/停止共享同一 _sync
+    // 临界区（原子边界/线性化点）：「取消状态裁决、监听器发布、超时停止」三者线性化在同一把
+    // 锁上，杜绝「超时已确认停止、监听器晚到发布」的 TOCTOU 竞态（见 StartAsync 与 AbortStartAsync）。
+    private int _startGeneration;
+    private bool _startAborted;
+
     public RemoteServer(
         RemoteSettingsStore settingsStore,
         RemoteCertificateService certificateService,
@@ -104,6 +110,13 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     /// </summary>
     public event EventHandler<RemoteServerNotification>? Notification;
 
+    /// <summary>
+    /// 测试门（S-STARTUP-D1-D2）：恰在「最后一次取消检查已通过、_listener 尚未发布」时被
+    /// await，用于确定性复现「超时已确认停止、启动线程晚到恢复」的竞态窗口。生产环境保持
+    /// null（不触发，零行为变化）。
+    /// </summary>
+    internal Func<Task>? BeforePublishAsync { get; set; }
+
     /// <summary>当前是否监听。</summary>
     public bool IsRunning
     {
@@ -122,12 +135,20 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
     /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // S-STARTUP-D1-D2：启动尝试注册。生成号 + 中止标记与监听器发布共享同一 _sync 临界区
+        // （原子边界/线性化点）——「取消状态裁决、监听器发布、超时停止」三者线性化在同一把锁上：
+        //  · 已在监听 → no-op（保持既有语义）；
+        //  · 新尝试 → 递增生成号并清除中止标记（新尝试从干净状态开始；旧尝试靠生成号退出）。
+        int attempt;
         lock (_sync)
         {
             if (_listener is not null)
             {
                 return;
             }
+
+            attempt = ++_startGeneration;
+            _startAborted = false;
         }
 
         var settings = await LoadCurrentSettingsAsync(cancellationToken).ConfigureAwait(false);
@@ -185,24 +206,104 @@ public sealed class RemoteServer : IRemoteServerControl, IDisposable
             return;
         }
 
-        lock (_sync)
+        // S-STARTUP-D1-D2 测试门：恰在「最后一次取消检查已通过、_listener 尚未发布」处暂停启动
+        // 线程，确定性复现「超时已确认停止、启动线程晚到恢复」的竞态窗口（生产环境为 null）。
+        if (BeforePublishAsync is not null)
         {
-            if (_listener is not null)
-            {
-                listener.Stop();
-                return;
-            }
-
-            _listener = listener;
-            _cts = new CancellationTokenSource();
+            await BeforePublishAsync().ConfigureAwait(false);
         }
 
-        var cts = _cts;
-        _acceptLoop = AcceptLoopAsync(cts!.Token);
+        // S-STARTUP-D1-D2：发布临界区（原子边界）。取消状态裁决（中止标记）、监听器发布与超时
+        // 停止全部线性化在 _sync 上：
+        //  · 本次尝试已被超时路径中止（_startAborted）→ 绝不发布，回收本地已启动的 socket；
+        //  · 生成号已过期（更新尝试已开始）→ 放弃本次发布；
+        //  · 已有监听器（并发/后续尝试已发布）→ 放弃本地 socket；
+        //  · 否则原子发布监听器并建立接受循环。
+        TcpListener? discard = null;
+        lock (_sync)
+        {
+            if (attempt != _startGeneration || _startAborted || _listener is not null)
+            {
+                discard = listener;
+            }
+            else
+            {
+                _listener = listener;
+                _cts = new CancellationTokenSource();
+                _acceptLoop = AcceptLoopAsync(_cts.Token);
+            }
+        }
+
+        if (discard is not null)
+        {
+            discard.Stop();
+            _logger.Info("RemoteServer", "远程控制启动已中止或被新尝试取代；不监听。");
+            return;
+        }
+
         _logger.Info(
             "RemoteServer",
             "远程控制已启动：" + settings.ListenAddress + ":" + settings.ListenPort
             + "，TLS=" + (settings.RequireTls ? "required" : "optional") + "。");
+    }
+
+    /// <summary>
+    /// 原子中止当前启动尝试（S-STARTUP-D1-D2）。与 <see cref="StartAsync"/> 的监听器发布共享
+    /// 同一 <see cref="_sync"/> 临界区（线性化点）：
+    /// <list type="bullet">
+    /// <item>若监听器已在竞态窗口内发布 → 在临界区内捕获并置空，随后停止 socket、取消接受循环
+    /// 并等待其结束（回收）；</item>
+    /// <item>若尚未发布 → 记录中止标记，晚到恢复的启动线程在发布临界区内看到标记即放弃发布，
+    /// 绝不晚到监听（fail-closed）。</item>
+    /// </list>
+    /// 本方法返回后，被中止的启动尝试绝不可能再发布监听器；只取消远程启动，不触碰应用主 CTS。
+    /// 由 <see cref="RemoteStartController"/> 在启动超时路径调用。
+    /// </summary>
+    public async Task AbortStartAsync()
+    {
+        TcpListener? listener;
+        CancellationTokenSource? cts;
+        Task? acceptLoop;
+        lock (_sync)
+        {
+            listener = _listener;
+            cts = _cts;
+            acceptLoop = _acceptLoop;
+            _listener = null;
+            _cts = null;
+            _acceptLoop = null;
+            _startAborted = true;
+        }
+
+        if (listener is not null)
+        {
+            try
+            {
+                listener.Stop();
+            }
+            catch (SocketException)
+            {
+            }
+        }
+
+        if (cts is not null)
+        {
+            cts.Cancel();
+        }
+
+        if (acceptLoop is not null)
+        {
+            try
+            {
+                await acceptLoop.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        cts?.Dispose();
+        _logger.Info("RemoteServer", "远程控制启动已被中止；不监听。");
     }
 
     /// <summary>停止监听并关闭所有在途连接。</summary>

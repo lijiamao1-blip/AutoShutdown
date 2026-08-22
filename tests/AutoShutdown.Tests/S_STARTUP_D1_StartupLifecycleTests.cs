@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using AutoShutdown.App;
@@ -310,7 +312,7 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
             var logger = new RecordingLogger();
 
             // 超时很短：StartBounded 必须在有界时间内返回并确认不监听。
-            RemoteStartController.StartBounded(server, logger, CancellationToken.None, TimeSpan.FromMilliseconds(200));
+            _ = RemoteStartController.StartBounded(server, logger, CancellationToken.None, TimeSpan.FromMilliseconds(200));
 
             Assert.False(server.IsRunning, "远程启动超时后必须保持不监听。");
             Assert.Contains(logger.Entries, e => e == "RemoteStartTimedOut");
@@ -324,6 +326,94 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
             {
                 Assert.False(server.IsRunning, "底层阻塞解除后也绝不进入监听（fail-closed）。");
                 await Task.Delay(50);
+            }
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    // --- S-STARTUP-D1-D2：确定性竞态回归——超时已确认停止后，晚到恢复的启动线程绝不发布监听器 ---
+    // 覆盖总顾问复验指出的 TOCTOU 竞态：最后一次取消检查已通过、_listener 尚未发布的窗口内，
+    // 控制器超时并确认停止后，启动线程晚到恢复也不得再发布监听器（fail-closed，确定性测试门）。
+
+    [Fact]
+    public async Task RemoteStart_OnTimeout_PublishGate_AbortedAttemptNeverPublishes_AndResourcesReleased()
+    {
+        const int port = 48733;
+        var root = NewTempRoot();
+        try
+        {
+            var settings = JsonSerializer.SerializeToElement(new RemoteSettingsDocument
+            {
+                Enabled = true,
+                ListenAddress = "127.0.0.1",
+                ListenPort = port,
+                RequireTls = false
+            });
+
+            // 设置读取立即返回（不阻塞）：让启动线程顺利通过取消检查点并创建监听器，
+            // 精确停在发布门前（测试门），确定性复现竞态窗口。
+            var services = new ServiceCollection();
+            services.AddAutoShutdownServices(root);
+            services.AddSingleton(new RemoteSettingsStore(
+                new BlockingRemoteSettingsStorage(Task.CompletedTask, settings)));
+            await using var provider = services.BuildServiceProvider();
+
+            var server = provider.GetRequiredService<RemoteServer>();
+            var logger = new RecordingLogger();
+
+            // 测试门：恰在「最后一次取消检查已通过、_listener 尚未发布」处阻塞启动线程。
+            var gateEntered = new TaskCompletionSource();
+            var releaseStart = new TaskCompletionSource();
+            server.BeforePublishAsync = async () =>
+            {
+                gateEntered.SetResult();
+                await releaseStart.Task;
+            };
+
+            Task? remoteTask = null;
+            try
+            {
+                // 超时很短：StartBounded 必须超时返回并确认不监听（返回被监督的底层启动任务）。
+                remoteTask = RemoteStartController.StartBounded(
+                    server, logger, CancellationToken.None, TimeSpan.FromMilliseconds(200));
+
+                // 先确认启动线程已确定性停在发布门前，且控制器已返回并保持不监听。
+                await gateEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(server.IsRunning, "控制器返回后必须保持不监听。");
+                Assert.Contains(logger.Entries, e => e == "RemoteStartTimedOut");
+            }
+            finally
+            {
+                // 再放行启动线程（即使断言失败也不泄漏后台任务）。
+                releaseStart.SetResult();
+            }
+
+            // 后台启动任务最终结束（有界等待；独立 CTS 由延迟释放收尾）。
+            Assert.NotNull(remoteTask);
+            await remoteTask!.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // 持续有界检查：IsRunning 始终为 false（超时中止后，晚到恢复的启动线程绝不发布）。
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                Assert.False(server.IsRunning, "超时中止后，晚到恢复的启动线程绝不发布监听器（fail-closed）。");
+                await Task.Delay(50);
+            }
+
+            // 验证没有监听端口：连接必须被拒绝（监听器已回收）。
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                using var client = new TcpClient();
+                await client.ConnectAsync("127.0.0.1", port);
+            });
+
+            // 资源被释放：同一端口可被重新绑定（旧 socket 已关闭回收）。
+            using (var probe = new TcpListener(IPAddress.Loopback, port))
+            {
+                probe.Start();
             }
         }
         finally
