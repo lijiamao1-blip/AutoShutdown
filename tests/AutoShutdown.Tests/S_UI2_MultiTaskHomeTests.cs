@@ -743,14 +743,18 @@ public sealed class S_UI2_MultiTaskHomeTests
     // ======================================================================================
 
     [Fact]
-    public void Homepage_OuterContainer_IsGrid_NoHomeScrollViewer()
+    public void Homepage_IsScrollable_AndRecentActivityKeepsItsOwnScrollbar()
     {
-        // 首页最外层是 Grid（非 ScrollViewer，无首页整体滚动条）。
+        // 低高度下首页整体可滚动，避免创建按钮被裁切；最近活动列表仍限制高度并独立滚动。
         var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
 
-        Assert.StartsWith("<Grid ", home.TrimStart());
-        // 首页全区块不含显式 ScrollViewer；最近活动仅使用 ListBox 自身的内部滚动。
-        Assert.DoesNotContain("<ScrollViewer", home);
+        Assert.StartsWith("<ScrollViewer ", home.TrimStart());
+        Assert.Contains("x:Name=\"HomePageScrollViewer\"", home);
+        Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", home);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", home);
+        Assert.Contains("Content=\"创建任务\"", home);
+        Assert.Contains("MaxHeight=\"240\"", home);
+        Assert.Contains("ScrollViewer.VerticalScrollBarVisibility=\"Auto\"", home);
     }
 
     [Fact]

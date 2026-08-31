@@ -1,6 +1,6 @@
 # 电脑自动关机助手 AutoShutdown
 
-AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.10**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
+AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.12**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
 
 > 本软件能够执行真实系统电源操作。首次使用请先保存重要文件，并认真阅读下面的安全提醒。
 
@@ -70,7 +70,7 @@ dotnet test .\AutoShutdown.sln --configuration Release --no-build
 生成发布候选包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.10 -Step S24 -Build release
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.12 -Step S24 -Build release
 ```
 
 ## 项目结构
@@ -83,4 +83,4 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 
 ## 当前版本
 
-**v2.0.10** — 改进多应用关闭与强制关机可靠性，完善日期和工作日说明，并统一任务管理及设置页按钮样式。
+**v2.0.12** — 修复 1080P 等较低高度显示器上首页内容被截断的问题，并恢复“最近活动”区域的独立滚动条。

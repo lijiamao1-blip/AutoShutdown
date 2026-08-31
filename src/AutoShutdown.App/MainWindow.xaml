@@ -95,7 +95,10 @@
                 <Grid Grid.Column="1">
 
                     <!-- 首页：左侧完整创建表单；右侧当前任务与最近活动按 2:1 分配高度。 -->
-                    <Grid Grid.Column="1" Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}">
+                    <ScrollViewer x:Name="HomePageScrollViewer" Grid.Column="1"
+                                  Visibility="{Binding IsHomeVisible, Converter={StaticResource BoolToVisibility}}"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.06*"/>
                             <ColumnDefinition Width="12"/>
@@ -366,7 +369,7 @@
                                         <RowDefinition Height="*"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Text="最近活动" Style="{StaticResource CardTitleStyle}" FontSize="15" Margin="0,0,0,8"/>
-                                    <ListBox Grid.Row="1" ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MinHeight="60"
+                                    <ListBox Grid.Row="1" ItemsSource="{Binding RecentActivities}" Style="{StaticResource ActivityListStyle}" MinHeight="60" MaxHeight="240"
                                              ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                         <ListBox.ItemTemplate><DataTemplate><TextBlock Margin="0,3"><Run Text="{Binding Time}" Foreground="#52678A"/><Run Text="   "/><Run Text="{Binding Text}" Foreground="#273A5D"/></TextBlock></DataTemplate></ListBox.ItemTemplate>
                                     </ListBox>
@@ -374,6 +377,7 @@
                             </Border>
                         </Grid>
                     </Grid>
+                    </ScrollViewer>
 
                     <!-- 任务管理页 -->
                     <ScrollViewer Grid.Column="1" Visibility="{Binding IsTasksPageVisible, Converter={StaticResource BoolToVisibility}}"
