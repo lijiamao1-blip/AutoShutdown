@@ -88,12 +88,22 @@ public sealed class CloseAppsService
             return new CloseAppsReport { TargetCount = 0, Succeeded = true };
         }
 
-        var results = new List<CloseAppTargetResult>(targets.Count);
-        foreach (var target in targets)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            results.Add(CloseTarget(target, cancellationToken));
-        }
+        // 各目标互不依赖。并行执行可避免 N 个目标把逐目标等待上限累加成 N×30 秒，
+        // 同时仍保留每个目标自己的有界等待、身份复核和取消语义。
+        const int maxConcurrentTargets = 8;
+        var results = new CloseAppTargetResult[targets.Count];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, targets.Count),
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = maxConcurrentTargets
+            },
+            (index, token) =>
+            {
+                results[index] = CloseTarget(targets[index], token);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
 
         var succeeded = results.All(result => result.Succeeded);
         return new CloseAppsReport
@@ -101,6 +111,7 @@ public sealed class CloseAppsService
             TargetCount = targets.Count,
             Results = results,
             Succeeded = succeeded,
+            ContinueToPower = !succeeded && config.CloseApps.ForceSystemShutdownIfAppsBlock,
             Summary = succeeded ? string.Empty : BuildSummary(results)
         };
     }
@@ -108,6 +119,20 @@ public sealed class CloseAppsService
     private CloseAppTargetResult CloseTarget(CloseAppTarget target, CancellationToken cancellationToken)
     {
         var candidates = Resolve(target);
+
+        // 一个可执行路径常对应“主窗口 + 多个无窗口后台子进程”（浏览器/WebView2 等）。
+        // 只要同路径下存在可关闭的主窗口，就只向这些窗口进程发送 WM_CLOSE；无窗口兄弟
+        // 不应把整条关机任务判为失败。PID 精确目标仍保持原有严格语义。
+        if (target.ExecutablePath is not null && candidates.Count > 1)
+        {
+            var windowed = candidates
+                .Where(candidate => _windowManager.HasMainWindow(candidate.ProcessId))
+                .ToList();
+            if (windowed.Count > 0)
+            {
+                candidates = windowed;
+            }
+        }
 
         if (candidates.Count == 0)
         {

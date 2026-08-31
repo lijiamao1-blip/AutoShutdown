@@ -80,6 +80,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<bool>? _cancelConfirmation;
     private readonly Func<bool>? _realPowerConfirmation;
     private readonly Func<bool>? _closeAppsForceKillConfirmation;
+    private readonly Func<bool>? _closeAppsClearAllConfirmation;
     private readonly IUnattendedPolicyService? _unattendedPolicy;
     private readonly Func<bool>? _unattendedEnableConfirmation;
     private readonly Func<bool>? _unattendedEnableSecondConfirmation;
@@ -130,7 +131,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ITaskService? taskService = null,
         IIdleMonitor? idleMonitor = null,
         IProcessInfoProvider? processInfoProvider = null,
-        Func<ProcessPickerViewModel, ProcessPickerResult?>? processPickerLauncher = null)
+        Func<ProcessPickerViewModel, ProcessPickerResult?>? processPickerLauncher = null,
+        Func<bool>? closeAppsClearAllConfirmation = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -147,6 +149,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _cancelConfirmation = cancelConfirmation;
         _realPowerConfirmation = realPowerConfirmation;
         _closeAppsForceKillConfirmation = closeAppsForceKillConfirmation;
+        _closeAppsClearAllConfirmation = closeAppsClearAllConfirmation;
         _unattendedPolicy = unattendedPolicy;
         _unattendedEnableConfirmation = unattendedEnableConfirmation;
         _unattendedEnableSecondConfirmation = unattendedEnableSecondConfirmation;
@@ -208,6 +211,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 CloseAppsTargets.Remove(row);
             }
         });
+        ClearAllCloseAppsTargetsCommand = new RelayCommand(ClearAllCloseAppsTargets);
         SaveCloseAppsCommand = new AsyncRelayCommand(ExecuteSaveCloseAppsAsync);
         OpenProcessPickerCommand = new RelayCommand(_ => OpenProcessPicker());
         ReSelectCloseAppsTargetCommand = new RelayCommand(parameter =>
@@ -707,10 +711,15 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _nthWorkdayIndex, value))
             {
+                OnPropertyChanged(nameof(NthWorkdayExplanationText));
                 RefreshCreateState();
             }
         }
     }
+
+    public string NthWorkdayExplanationText =>
+        $"你当前选择：每个月从1号开始，跳过周六、周日和下方填写的例外日期，"
+        + $"数到第 {NthWorkdayIndex + 1} 个工作日时，在上方设置的时间执行任务。";
 
     private DateTime? _oneTimeDate;
 
@@ -1386,6 +1395,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RemoveCloseAppsTargetCommand { get; }
 
+    public ICommand ClearAllCloseAppsTargetsCommand { get; }
+
     public AsyncRelayCommand SaveCloseAppsCommand { get; }
 
     public ICommand OpenProcessPickerCommand { get; }
@@ -1895,6 +1906,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<CloseAppsTargetRow> CloseAppsTargets { get; } = [];
 
+    private bool _forceSystemShutdownIfAppsBlock;
+
+    public bool ForceSystemShutdownIfAppsBlock
+    {
+        get => _forceSystemShutdownIfAppsBlock;
+        set
+        {
+            if (value && !_forceSystemShutdownIfAppsBlock && !ConfirmForceSystemShutdown())
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            SetProperty(ref _forceSystemShutdownIfAppsBlock, value);
+        }
+    }
+
     private string _closeAppsTargetInputText = string.Empty;
 
     public string CloseAppsTargetInputText
@@ -1939,6 +1967,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private void RefreshCloseAppsTargets()
     {
         CloseAppsTargets.Clear();
+        _forceSystemShutdownIfAppsBlock = _loadedConfig?.CloseApps?.ForceSystemShutdownIfAppsBlock == true;
+        OnPropertyChanged(nameof(ForceSystemShutdownIfAppsBlock));
         if (_loadedConfig?.CloseApps?.Targets is { } targets)
         {
             foreach (var target in targets)
@@ -2008,6 +2038,34 @@ public sealed class MainWindowViewModel : ObservableObject
         CloseAppsStatusText = string.Empty;
     }
 
+    private void ClearAllCloseAppsTargets()
+    {
+        if (CloseAppsTargets.Count == 0 || !ConfirmClearAllCloseAppsTargets())
+        {
+            return;
+        }
+
+        CloseAppsTargets.Clear();
+        CloseAppsErrorText = string.Empty;
+        CloseAppsStatusText = "已移除全部目标，请点击“保存关闭应用设置”永久保存";
+    }
+
+    private bool ConfirmClearAllCloseAppsTargets()
+    {
+        if (_closeAppsClearAllConfirmation is not null)
+        {
+            return _closeAppsClearAllConfirmation();
+        }
+
+        return System.Windows.MessageBox.Show(
+            $"确定从关闭应用列表中移除全部 {CloseAppsTargets.Count} 个目标吗？\n"
+            + "确认后还需要点击“保存关闭应用设置”才会永久生效。",
+            "一键移除全部关闭目标",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+    }
+
     private async Task ExecuteSaveCloseAppsAsync()
     {
         if (_loadedConfig is null)
@@ -2041,6 +2099,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var closeApps = new CloseAppsConfig
         {
             GracefulTimeoutSeconds = _loadedConfig.CloseApps?.GracefulTimeoutSeconds ?? 30,
+            ForceSystemShutdownIfAppsBlock = ForceSystemShutdownIfAppsBlock,
             Targets = targets.ToArray()
         };
 
@@ -2085,6 +2144,22 @@ public sealed class MainWindowViewModel : ObservableObject
             "启用强杀（关闭应用）",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning) == MessageBoxResult.OK;
+    }
+
+    private bool ConfirmForceSystemShutdown()
+    {
+        if (_closeAppsForceKillConfirmation is not null)
+        {
+            return _closeAppsForceKillConfirmation();
+        }
+
+        return System.Windows.MessageBox.Show(
+            "开启后，Windows 会在关机或重启时强制结束无响应的软件。\n"
+            + "未保存的文档和数据可能丢失。是否确认开启？",
+            "启用最终强制关机",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     // ---- 从运行中的进程选择（S-CLOSEUI1） ----

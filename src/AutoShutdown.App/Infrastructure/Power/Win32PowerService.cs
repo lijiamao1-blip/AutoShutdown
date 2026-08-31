@@ -28,8 +28,8 @@ public sealed class Win32PowerService : IPowerService
 
         var (succeeded, nativeErrorCode) = request.Action switch
         {
-            PowerAction.Shutdown => _native.Shutdown(),
-            PowerAction.Restart => _native.Restart(),
+            PowerAction.Shutdown => _native.Shutdown(request.ForceIfHung),
+            PowerAction.Restart => _native.Restart(request.ForceIfHung),
             PowerAction.Sleep => _native.Sleep(),
             PowerAction.Hibernate => _native.Hibernate(),
             _ => (false, null)

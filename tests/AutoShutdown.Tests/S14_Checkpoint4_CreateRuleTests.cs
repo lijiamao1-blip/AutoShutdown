@@ -102,6 +102,16 @@ public sealed class S14_Checkpoint4_CreateRuleTests
     }
 
     [Fact]
+    public void NthWorkdayExplanation_UsesCurrentlySelectedOrdinal()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.NthWorkdayIndex = 3;
+
+        Assert.Contains("第 4 个工作日", viewModel.NthWorkdayExplanationText);
+        Assert.Contains("跳过周六、周日", viewModel.NthWorkdayExplanationText);
+    }
+
+    [Fact]
     public void TryBuildDefinition_OneTime_BuildsDateTimeFromDateAndTime()
     {
         var viewModel = CreateViewModel();

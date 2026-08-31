@@ -7,9 +7,9 @@ namespace AutoShutdown.App.Infrastructure.Power;
 /// </summary>
 public interface IPowerNativeApi
 {
-    (bool Succeeded, int? NativeErrorCode) Shutdown();
+    (bool Succeeded, int? NativeErrorCode) Shutdown(bool forceIfHung = false);
 
-    (bool Succeeded, int? NativeErrorCode) Restart();
+    (bool Succeeded, int? NativeErrorCode) Restart(bool forceIfHung = false);
 
     (bool Succeeded, int? NativeErrorCode) Sleep();
 

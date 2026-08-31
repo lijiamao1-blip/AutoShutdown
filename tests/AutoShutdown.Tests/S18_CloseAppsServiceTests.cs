@@ -46,6 +46,28 @@ public sealed class S18_CloseAppsServiceTests
     }
 
     [Fact]
+    public async Task SamePathWithWindowAndBackgroundWorkers_ClosesWindowOnly_WithoutFailingTarget()
+    {
+        var processes = new FakeProcessManager
+        {
+            Processes = [Process(100), Process(101), Process(102)]
+        };
+        var window = new FakeAppWindowManager
+        {
+            HasMainWindowFunc = pid => pid == 100
+        };
+        var service = new CloseAppsService(
+            new FakeConfigurationService(Success(PathConfig(NotepadPath))), processes, window);
+
+        var report = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.True(report.Succeeded);
+        var result = Assert.Single(report.Results);
+        Assert.Equal(1, result.MatchedCount);
+        Assert.Single(window.RequestCloseCalls, 100);
+    }
+
+    [Fact]
     public async Task PidTarget_MatchesExactly()
     {
         var processes = new FakeProcessManager { Processes = [Process(100), Process(200)] };
@@ -704,6 +726,46 @@ public sealed class S18_CloseAppsServiceTests
 
         Assert.Equal(TimeSpan.FromSeconds(5), passed);
         Assert.Empty(window.ForceKillCalls);
+    }
+
+    [Fact]
+    public async Task MoreThanSixTargets_AreWaitedConcurrently_InsteadOfAccumulatingTimeouts()
+    {
+        var paths = Enumerable.Range(1, 7).Select(i => $@"C:\Apps\App{i}.exe").ToArray();
+        var processes = new FakeProcessManager
+        {
+            Processes = paths.Select((path, i) => Process(200 + i, path, name: $"app{i + 1}.exe")).ToList()
+        };
+        var active = 0;
+        var maximum = 0;
+        var window = new FakeAppWindowManager
+        {
+            WaitForExitFunc = (_, _, _) =>
+            {
+                var current = Interlocked.Increment(ref active);
+                int observed;
+                do
+                {
+                    observed = Volatile.Read(ref maximum);
+                } while (current > observed
+                    && Interlocked.CompareExchange(ref maximum, current, observed) != observed);
+                Thread.Sleep(40);
+                Interlocked.Decrement(ref active);
+                return ProcessWaitResult.Exited;
+            }
+        };
+        var config = BaseConfig(new CloseAppsConfig
+        {
+            GracefulTimeoutSeconds = 30,
+            Targets = paths.Select(path => new CloseAppsTargetConfig { ExecutablePath = path }).ToArray()
+        });
+        var service = new CloseAppsService(new FakeConfigurationService(Success(config)), processes, window);
+
+        var result = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(7, result.TargetCount);
+        Assert.True(maximum > 1, "Multiple application waits should overlap.");
     }
 
     private static AppConfig PathConfig(string path, bool forceKill = false) =>

@@ -89,6 +89,21 @@ public sealed class S12_5Win32PowerContractTests
         Assert.Equal(1, native.CallCount);
     }
 
+    [Theory]
+    [InlineData(PowerAction.Shutdown)]
+    [InlineData(PowerAction.Restart)]
+    public async Task Win32PowerService_ForwardsForceIfHung_ForShutdownAndRestart(PowerAction action)
+    {
+        var native = new RecordingNativeApi();
+        var service = new Win32PowerService(native);
+
+        await service.ExecuteAsync(
+            new PowerRequest { Action = action, ForceIfHung = true },
+            CancellationToken.None);
+
+        Assert.True(native.LastForceIfHung);
+    }
+
     // ---- 5. Unknown 动作返回 Rejected，不调用原生 ----
 
     [Fact]
@@ -134,6 +149,8 @@ public sealed class S12_5Win32PowerContractTests
 
         public int CallCount { get; private set; }
 
+        public bool LastForceIfHung { get; private set; }
+
         private (bool, int?) Invoke(PowerAction action)
         {
             LastAction = action;
@@ -141,9 +158,17 @@ public sealed class S12_5Win32PowerContractTests
             return (Succeed, Succeed ? null : ErrorCode);
         }
 
-        public (bool Succeeded, int? NativeErrorCode) Shutdown() => Invoke(PowerAction.Shutdown);
+        public (bool Succeeded, int? NativeErrorCode) Shutdown(bool forceIfHung = false)
+        {
+            LastForceIfHung = forceIfHung;
+            return Invoke(PowerAction.Shutdown);
+        }
 
-        public (bool Succeeded, int? NativeErrorCode) Restart() => Invoke(PowerAction.Restart);
+        public (bool Succeeded, int? NativeErrorCode) Restart(bool forceIfHung = false)
+        {
+            LastForceIfHung = forceIfHung;
+            return Invoke(PowerAction.Restart);
+        }
 
         public (bool Succeeded, int? NativeErrorCode) Sleep() => Invoke(PowerAction.Sleep);
 

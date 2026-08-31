@@ -11,6 +11,11 @@ public sealed record CloseAppsConfig
     /// <summary>全局优雅关闭等待期限（秒）。默认 30。</summary>
     public int GracefulTimeoutSeconds { get; init; } = 30;
 
+    /// <summary>
+    /// 关机/重启时让 Windows 在应用无响应后强制完成退出。默认关闭；开启后未保存工作可能丢失。
+    /// </summary>
+    public bool ForceSystemShutdownIfAppsBlock { get; init; }
+
     public CloseAppsTargetConfig[] Targets { get; init; } = [];
 }
 

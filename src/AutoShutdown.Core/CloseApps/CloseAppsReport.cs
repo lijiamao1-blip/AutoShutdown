@@ -14,5 +14,10 @@ public sealed record CloseAppsReport
 
     public bool Succeeded { get; init; }
 
+    /// <summary>
+    /// 目标关闭存在失败时，是否因用户已明确开启“最终强制完成系统关机”而允许电源流程继续。
+    /// </summary>
+    public bool ContinueToPower { get; init; }
+
     public string Summary { get; init; } = string.Empty;
 }

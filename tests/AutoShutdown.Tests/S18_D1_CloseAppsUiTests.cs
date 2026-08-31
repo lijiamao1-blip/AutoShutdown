@@ -183,6 +183,35 @@ public sealed class S18_D1_CloseAppsUiTests
         Assert.Empty(viewModel.CloseAppsTargets);
     }
 
+    [Fact]
+    public async Task ClearAllTargets_Confirmed_ClearsListButDoesNotPersistUntilSave()
+    {
+        var config = new RecordingConfigurationService(ConfigWithCloseApps(
+            new CloseAppsTargetConfig { ExecutablePath = NotepadPath },
+            new CloseAppsTargetConfig { ProcessId = 4321 }));
+        var viewModel = CreateViewModel(config, closeAppsClearAllConfirmation: () => true);
+        await viewModel.InitializeAsync();
+
+        viewModel.ClearAllCloseAppsTargetsCommand.Execute(null);
+
+        Assert.Empty(viewModel.CloseAppsTargets);
+        Assert.Empty(config.SavedConfigs);
+        Assert.Contains("保存关闭应用设置", viewModel.CloseAppsStatusText);
+    }
+
+    [Fact]
+    public async Task ClearAllTargets_Cancelled_KeepsList()
+    {
+        var viewModel = CreateViewModel(
+            ConfigWithCloseApps(new CloseAppsTargetConfig { ExecutablePath = NotepadPath }),
+            closeAppsClearAllConfirmation: () => false);
+        await viewModel.InitializeAsync();
+
+        viewModel.ClearAllCloseAppsTargetsCommand.Execute(null);
+
+        Assert.Single(viewModel.CloseAppsTargets);
+    }
+
     // ---- 保存：逐目标强杀授权持久化 ----
 
     [Fact]
@@ -248,14 +277,17 @@ public sealed class S18_D1_CloseAppsUiTests
 
     private static MainWindowViewModel CreateViewModel(
         AppConfig config,
-        Func<bool>? closeAppsForceKillConfirmation = null)
+        Func<bool>? closeAppsForceKillConfirmation = null,
+        Func<bool>? closeAppsClearAllConfirmation = null)
         => CreateViewModel(
             new RecordingConfigurationService(config),
-            closeAppsForceKillConfirmation);
+            closeAppsForceKillConfirmation,
+            closeAppsClearAllConfirmation);
 
     private static MainWindowViewModel CreateViewModel(
         RecordingConfigurationService config,
-        Func<bool>? closeAppsForceKillConfirmation = null)
+        Func<bool>? closeAppsForceKillConfirmation = null,
+        Func<bool>? closeAppsClearAllConfirmation = null)
         => new(
             new RunningEngine(),
             config,
@@ -265,7 +297,8 @@ public sealed class S18_D1_CloseAppsUiTests
             autoStartConfirmation: () => true,
             cancelConfirmation: () => true,
             realPowerConfirmation: () => true,
-            closeAppsForceKillConfirmation: closeAppsForceKillConfirmation);
+            closeAppsForceKillConfirmation: closeAppsForceKillConfirmation,
+            closeAppsClearAllConfirmation: closeAppsClearAllConfirmation);
 
     private sealed class RunningEngine : ISchedulerEngine
     {

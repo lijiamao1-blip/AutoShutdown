@@ -113,7 +113,8 @@
                                 <RadioButton Content="每天固定时间" IsChecked="{Binding ModeIsDailyAt}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                 <RadioButton Content="每周指定星期" IsChecked="{Binding ModeIsWeekdays}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                 <RadioButton Content="下个工作日" IsChecked="{Binding ModeIsNextWorkday}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
-                                <RadioButton Content="每月第N个工作日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
+                                <RadioButton Content="每月第几个上班日" IsChecked="{Binding ModeIsNthWorkdayOfMonth}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"
+                                             ToolTip="例如选择第1个：如果1号是工作日就在1号执行；如果1号是周末，就顺延到星期一。"/>
                                 <RadioButton Content="一次性指定" IsChecked="{Binding ModeIsOneTime}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                                 <RadioButton Content="空闲触发" IsChecked="{Binding ModeIsIdle}" GroupName="TimeMode" Style="{StaticResource SegmentRadioStyle}"/>
                             </WrapPanel>
@@ -135,11 +136,66 @@
                                                         <TextBlock Text="执行日期" Style="{StaticResource MicroLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                                         <DatePicker Grid.Column="1" SelectedDate="{Binding OneTimeDate}" DisplayDateStart="{Binding OneTimeDisplayDateStart, Mode=OneWay}"
                                                                     HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                            <DatePicker.Resources>
+                                                                <Style x:Key="LargeCalendarDayStyle" TargetType="CalendarDayButton">
+                                                                    <Setter Property="FontSize" Value="14"/>
+                                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                    <Setter Property="MinWidth" Value="36"/>
+                                                                    <Setter Property="MinHeight" Value="34"/>
+                                                                    <Setter Property="Margin" Value="2"/>
+                                                                    <Setter Property="Foreground" Value="#243B5A"/>
+                                                                    <Setter Property="Background" Value="Transparent"/>
+                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                    <Setter Property="BorderThickness" Value="1"/>
+                                                                    <Setter Property="Template">
+                                                                        <Setter.Value>
+                                                                            <ControlTemplate TargetType="CalendarDayButton">
+                                                                                <Border x:Name="DaySurface" CornerRadius="8"
+                                                                                        Background="{TemplateBinding Background}"
+                                                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                                                        BorderThickness="{TemplateBinding BorderThickness}">
+                                                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                                </Border>
+                                                                                <ControlTemplate.Triggers>
+                                                                                    <Trigger Property="IsInactive" Value="True">
+                                                                                        <Setter Property="Foreground" Value="#A2AEC0"/>
+                                                                                    </Trigger>
+                                                                                    <Trigger Property="IsToday" Value="True">
+                                                                                        <Setter TargetName="DaySurface" Property="BorderBrush" Value="#2F80ED"/>
+                                                                                        <Setter Property="Foreground" Value="#1B63C6"/>
+                                                                                    </Trigger>
+                                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                                        <Setter TargetName="DaySurface" Property="Background" Value="#DCEEFF"/>
+                                                                                    </Trigger>
+                                                                                    <Trigger Property="IsSelected" Value="True">
+                                                                                        <Setter TargetName="DaySurface" Property="Background" Value="#2F80ED"/>
+                                                                                        <Setter TargetName="DaySurface" Property="BorderBrush" Value="#1D68C9"/>
+                                                                                        <Setter Property="Foreground" Value="White"/>
+                                                                                    </Trigger>
+                                                                                    <Trigger Property="IsBlackedOut" Value="True">
+                                                                                        <Setter Property="Opacity" Value="0.35"/>
+                                                                                    </Trigger>
+                                                                                </ControlTemplate.Triggers>
+                                                                            </ControlTemplate>
+                                                                        </Setter.Value>
+                                                                    </Setter>
+                                                                </Style>
+                                                            </DatePicker.Resources>
                                                             <DatePicker.CalendarStyle>
                                                                 <Style TargetType="Calendar">
-                                                                    <Setter Property="FontSize" Value="15"/>
-                                                                    <Setter Property="Width" Value="300"/>
-                                                                    <Setter Property="Height" Value="264"/>
+                                                                    <Setter Property="FontSize" Value="14"/>
+                                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                    <Setter Property="Width" Value="320"/>
+                                                                    <Setter Property="Height" Value="280"/>
+                                                                    <Setter Property="Background" Value="#F8FBFF"/>
+                                                                    <Setter Property="BorderBrush" Value="#98C4F5"/>
+                                                                    <Setter Property="BorderThickness" Value="1"/>
+                                                                    <Setter Property="CalendarDayButtonStyle" Value="{StaticResource LargeCalendarDayStyle}"/>
+                                                                    <Setter Property="LayoutTransform">
+                                                                        <Setter.Value>
+                                                                            <ScaleTransform ScaleX="1.25" ScaleY="1.25"/>
+                                                                        </Setter.Value>
+                                                                    </Setter>
                                                                 </Style>
                                                             </DatePicker.CalendarStyle>
                                                         </DatePicker>
@@ -168,8 +224,18 @@
                                                     </WrapPanel>
                                                 </StackPanel>
                                                 <StackPanel Margin="0,8,0,0" Visibility="{Binding IsNthWorkdaySelectorVisible, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="每月第几个工作日" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
+                                                    <TextBlock Text="选择每个月第几个上班日执行" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,6"/>
                                                     <ComboBox Style="{StaticResource InputComboStyle}" ItemsSource="{Binding NthWorkdayOptions}" SelectedIndex="{Binding NthWorkdayIndex}" HorizontalAlignment="Stretch"/>
+                                                    <Border Background="#EAF4FF" BorderBrush="#A9CFF7" BorderThickness="1" CornerRadius="10" Padding="12,9" Margin="0,8,0,0">
+                                                        <StackPanel>
+                                                            <TextBlock Text="怎么使用" FontSize="12" FontWeight="SemiBold" Foreground="#1D5FA7" Margin="0,0,0,4"/>
+                                                            <TextBlock Text="① 先在上面选择执行时间。&#10;② 再选择第几个工作日。工作日只计算星期一到星期五，周六、周日不算。&#10;③ 如果遇到法定节假日，请把日期填写到下方例外日期中，软件会继续往后数。"
+                                                                       FontSize="11" Foreground="#425D7A" TextWrapping="Wrap"/>
+                                                            <TextBlock Text="{Binding NthWorkdayExplanationText}" FontSize="11" FontWeight="SemiBold" Foreground="#174F8C" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                                            <TextBlock Text="例子：选择“第1个工作日”。如果本月1号是星期六，软件会跳过1号、2号，在3号星期一执行。"
+                                                                       FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                    </Border>
                                                 </StackPanel>
                                             </StackPanel>
                                             <StackPanel Visibility="{Binding IsIdleSelectorVisible, Converter={StaticResource BoolToVisibility}}">
@@ -181,9 +247,16 @@
                                     </Border>
                                     <Border Style="{StaticResource InnerPanelStyle}" Margin="0,0,0,8" Visibility="{Binding IsHolidayInputVisible, Converter={StaticResource BoolToVisibility}}">
                                         <StackPanel>
-                                            <TextBlock Text="例外日历（节假日）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
-                                            <TextBlock Text="每行一个日期（yyyy-MM-dd），这些日期不执行；留空表示无例外。" FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="46" VerticalScrollBarVisibility="Auto"/>
+                                            <TextBlock Text="例外日期（这些日期跳过任务，不会执行关机）" Style="{StaticResource MicroLabelStyle}" Margin="0,0,0,4"/>
+                                            <TextBlock FontSize="11" Foreground="#536985" TextWrapping="Wrap" Margin="0,0,0,6">
+                                                <Run Text="填写格式：每行填写一个完整日期，必须使用 年-月-日 格式（yyyy-MM-dd），不能使用逗号或空格分隔。每输入一个日期后，按回车键换行，再输入下一个日期；继续按回车键换行并输入下一个日期，依次类推。&#10;"/>
+                                                <Run Text="示例：&#10;2026-10-01&#10;2026-10-02&#10;"/>
+                                                <Run Text="上面的示例表示 10月1日、10月2日不执行当前任务。留空表示每天按原计划执行，没有例外日期。"/>
+                                            </TextBlock>
+                                            <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding HolidayDatesText, UpdateSourceTrigger=PropertyChanged}"
+                                                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="68" VerticalScrollBarVisibility="Auto"
+                                                     ToolTip="每行一个日期，例如：2026-10-01（该日期将跳过任务）"
+                                                     AutomationProperties.HelpText="每行一个日期，格式为四位年份-两位月份-两位日期，例如2026-10-01；这些日期不执行任务。"/>
                                         </StackPanel>
                                     </Border>
                                     <TextBlock Text="电源动作（5 种）" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,5"/>
@@ -275,7 +348,7 @@
                                     <WrapPanel>
                                         <Button Content="延迟 10 分钟" Style="{StaticResource SolidBlueButtonStyle}" Command="{Binding SnoozeCommand}" Margin="0,0,8,0"/>
                                         <Button Content="取消任务" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding CancelCommand}" Margin="0,0,8,0"/>
-                                        <Button Content="清除记录" Style="{StaticResource ClearRecordButtonStyle}" Command="{Binding ClearCommand}"/>
+                                        <Button Content="清除记录" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding ClearCommand}" Padding="16,8"/>
                                     </WrapPanel>
                                     <UniformGrid Columns="3" Margin="0,10,0,0">
                                         <Border Background="#9980D0F2" CornerRadius="10" Padding="8,6" Margin="0,0,5,0"><StackPanel HorizontalAlignment="Center"><TextBlock Text="任务状态" FontSize="11" FontWeight="SemiBold" Foreground="#29496F" HorizontalAlignment="Center"/><TextBlock Text="{Binding CurrentStateText}" FontSize="11" Foreground="#536985" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" Margin="0,3,0,0" MaxWidth="90"/></StackPanel></Border>
@@ -317,7 +390,7 @@
                                 <Button Content="一键停用" Style="{StaticResource SecondaryButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkDisableCommand}"/>
                                 <Button Content="一键延迟10分钟" Style="{StaticResource SecondaryButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkSnoozeCommand}"/>
                                 <Button Content="一键停止" Style="{StaticResource DangerSolidButtonStyle}" Padding="16,8" Margin="0,0,8,0" Command="{Binding BulkStopCommand}"/>
-                                <Button Content="一键清除" Style="{StaticResource ClearRecordButtonStyle}" Padding="16,8" Command="{Binding BulkClearCommand}"/>
+                                <Button Content="一键清除" Style="{StaticResource DangerSolidButtonStyle}" Padding="16,8" Command="{Binding BulkClearCommand}"/>
                             </WrapPanel>
 
                             <!-- 横幅区：恢复通知 / 仲裁结果 / 强制冲突询问 / 故障状态 -->
@@ -386,10 +459,10 @@
                                                             <Button Content="延迟10分钟" Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,8,0"
                                                                     Command="{Binding DataContext.RowSnoozeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}" IsEnabled="{Binding CanSnooze}"/>
-                                                            <Button Content="停止" Style="{StaticResource DangerSolidButtonStyle}" Padding="14,6" Margin="0,0,8,0"
+                                                            <Button Content="停止" Style="{StaticResource DangerSolidButtonStyle}" Padding="18,7" MinWidth="76" Margin="0,0,8,0"
                                                                     Command="{Binding DataContext.RowStopCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}" IsEnabled="{Binding CanStop}"/>
-                                                            <Button Content="清除" Style="{StaticResource ClearRecordButtonStyle}" Padding="14,6"
+                                                            <Button Content="清除" Style="{StaticResource DangerSolidButtonStyle}" Padding="18,7" MinWidth="76"
                                                                     Command="{Binding DataContext.RowClearCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}" IsEnabled="{Binding CanClear}"/>
                                                         </StackPanel>
@@ -753,11 +826,17 @@
                                 <StackPanel>
                                     <TextBlock Text="关闭应用（关机前）" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="任务到期后先优雅关闭下列目标；强杀默认关闭，须逐目标显式授权（授权即可能丢失未保存工作）。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <CheckBox Content="最终强制完成系统关机（无响应软件将被 Windows 强制结束）"
+                                              IsChecked="{Binding ForceSystemShutdownIfAppsBlock}"
+                                              FontSize="13" Foreground="#C62828" Margin="0,0,0,10"
+                                              ToolTip="默认关闭。开启后可避免停在“有程序正在阻止关机”，但未保存内容可能丢失。"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                         <TextBox Style="{StaticResource InputBoxStyle}" Text="{Binding CloseAppsTargetInputText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" MinWidth="300" ToolTip="输入可执行文件完整路径或进程 ID（纯正整数按进程 ID，其余按路径）"/>
                                         <Button Content="＋ 添加目标" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding AddCloseAppsTargetCommand}" Padding="20,10"/>
                                         <Button Content="从运行中的进程选择" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding OpenProcessPickerCommand}" Padding="20,10" Margin="10,0,0,0"
                                                 ToolTip="只读取当前进程信息，不会启动、关闭或结束任何程序"/>
+                                        <Button Content="一键移除全部" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ClearAllCloseAppsTargetsCommand}" Padding="20,10" Margin="10,0,0,0"/>
+                                        <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="20,10" Margin="10,0,0,0"/>
                                     </StackPanel>
                                     <ItemsControl ItemsSource="{Binding CloseAppsTargets}">
                                         <ItemsControl.ItemTemplate>
@@ -794,7 +873,6 @@
                                     </ItemsControl>
                                     <TextBlock Text="{Binding CloseAppsErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsError, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding CloseAppsStatusText}" FontSize="12" Foreground="#1B7F4B" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="{Binding HasCloseAppsStatus, Converter={StaticResource BoolToVisibility}}"/>
-                                    <Button Content="保存关闭应用设置" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCloseAppsCommand}" Padding="24,10" HorizontalAlignment="Left"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
@@ -949,7 +1027,7 @@
                                     </TextBlock>
                                     <TextBlock Text="{Binding RemoteSection.DetailText}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding RemoteSection.DetailText, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="{Binding RemoteSection.ErrorText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding RemoteSection.HasError, Converter={StaticResource BoolToVisibility}}"/>
-                                    <Button Content="保存并应用" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RemoteSection.SaveCommand}" IsEnabled="{Binding RemoteSection.CanOperate}" Padding="22,10" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                    <Button Content="保存并应用" Style="{StaticResource DangerSolidButtonStyle}" Command="{Binding RemoteSection.SaveCommand}" IsEnabled="{Binding RemoteSection.CanOperate}" Padding="22,10" MinWidth="205" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

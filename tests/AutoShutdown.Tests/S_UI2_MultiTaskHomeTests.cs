@@ -845,7 +845,10 @@ public sealed class S_UI2_MultiTaskHomeTests
 
         Assert.Contains("时间模式（8 种）", home);
         Assert.Contains("WrapPanel", home);
-        Assert.Contains("Content=\"每月第N个工作日\"", home);
+        Assert.Contains("Content=\"每月第几个上班日\"", home);
+        Assert.Contains("NthWorkdayExplanationText", home);
+        Assert.Contains("每输入一个日期后，按回车键换行，再输入下一个日期", home);
+        Assert.Contains("Content=\"清除记录\" Style=\"{StaticResource DangerSolidButtonStyle}\"", home);
         Assert.Contains("Content=\"每周指定星期\"", home);
         Assert.Contains("Content=\"唤醒他机\"", home);
         Assert.DoesNotContain("Viewbox", home);

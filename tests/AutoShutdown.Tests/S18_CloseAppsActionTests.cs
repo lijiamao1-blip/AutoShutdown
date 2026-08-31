@@ -64,6 +64,24 @@ public sealed class S18_CloseAppsActionTests
     }
 
     [Fact]
+    public async Task GlobalForceSwitch_AllowsPowerToContinueAfterCloseTimeout()
+    {
+        var action = new CloseAppsAction(Service(
+            new CloseAppsConfig
+            {
+                GracefulTimeoutSeconds = 1,
+                ForceSystemShutdownIfAppsBlock = true,
+                Targets = [new CloseAppsTargetConfig { ExecutablePath = NotepadPath }]
+            },
+            NotepadProcess()));
+
+        var result = await action.ExecuteAsync(Context(), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(string.Empty, result.ErrorMessage);
+    }
+
+    [Fact]
     public void NullService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new CloseAppsAction(null!));

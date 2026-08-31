@@ -169,6 +169,9 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
 
         if (!pipeline.PowerAllowed)
         {
+            var details = string.Join("; ", pipeline.Actions
+                .Where(action => !action.Succeeded && !string.IsNullOrWhiteSpace(action.ErrorMessage))
+                .Select(action => action.ActionName + ": " + action.ErrorMessage));
             return new ShutdownWorkflowResult
             {
                 Status = ShutdownWorkflowStatus.Rejected,
@@ -176,6 +179,7 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
                 PrePipeline = pipeline,
                 UnattendedConfirmation = unattendedConfirmation,
                 Message = "The pre-pipeline blocked the power action."
+                    + (details.Length == 0 ? string.Empty : " " + details)
             };
         }
 
@@ -191,7 +195,8 @@ public sealed class ShutdownWorkflow : IShutdownWorkflow
             Reason = unattendedConfirmation is { AllowsPower: true }
                 ? "The scheduled task is due and unattended equivalent confirmation was granted."
                 : "The scheduled task is due and has been approved for execution.",
-            RealPowerConfirmed = effectiveConfirmed
+            RealPowerConfirmed = effectiveConfirmed,
+            ForceIfHung = config.CloseApps?.ForceSystemShutdownIfAppsBlock == true
         };
 
         PowerResult powerResult;

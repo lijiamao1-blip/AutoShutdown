@@ -17,6 +17,7 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
     private const uint EWX_SHUTDOWN = 0x00000001;
     private const uint EWX_REBOOT = 0x00000002;
     private const uint EWX_POWEROFF = 0x00000008;
+    private const uint EWX_FORCEIFHUNG = 0x00000010;
 
     // SetSuspendState 参数
     private const bool SleepMode = false;    // 睡眠
@@ -27,25 +28,27 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
     private const uint TOKEN_QUERY = 0x0008;
     private const uint SE_PRIVILEGE_ENABLED = 0x00000002;
 
-    public (bool Succeeded, int? NativeErrorCode) Shutdown()
+    public (bool Succeeded, int? NativeErrorCode) Shutdown(bool forceIfHung = false)
     {
         if (!EnableShutdownPrivilege())
         {
             return (false, Marshal.GetLastWin32Error());
         }
 
-        var ok = ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF, 0);
+        var flags = EWX_SHUTDOWN | EWX_POWEROFF | (forceIfHung ? EWX_FORCEIFHUNG : 0);
+        var ok = ExitWindowsEx(flags, 0);
         return ok ? (true, null) : (false, Marshal.GetLastWin32Error());
     }
 
-    public (bool Succeeded, int? NativeErrorCode) Restart()
+    public (bool Succeeded, int? NativeErrorCode) Restart(bool forceIfHung = false)
     {
         if (!EnableShutdownPrivilege())
         {
             return (false, Marshal.GetLastWin32Error());
         }
 
-        var ok = ExitWindowsEx(EWX_REBOOT, 0);
+        var flags = EWX_REBOOT | (forceIfHung ? EWX_FORCEIFHUNG : 0);
+        var ok = ExitWindowsEx(flags, 0);
         return ok ? (true, null) : (false, Marshal.GetLastWin32Error());
     }
 

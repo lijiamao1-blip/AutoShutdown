@@ -136,6 +136,11 @@ public sealed class S11UiSourceContractTests
         Assert.Contains("一键延迟10分钟", window);
         Assert.Contains("一键停止", window);
         Assert.Contains("一键清除", window);
+        Assert.Contains("Content=\"一键清除\" Style=\"{StaticResource DangerSolidButtonStyle}\"", window);
+        Assert.Contains("Content=\"停止\" Style=\"{StaticResource DangerSolidButtonStyle}\" Padding=\"18,7\" MinWidth=\"76\"", window);
+        Assert.Contains("Content=\"清除\" Style=\"{StaticResource DangerSolidButtonStyle}\" Padding=\"18,7\" MinWidth=\"76\"", window);
+        Assert.Contains("Content=\"保存并应用\" Style=\"{StaticResource DangerSolidButtonStyle}\"", window);
+        Assert.Contains("MinWidth=\"205\"", window);
         Assert.Contains("TaskItems.Where(item => item.CanSnooze)", source);
         Assert.Contains("TaskItems.Where(item => item.CanStop)", source);
         Assert.Contains("TaskItems.Where(item => item.CanClear)", source);

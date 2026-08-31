@@ -37,8 +37,8 @@ public sealed class CloseAppsAction : IPreShutdownAction
 
         return new PrePipelineActionResult
         {
-            Succeeded = report.Succeeded,
-            ErrorMessage = report.Succeeded ? string.Empty : report.Summary
+            Succeeded = report.Succeeded || report.ContinueToPower,
+            ErrorMessage = report.Succeeded || report.ContinueToPower ? string.Empty : report.Summary
         };
     }
 }
