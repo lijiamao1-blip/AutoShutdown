@@ -127,6 +127,12 @@ public static class ProcessSelectionGuard
             return ProcessSelectionDecision.NotSelectable("AutoShutdown 自身进程，不可选择");
         }
 
+        // 桌面外壳不能作为普通应用关闭，否则可能只弹出系统关机对话框。
+        if (WindowsShellProcess.IsExplorer(info.ProcessName, key))
+        {
+            return ProcessSelectionDecision.NotSelectable("Windows 桌面进程，由系统关机处理，不可选择");
+        }
+
         // 辅助进程：按可执行文件基名与进程名双查。
         var fileName = Path.GetFileNameWithoutExtension(key);
         if (KnownHelperExecutableNames.Contains(fileName)

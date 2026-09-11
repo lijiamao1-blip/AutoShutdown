@@ -206,6 +206,14 @@ public sealed class CloseAppsService
             return CloseAppStatus.SkippedProtected;
         }
 
+        // 向 Explorer 桌面主窗口发关闭请求可能只弹出系统关机对话框，等待进程退出则会
+        // 超时并阻断后续电源动作。兼容旧目标清单：不发送关闭、不等待、不强杀，由 Windows
+        // 在最终电源阶段处理。自身/其他会话/PID 重用等保护仍在此之前严格拒绝。
+        if (WindowsShellProcess.IsExplorer(current.ProcessName, current.ExecutablePath))
+        {
+            return CloseAppStatus.SkippedWindowsShell;
+        }
+
         var exitStatus = _windowManager.GetExitStatus(current.ProcessId);
         if (exitStatus == ProcessExitStatus.Exited)
         {
@@ -304,6 +312,7 @@ public sealed class CloseAppsService
         CloseAppStatus.ClosedGracefully or
         CloseAppStatus.AlreadyExited or
         CloseAppStatus.NotRunning or
+        CloseAppStatus.SkippedWindowsShell or
         CloseAppStatus.ForceKilled => true,
         _ => false
     };
@@ -320,6 +329,7 @@ public sealed class CloseAppsService
         if (statuses.Contains(CloseAppStatus.ForceKilled)) return CloseAppStatus.ForceKilled;
         if (statuses.Contains(CloseAppStatus.ClosedGracefully)) return CloseAppStatus.ClosedGracefully;
         if (statuses.Contains(CloseAppStatus.AlreadyExited)) return CloseAppStatus.AlreadyExited;
+        if (statuses.Contains(CloseAppStatus.SkippedWindowsShell)) return CloseAppStatus.SkippedWindowsShell;
         return CloseAppStatus.Unknown;
     }
 
@@ -343,6 +353,7 @@ public sealed class CloseAppsService
         CloseAppStatus.ForceKilled => "force-killed",
         CloseAppStatus.AccessDenied => "access denied",
         CloseAppStatus.SkippedProtected => "skipped (protected)",
+        CloseAppStatus.SkippedWindowsShell => "skipped (Windows shell; handled by system shutdown)",
         CloseAppStatus.PidReuseDetected => "pid reuse detected",
         CloseAppStatus.ExitNotConfirmed => "exit not confirmed",
         CloseAppStatus.ExitStatusUnknown => "exit status unknown",

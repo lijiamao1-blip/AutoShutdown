@@ -19,8 +19,20 @@ public sealed class SingleInstanceCoordinator : IDisposable
 {
     private const string MutexName = @"Local\AutoShutdown.Desktop.Singleton.v1";
 
+    private readonly string _mutexName;
     private Mutex? _mutex;
     private bool _owned;
+
+    public SingleInstanceCoordinator()
+        : this(MutexName)
+    {
+    }
+
+    internal SingleInstanceCoordinator(string mutexName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mutexName);
+        _mutexName = mutexName;
+    }
 
     public SingleInstanceAcquireResult TryAcquirePrimary()
     {
@@ -35,7 +47,7 @@ public sealed class SingleInstanceCoordinator : IDisposable
 
         try
         {
-            var mutex = new Mutex(initiallyOwned: false, MutexName);
+            var mutex = new Mutex(initiallyOwned: false, _mutexName);
             try
             {
                 var owned = mutex.WaitOne(0);

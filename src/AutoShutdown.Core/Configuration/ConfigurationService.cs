@@ -26,7 +26,8 @@ public sealed class ConfigurationService : IConfigurationService
 
     public async Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken)
     {
-        var read = await _storage.ReadAsync<JsonElement>(ConfigFileName, cancellationToken);
+        var read = await _storage.ReadAsync<JsonElement>(ConfigFileName, cancellationToken)
+            .ConfigureAwait(false);
 
         switch (read.Status)
         {
@@ -77,7 +78,7 @@ public sealed class ConfigurationService : IConfigurationService
                     $"No migration chain exists from schema version {version}.");
             }
 
-            element = await migration.MigrateAsync(element, cancellationToken);
+            element = await migration.MigrateAsync(element, cancellationToken).ConfigureAwait(false);
             version = migration.TargetVersion;
         }
 
@@ -139,7 +140,7 @@ public sealed class ConfigurationService : IConfigurationService
         var write = await _storage.WriteAsync(
             ConfigFileName,
             config,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         return write.Status == StorageWriteStatus.Success
             ? new ConfigurationSaveResult { Status = ConfigurationSaveStatus.Success }

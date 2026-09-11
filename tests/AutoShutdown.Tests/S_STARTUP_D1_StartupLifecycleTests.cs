@@ -183,13 +183,14 @@ public sealed class S_STARTUP_D1_StartupLifecycleTests
     {
         // 模拟「主实例关键初始化失败后释放互斥体」：进程退出时 OS 同样会释放命名单实例
         // 互斥体；此处直接验证释放后下一实例可立即成为主实例（不留任何后台占用）。
-        using var first = new SingleInstanceCoordinator();
+        var mutexName = @"Local\AutoShutdown.Desktop.Singleton.Test." + Guid.NewGuid().ToString("N");
+        using var first = new SingleInstanceCoordinator(mutexName);
         var acquired = first.TryAcquirePrimary();
         Assert.Equal(SingleInstanceResult.Primary, acquired.Result);
 
         first.Dispose();
 
-        using var second = new SingleInstanceCoordinator();
+        using var second = new SingleInstanceCoordinator(mutexName);
         var next = second.TryAcquirePrimary();
         Assert.Equal(SingleInstanceResult.Primary, next.Result);
     }

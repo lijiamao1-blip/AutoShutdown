@@ -37,5 +37,8 @@ public enum CloseAppStatus
     ExitNotConfirmed = 10,
 
     /// <summary>退出状态无法确认（D1-3）：绝不当作已退出，也绝不强杀。</summary>
-    ExitStatusUnknown = 11
+    ExitStatusUnknown = 11,
+
+    /// <summary>Windows 桌面进程由系统关机处理；未发送关闭/强杀请求，不阻断流水线。</summary>
+    SkippedWindowsShell = 12
 }

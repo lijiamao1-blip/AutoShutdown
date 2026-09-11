@@ -221,6 +221,19 @@ public sealed class S_CLOSEUI1_ProcessPickerTests : IDisposable
         Assert.Contains("系统关键进程", decision.Reason);
     }
 
+    [Theory]
+    [InlineData("explorer")]
+    [InlineData("EXPLORER.EXE")]
+    public void Guard_Explorer_NotSelectable(string name)
+    {
+        var decision = ProcessSelectionGuard.Evaluate(
+            RunningProcess(name, CreateTempFile(), pid: 10, sessionId: 1),
+            Context(sessionId: 1));
+
+        Assert.False(decision.Selectable);
+        Assert.Contains("Windows 桌面", decision.Reason);
+    }
+
     [Fact]
     public void Guard_AlreadyAdded_NotSelectable()
     {

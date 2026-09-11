@@ -18,6 +18,43 @@ public sealed class S18_CloseAppsServiceTests
     private static readonly DateTimeOffset StartTime =
         new(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData("explorer", false, false)]
+    [InlineData("EXPLORER.EXE", true, false)]
+    [InlineData("Explorer", false, true)]
+    [InlineData("explorer.exe", true, true)]
+    [InlineData("", false, false)]
+    public async Task Explorer_IsLeftToWindows_WithoutClosingWaitingOrKilling(
+        string name, bool forceKill, bool usePid)
+    {
+        const string path = @"C:\Windows\explorer.exe";
+        var config = BaseConfig(new CloseAppsConfig
+        {
+            GracefulTimeoutSeconds = 5,
+            Targets = [new CloseAppsTargetConfig
+            {
+                ProcessId = usePid ? 100 : null,
+                ExecutablePath = usePid ? null : path,
+                ForceKillAllowed = forceKill
+            }]
+        });
+        var processes = new FakeProcessManager { Processes = [Process(100, path, name: name)] };
+        var window = new FakeAppWindowManager
+        {
+            WaitForExitFunc = (_, _, _) => ProcessWaitResult.TimedOut
+        };
+        var service = new CloseAppsService(new FakeConfigurationService(Success(config)), processes, window);
+
+        var report = await service.CloseAllAsync(CancellationToken.None);
+
+        Assert.True(report.Succeeded);
+        Assert.False(report.ContinueToPower); // 不依赖最终强制关机开关绕过失败。
+        Assert.Equal(CloseAppStatus.SkippedWindowsShell, Assert.Single(report.Results).Status);
+        Assert.Empty(window.RequestCloseCalls);
+        Assert.Empty(window.WaitForExitCalls);
+        Assert.Empty(window.ForceKillCalls);
+    }
+
     [Fact]
     public async Task ExactPathMatch_ClosesOnlyMatchingPath_NotSimilarName()
     {

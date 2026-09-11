@@ -21,6 +21,8 @@ param(
     [string]$BaseCommit = '',                  # 可选：功能基线提交（如 97cef24）
     [string]$OutRoot = '',                     # 默认 artifacts/release/v<Version>
     [string]$InformationalVersion = '',        # 可选：覆盖 -p:InformationalVersion
+    [ValidateSet('Test', 'Production')]
+    [string]$DistributionMode = 'Test',         # 对外正式包必须显式传 Production
     [switch]$SkipFdZip,                        # 只构建候选 EXE，跳过轻量 ZIP
     [switch]$SkipSolutionBuild                 # 跳过解决方案 Release 构建（只做 publish）
 )
@@ -83,6 +85,9 @@ $commonPublish = @(
     ("-p:Version=" + $Version), ("-p:InformationalVersion=" + $InformationalVersion),
     '--nologo'
 )
+if ($DistributionMode -eq 'Production') {
+    $commonPublish += '-p:AutoShutdownDistributionMode=Production'
+}
 Write-Host '发布候选 EXE（自包含单文件）...'
 & $dotnet publish $appProject @commonPublish -o $candidateDir
 if ($LASTEXITCODE -ne 0) { Write-Error '候选 EXE 发布失败。'; exit 21 }
@@ -104,6 +109,9 @@ if (-not $SkipFdZip) {
         ("-p:Version=" + $Version), ("-p:InformationalVersion=" + $InformationalVersion),
         '--nologo'
     )
+    if ($DistributionMode -eq 'Production') {
+        $fdCommon += '-p:AutoShutdownDistributionMode=Production'
+    }
     & $dotnet publish $appProject @fdCommon -o $fdDir
     if ($LASTEXITCODE -ne 0) { Write-Error '轻量版发布失败。'; exit 23 }
 
@@ -115,9 +123,14 @@ AutoShutdown v$Version ($Step.$Build) 轻量版（framework-dependent）使用�
 3. 数据目录默认 %LocalAppData%\AutoShutdown；可用环境变量 AUTOSHUTDOWN_DATA_ROOT 指向隔离数据目录（S-PKG 验证构建）。
 4. 本包默认安全测试模式（FakePowerService），默认不启用开机自启动。
 "@
+    $modeLine = if ($DistributionMode -eq 'Production') {
+        '- 正式分发模式：首次启动建立 TestMode=false、RealPowerEnabled=true 配置；创建任务仍需明确确认。'
+    } else {
+        '- 默认 TestMode=true：不执行真实电源操作。'
+    }
     $fdSafety = @"
 AutoShutdown v$Version ($Step.$Build) 安全说明
-- 默认 TestMode=true：不执行真实电源操作。
+$modeLine
 - 默认不启用开机自启动、不写注册表。
 - 候选状态：见 manifest（未签名候选 = 未使用正式签名证书，绝不伪称已签名发布）。
 - 请勿将未签名候选用于生产环境的真实电源管理。
@@ -158,6 +171,7 @@ commit-subject: $($head.Subject)
 sha256: $candidateHash
 size-bytes: $candidateSize
 informational-version: $InformationalVersion
+distribution-mode: $DistributionMode
 sdk: $sdkVersion
 publish-mode: self-contained single-file (win-x64, Trim=false, ReadyToRun=false, DebugType=None)
 signing-status: unsigned-candidate
@@ -178,6 +192,7 @@ $manifestJson = [ordered]@{
     sha256 = $candidateHash
     sizeBytes = $candidateSize
     informationalVersion = $InformationalVersion
+    distributionMode = $DistributionMode
     sdk = $sdkVersion
     publishMode = 'self-contained single-file (win-x64)'
     signingStatus = 'unsigned-candidate'

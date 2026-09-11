@@ -1,6 +1,6 @@
 # 电脑自动关机助手 AutoShutdown
 
-AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.12**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
+AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.16**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
 
 > 本软件能够执行真实系统电源操作。首次使用请先保存重要文件，并认真阅读下面的安全提醒。
 
@@ -49,6 +49,8 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 
 关机流程会先尝试保存 Office 文档，再并行关闭配置的应用，最后执行系统电源操作。应用数量多并不会直接导致失败；如果某个程序拒绝退出，未启用最终强制关机时，任务会为保护未保存内容而停止。启用最终强制关机后，无响应程序可能被 Windows 强制结束。
 
+若旧版本只弹出“关闭 Windows”窗口，请检查关闭目标中是否有 `Explorer.EXE`。修复版会自动跳过旧配置中的 Explorer，并禁止在进程选择器中添加它，将桌面进程交给 Windows 在系统关机阶段处理；其他应用的关闭失败仍按原规则处理。
+
 ## 安全提醒
 
 - 正式关机测试前，请先手动保存所有重要文件。
@@ -59,7 +61,7 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 
 ## 开发与构建
 
-开发环境需要 Windows 和 .NET 8 SDK：
+开发环境需要 Windows 和 .NET 8.0.131 SDK（包含 .NET 8.0.31 运行时）：
 
 ```powershell
 dotnet restore .\AutoShutdown.sln
@@ -70,7 +72,7 @@ dotnet test .\AutoShutdown.sln --configuration Release --no-build
 生成发布候选包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.12 -Step S24 -Build release
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.16 -Step S24 -Build release -DistributionMode Production
 ```
 
 ## 项目结构
@@ -83,4 +85,4 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 
 ## 当前版本
 
-**v2.0.12** — 修复 1080P 等较低高度显示器上首页内容被截断的问题，并恢复“最近活动”区域的独立滚动条。
+**v2.0.16** — 保留 v2.0.15 的正式配置初始化和 Explorer 关闭修复，将自包含运行时更新到 .NET 8.0.31，并隔离单实例测试使用的互斥锁，避免正在运行的正式程序干扰构建验证。

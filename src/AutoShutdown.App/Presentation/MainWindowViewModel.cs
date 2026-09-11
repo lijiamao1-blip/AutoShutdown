@@ -2372,8 +2372,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        Refresh(GetSnapshot(), _clock.UtcNow);
         await RefreshConfigurationAsync();
+        Refresh(GetSnapshot(), _clock.UtcNow);
         RefreshAutoStart();
         await RefreshUnattendedAsync();
         RefreshRecoveryNotice();
@@ -2548,7 +2548,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _currentInstance = instance;
         HasCurrentTask = true;
-        CurrentStateText = UiTextMapper.Map(instance);
+        CurrentStateText = MapDisplayedState(instance);
         TaskActionText = UiTextMapper.Map(instance.ActionSnapshot);
         var localFire = TimeZoneInfo.ConvertTime(instance.ScheduledFireTime, _clock.LocalTimeZone);
         var localWarning = instance.WarningStartTime is null
@@ -2582,7 +2582,7 @@ public sealed class MainWindowViewModel : ObservableObject
             IsIdleStatusVisible = false;
         }
 
-        TaskSummaryText = $"当前任务：{UiTextMapper.Map(instance.State)} / {UiTextMapper.Map(instance.ActionSnapshot)} / {localFire:yyyy-MM-dd HH:mm}";
+        TaskSummaryText = $"当前任务：{MapDisplayedState(instance)} / {UiTextMapper.Map(instance.ActionSnapshot)} / {localFire:yyyy-MM-dd HH:mm}";
 
         CanSnooze = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming
             && instance.InstanceId != Guid.Empty
@@ -2606,7 +2606,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _lastState = instance.State;
             _lastInstanceId = instance.InstanceId;
             _lastToken = instance.StageToken;
-            AppendActivity($"任务状态：{UiTextMapper.Map(instance.State)}");
+            AppendActivity($"任务状态：{MapDisplayedState(instance)}");
         }
 
         RefreshCreateState();
@@ -3354,7 +3354,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 instance.InstanceId,
                 instance.StageToken,
                 UiTextMapper.Map(instance.ActionSnapshot),
-                UiTextMapper.Map(instance),
+                MapDisplayedState(instance),
                 localFire.ToString("yyyy-MM-dd HH:mm:ss"),
                 remaining > TimeSpan.Zero ? remaining.ToString(@"hh\:mm\:ss") : "已到期",
                 localWarning?.ToString("HH:mm:ss") ?? "无",
@@ -3379,6 +3379,11 @@ public sealed class MainWindowViewModel : ObservableObject
         BulkStopCommand.RaiseCanExecuteChanged();
         BulkClearCommand.RaiseCanExecuteChanged();
     }
+
+    private string MapDisplayedState(TaskInstance instance)
+        => instance.State == TaskInstanceState.Executed && _loadedConfig?.TestMode == true
+            ? "模拟完成（未执行真实电源操作）"
+            : UiTextMapper.Map(instance);
 
     /// <summary>
     /// 呈现待决强制冲突（询问用户）与最近一次仲裁结果（赢家/合并/改期/理由）。

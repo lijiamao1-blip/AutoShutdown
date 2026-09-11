@@ -22,6 +22,32 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
     private static readonly DateTimeOffset StartTime =
         new(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(-1, false)]
+    [InlineData(2, false)]
+    public async Task Explorer_OnlyCurrentSessionContinuesToPower_WithoutWindowRequests(
+        int sessionId, bool shouldContinue)
+    {
+        var window = new FakeWindowManager
+        {
+            WaitForExitOverride = (_, _, _) => throw new InvalidOperationException("Must not wait for Explorer.")
+        };
+        var process = Process(100, sessionId) with
+        {
+            ProcessName = "explorer",
+            ExecutablePath = @"C:\Windows\explorer.exe"
+        };
+
+        var (result, requests) = await RunCloseAppsAsync(process, window, forceKill: false);
+
+        Assert.Equal(shouldContinue ? ShutdownWorkflowStatus.Simulated : ShutdownWorkflowStatus.Rejected,
+            result.Status);
+        Assert.Equal(shouldContinue ? 1 : 0, requests.Count);
+        Assert.Equal(0, window.CloseCalls);
+        Assert.Equal(0, window.KillCalls);
+    }
+
     [Fact]
     public async Task UnknownSession_BlocksPipeline_AndPowerZero()
     {
@@ -94,10 +120,11 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
     }
 
     private static async Task<(ShutdownWorkflowResult Result, IReadOnlyList<PowerRequest> Requests)>
-        RunCloseAppsAsync(ProcessSnapshot process, FakeWindowManager window, RecordingPowerService? power = null)
+        RunCloseAppsAsync(ProcessSnapshot process, FakeWindowManager window, RecordingPowerService? power = null,
+            bool forceKill = true)
     {
         var closeAppsService = new CloseAppsService(
-            new FakeConfigurationService(ConfigWithCloseApps()),
+            new FakeConfigurationService(ConfigWithCloseApps(process.ExecutablePath!, forceKill)),
             new FakeProcessManager(process),
             window);
         var action = new CloseAppsAction(closeAppsService);
@@ -112,7 +139,7 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
         return (result, power.Requests);
     }
 
-    private static AppConfig ConfigWithCloseApps() => new()
+    private static AppConfig ConfigWithCloseApps(string targetPath, bool forceKill) => new()
     {
         SchemaVersion = 1,
         TestMode = true,
@@ -121,7 +148,7 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
         CloseApps = new CloseAppsConfig
         {
             GracefulTimeoutSeconds = 5,
-            Targets = [new CloseAppsTargetConfig { ExecutablePath = NotepadPath, ForceKillAllowed = true }]
+            Targets = [new CloseAppsTargetConfig { ExecutablePath = targetPath, ForceKillAllowed = forceKill }]
         }
     };
 
@@ -176,10 +203,16 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
         public ProcessExitStatus ExitStatus { get; init; } = ProcessExitStatus.Running;
         public ForceKillStatus ForceKillStatus { get; init; } = ForceKillStatus.Killed;
         public Func<int, TimeSpan, CancellationToken, ProcessWaitResult>? WaitForExitOverride { get; init; }
+        public int CloseCalls { get; private set; }
+        public int KillCalls { get; private set; }
 
         public bool HasMainWindow(int processId) => MainWindowPresent;
 
-        public bool RequestClose(int processId) => true;
+        public bool RequestClose(int processId)
+        {
+            CloseCalls++;
+            return true;
+        }
 
         public ProcessExitStatus GetExitStatus(int processId) => ExitStatus;
 
@@ -189,7 +222,10 @@ public sealed class S18_D1_CloseAppsSafetyE2ETests
                 : WaitForExitOverride(processId, timeout, cancellationToken);
 
         public ForceKillResult ForceKill(int processId, DateTimeOffset expectedStartTimeUtc)
-            => new() { Status = ForceKillStatus };
+        {
+            KillCalls++;
+            return new() { Status = ForceKillStatus };
+        }
     }
 
     private sealed class FakeConfigurationService : IConfigurationService

@@ -68,6 +68,16 @@ public sealed class S_PKG_PublishContractTests
         Assert.Contains("win-x64-framework-dependent", Script);
     }
 
+    [Fact]
+    public void PublishCandidate_RequiresExplicitProductionMode_AndPassesBuildMarkerToBothPackages()
+    {
+        Assert.Contains("[ValidateSet('Test', 'Production')]", Script);
+        Assert.Contains("[string]$DistributionMode = 'Test'", Script);
+        Assert.Equal(2, CountOccurrences(Script, "-p:AutoShutdownDistributionMode=Production"));
+        Assert.Contains("distribution-mode: $DistributionMode", Script);
+        Assert.Contains("distributionMode = $DistributionMode", Script);
+    }
+
     // ---- 5. 候选命名与 SHA-256 生成 ----
 
     [Fact]
@@ -129,4 +139,7 @@ public sealed class S_PKG_PublishContractTests
 
         throw new DirectoryNotFoundException("The tools directory was not found.");
     }
+
+    private static int CountOccurrences(string value, string expected)
+        => value.Split(expected, StringSplitOptions.None).Length - 1;
 }

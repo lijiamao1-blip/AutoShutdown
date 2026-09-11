@@ -139,6 +139,22 @@ public partial class App : System.Windows.Application
             _serviceProvider = services.BuildServiceProvider();
             logger.Info("ServiceProviderBuilt", "服务容器构建完成。");
 
+            // 正式分发包必须在调度器或外部触发启动前切到真实电源配置。创建任务时仍需
+            // 用户逐次明确确认；测试/UI 冒烟构建不进入此分支。
+            if (ProductionConfigurationBootstrapper.IsProductionBuild && !UiTestEnvironment.IsRequested)
+            {
+                var production = ProductionConfigurationBootstrapper.EnsureRealPowerModeAsync(
+                        _serviceProvider.GetRequiredService<IConfigurationService>(),
+                        CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                if (!production.Succeeded)
+                {
+                    throw new InvalidOperationException(production.Message);
+                }
+
+                logger.Info("ProductionConfigurationReady", production.Message);
+            }
+
             if (triggerTaskId is { } primaryTriggerId)
             {
                 // 外部触发回调的无界面模式：不打开主窗口，仅把触发交回本地 Workflow 后退出。
