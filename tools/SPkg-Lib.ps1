@@ -3,13 +3,45 @@
 # 本文件由 tools/Publish-ReleaseCandidate.ps1、tools/Invoke-Upgrade.ps1 等 dot-source。
 
 function Get-ASDotNet {
-    # 项目已知 SDK 优先，回退 PATH。返回 dotnet.exe 全路径字符串；找不到返回 $null。
-    $knownSdk = 'C:\Users\李佳茂\Documents\Codex\2026-08-10\new-chat-5\work\.dotnet-sdk\dotnet.exe'
-    if (Test-Path -LiteralPath $knownSdk) {
-        return $knownSdk
-    }
+    # 返回一个「确实能为本仓库解析出 SDK」的 dotnet.exe 全路径；找不到返回 $null。
+    #
+    # 修复（S-PKG-D1）：原实现把一条机器专用的硬编码 SDK 路径放在最前，只要该路径存在
+    # 就无条件返回，从不验证它能否满足仓库的 global.json —— 注释写着「回退 PATH」，
+    # 但代码只在路径不存在时才回退，正好漏掉「路径还在、SDK 却不合用」这一种情况。
+    # 仓库在 6c80c8c 加入 global.json（限定 8.0.1xx 特征带）后，那个目录里只剩 8.0.423
+    # （4xx 带），于是脚本里每一句 dotnet 调用都以
+    # "A compatible .NET SDK was not found" 失败，构建在第 3 步即 exit 20 退出。
+    # 该硬编码路径同时出现在本文件 Test-TextLeak 的禁止泄露清单里（'\.dotnet-sdk\'、
+    # 'Codex'、用户目录），说明它本就不该固化进仓库，因此这里一并移除。
+    #
+    # 新策略：逐个候选在仓库根目录实际执行 `dotnet --version`，退出码为 0 才采用。
+    # 这样无论 global.json 将来怎么写都能自适应，也不再绑定任何一台机器的特定目录。
+    # 需要指定某个 SDK 时，用环境变量 AUTOSHUTDOWN_DOTNET 覆盖，而不是改脚本。
+    $candidates = @()
+    if ($env:AUTOSHUTDOWN_DOTNET) { $candidates += $env:AUTOSHUTDOWN_DOTNET }
     $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd) { $candidates += $cmd.Source }
+    $candidates += 'C:\Program Files\dotnet\dotnet.exe'
+
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        $usable = $false
+        Push-Location $repoRoot
+        try {
+            $global:LASTEXITCODE = 0
+            $null = & $candidate --version 2>$null
+            $usable = ($LASTEXITCODE -eq 0)
+        }
+        catch {
+            $usable = $false
+        }
+        finally {
+            Pop-Location
+        }
+        if ($usable) { return $candidate }
+    }
+
     return $null
 }
 
