@@ -38,6 +38,14 @@ if (-not $Build) { $Build = $head.Short }
 if (-not $SourceCommit) { $SourceCommit = $head.Full }
 if (-not $InformationalVersion) { $InformationalVersion = "v$Version-$Step.$Build" }
 
+# 文件/程序集版本必须随 -Version 走（S-PKG-D2）。
+# Directory.Build.props 把 FileVersion / AssemblyVersion 显式写死为 2.0.0.0，
+# 而 -p:Version= 只覆盖 Version，不会覆盖被显式设置的这两个属性 ——
+# 结果是脚本产出的 exe 在 Windows「属性 → 详细信息」里永远显示 2.0.0.0，
+# 多个版本的 exe 放在一起时无法按文件版本区分。应用内关于页读的是
+# InformationalVersion，不受影响，所以这个问题只在资源管理器里暴露。
+$fileVersion = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
+
 # ---- 1. SDK ----
 $dotnet = Get-ASDotNet
 if (-not $dotnet) { Write-Error '未找到可用的 .NET SDK。'; exit 10 }
@@ -82,7 +90,9 @@ $commonPublish = @(
     '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
     '-p:PublishSingleFile=true', '-p:PublishTrimmed=false', '-p:PublishReadyToRun=false',
     '-p:DebugType=None', '-p:DebugSymbols=false', '-p:UseSharedCompilation=false',
-    ("-p:Version=" + $Version), ("-p:InformationalVersion=" + $InformationalVersion),
+    ("-p:Version=" + $Version), ("-p:FileVersion=" + $fileVersion),
+    ("-p:AssemblyVersion=" + $fileVersion),
+    ("-p:InformationalVersion=" + $InformationalVersion),
     '--nologo'
 )
 if ($DistributionMode -eq 'Production') {
@@ -106,7 +116,9 @@ if (-not $SkipFdZip) {
         '-c', 'Release', '-r', 'win-x64', '--self-contained', 'false',
         '-p:PublishSingleFile=false', '-p:PublishTrimmed=false', '-p:PublishReadyToRun=false',
         '-p:DebugType=None', '-p:DebugSymbols=false', '-p:UseSharedCompilation=false',
-        ("-p:Version=" + $Version), ("-p:InformationalVersion=" + $InformationalVersion),
+        ("-p:Version=" + $Version), ("-p:FileVersion=" + $fileVersion),
+        ("-p:AssemblyVersion=" + $fileVersion),
+        ("-p:InformationalVersion=" + $InformationalVersion),
         '--nologo'
     )
     if ($DistributionMode -eq 'Production') {
@@ -170,6 +182,7 @@ commit-date: $($head.Date)
 commit-subject: $($head.Subject)
 sha256: $candidateHash
 size-bytes: $candidateSize
+file-version: $fileVersion
 informational-version: $InformationalVersion
 distribution-mode: $DistributionMode
 sdk: $sdkVersion
@@ -191,6 +204,7 @@ $manifestJson = [ordered]@{
     commitSubject = $head.Subject
     sha256 = $candidateHash
     sizeBytes = $candidateSize
+    fileVersion = $fileVersion
     informationalVersion = $InformationalVersion
     distributionMode = $DistributionMode
     sdk = $sdkVersion
