@@ -1,4 +1,7 @@
 using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -11,8 +14,8 @@ namespace AutoShutdown.App.Infrastructure.Remote;
 /// S23 TLS 服务器证书服务。两种模式（remote-settings.json）：
 /// <list type="bullet">
 /// <item>自签名自动生成（UseImportedCertificate=false）：首次生成 RSA-2048 自签名证书
-/// （SAN: localhost + 127.0.0.1，有效期 1 年），PFX 经 <see cref="ISecretProtector"/>（DPAPI）
-/// 封装后落盘，绝不明文写私钥；内存缓存，重启后从磁盘解密恢复。</item>
+/// （有效期 1 年），PFX 经 <see cref="ISecretProtector"/>（DPAPI）封装后落盘，绝不明文写私钥；
+/// 内存缓存，重启后从磁盘解密恢复。</item>
 /// <item>导入证书（UseImportedCertificate=true）：从 ImportedCertPath 加载 PFX；若带密码，
 /// 密码须由本地 UI 经 DPAPI 保护的密码文件提供（本服务绝不读明文密码）。</item>
 /// </list>
@@ -20,16 +23,35 @@ namespace AutoShutdown.App.Infrastructure.Remote;
 /// 绝不以「无证书/坏证书」状态继续服务。私钥经 <see cref="X509KeyStorageFlags.DefaultKeySet"/>
 /// 加载（详见 <see cref="LoadPfx(byte[], string?)"/>：本平台 SChannel 拒绝 EphemeralKeySet，
 /// 而 DefaultKeySet 实测不落 Windows 密钥库残留）。私钥唯一持久形态是 DPAPI 封装的 PFX。
+///
+/// 自签名 SAN 覆盖（S-REMOTE-D1）：SAN 必须覆盖客户端实际连入的端点，否则任何按规范校验
+/// 主机名的 TLS 客户端都会握手失败——而「让客户端跳过证书校验」等于放弃 TLS 的身份保证。
+/// 因此 SAN 按 <see cref="RemoteSettingsDocument.ListenAddress"/> 推导：
+/// <list type="bullet">
+/// <item>监听具体地址 → 覆盖 localhost / 回环 / 该地址；</item>
+/// <item>监听 0.0.0.0（或地址不可解析）→ 覆盖 localhost / 回环 / 本机主机名 / 当前全部活动
+/// IPv4 地址（无法预知客户端会用哪个本机地址连入）。</item>
+/// </list>
+/// 每次取证书都复核已有证书的 SAN 是否覆盖当前所需端点；不覆盖（监听地址被改、DHCP 换址等）
+/// 即重新生成并覆盖落盘文件——这会更换服务器证书指纹，已固定旧指纹的客户端需要重新信任。
 /// </summary>
 public sealed class RemoteCertificateService
 {
     private const int SelfSignedKeyBits = 2048;
+
+    /// <summary>subjectAltName 扩展 OID（RFC 5280）。</summary>
+    private const string SubjectAlternativeNameOid = "2.5.29.17";
 
     private readonly ISecretProtector _protector;
     private readonly IClock _clock;
     private readonly string _certificateFilePath;
     private readonly string _importedPasswordFilePath;
     private readonly object _sync = new();
+
+    // 生成/落盘临界区。原实现用 lock 只保护缓存字段，两个并发调用可能各自生成一份不同的
+    // 自签名证书并互相覆盖落盘文件（后到者的证书与磁盘不一致）。改为信号量后，
+    // 「读盘 → 校验覆盖 → 生成 → 落盘 → 发布缓存」整体串行化。
+    private readonly SemaphoreSlim _selfSignedGate = new(1, 1);
 
     private X509Certificate2? _selfSignedCache;
 
@@ -63,7 +85,7 @@ public sealed class RemoteCertificateService
 
         return settings.UseImportedCertificate
             ? await LoadImportedAsync(settings.ImportedCertPath, cancellationToken).ConfigureAwait(false)
-            : await GetOrCreateSelfSignedAsync(cancellationToken).ConfigureAwait(false);
+            : await GetOrCreateSelfSignedAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<X509Certificate2> LoadImportedAsync(
@@ -97,48 +119,202 @@ public sealed class RemoteCertificateService
         return LoadPfx(pfx, password);
     }
 
-    private async Task<X509Certificate2> GetOrCreateSelfSignedAsync(CancellationToken cancellationToken)
+    private async Task<X509Certificate2> GetOrCreateSelfSignedAsync(
+        RemoteSettingsDocument settings,
+        CancellationToken cancellationToken)
     {
+        var required = RequiredSanAddresses(settings);
+
+        // 快路径：已缓存且 SAN 覆盖当前所需端点，直接复用（每条 TLS 连接都会走到这里）。
+        X509Certificate2? cached;
         lock (_sync)
         {
-            if (_selfSignedCache is not null)
-            {
-                return _selfSignedCache;
-            }
+            cached = _selfSignedCache;
         }
 
-        byte[] pfx;
-        if (File.Exists(_certificateFilePath))
+        if (cached is not null && CoversAddresses(cached, required))
         {
-            byte[] protectedBytes = await File.ReadAllBytesAsync(_certificateFilePath, cancellationToken)
-                .ConfigureAwait(false);
-            try
-            {
-                pfx = _protector.Unprotect(protectedBytes);
-            }
-            catch (Exception exception)
-            {
-                throw new InvalidOperationException(
-                    "The stored server certificate could not be decrypted.", exception);
-            }
-        }
-        else
-        {
-            pfx = GenerateSelfSignedPfx();
-            await File.WriteAllBytesAsync(_certificateFilePath, _protector.Protect(pfx), cancellationToken)
-                .ConfigureAwait(false);
+            return cached;
         }
 
-        var certificate = LoadPfx(pfx, password: string.Empty);
-        lock (_sync)
+        await _selfSignedGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _selfSignedCache ??= certificate;
-        }
+            lock (_sync)
+            {
+                cached = _selfSignedCache;
+            }
 
-        return certificate;
+            if (cached is not null && CoversAddresses(cached, required))
+            {
+                return cached;
+            }
+
+            X509Certificate2? certificate = null;
+
+            if (File.Exists(_certificateFilePath))
+            {
+                byte[] protectedBytes = await File.ReadAllBytesAsync(_certificateFilePath, cancellationToken)
+                    .ConfigureAwait(false);
+
+                byte[] storedPfx;
+                try
+                {
+                    storedPfx = _protector.Unprotect(protectedBytes);
+                }
+                catch (Exception exception)
+                {
+                    throw new InvalidOperationException(
+                        "The stored server certificate could not be decrypted.", exception);
+                }
+
+                certificate = LoadPfx(storedPfx, password: string.Empty);
+
+                if (!CoversAddresses(certificate, required))
+                {
+                    // 已落盘证书的 SAN 覆盖不到当前监听端点（监听地址被改、DHCP 换址等）：
+                    // 继续使用只会让客户端主机名校验必然失败，因此丢弃并重新生成。
+                    certificate.Dispose();
+                    certificate = null;
+                }
+            }
+
+            if (certificate is null)
+            {
+                var generatedPfx = GenerateSelfSignedPfx(required);
+                await File.WriteAllBytesAsync(
+                        _certificateFilePath,
+                        _protector.Protect(generatedPfx),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                certificate = LoadPfx(generatedPfx, password: string.Empty);
+            }
+
+            lock (_sync)
+            {
+                // 旧缓存证书不在此处释放：可能仍被在途 TLS 连接使用，释放会直接打断这些连接。
+                _selfSignedCache = certificate;
+            }
+
+            return certificate;
+        }
+        finally
+        {
+            _selfSignedGate.Release();
+        }
     }
 
-    private byte[] GenerateSelfSignedPfx()
+    /// <summary>
+    /// 当前配置下 SAN 必须覆盖的 IP 集合。监听具体地址时只需覆盖该地址与回环；
+    /// 监听 0.0.0.0 / 地址不可解析时，客户端可能从任一本机地址连入，故全部活动 IPv4 都必须覆盖。
+    /// </summary>
+    private static IReadOnlyCollection<IPAddress> RequiredSanAddresses(RemoteSettingsDocument settings)
+    {
+        var required = new HashSet<IPAddress> { IPAddress.Loopback };
+
+        if (IPAddress.TryParse(settings.ListenAddress, out var listenAddress)
+            && !listenAddress.Equals(IPAddress.Any)
+            && !listenAddress.Equals(IPAddress.IPv6Any))
+        {
+            required.Add(listenAddress);
+            return required;
+        }
+
+        foreach (var address in EnumerateLocalIpv4())
+        {
+            required.Add(address);
+        }
+
+        return required;
+    }
+
+    /// <summary>
+    /// 本机当前活动的非回环 IPv4 地址。仅读取本机网络配置（托管
+    /// <c>System.Net.NetworkInformation</c>），不扫描、不自动发现、不访问公网，无 P/Invoke。
+    /// 枚举失败返回空清单（只保证回环覆盖，绝不假装覆盖了未知地址）。
+    /// </summary>
+    private static IReadOnlyList<IPAddress> EnumerateLocalIpv4()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(networkInterface => networkInterface.OperationalStatus == OperationalStatus.Up)
+                .Where(networkInterface => networkInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .SelectMany(networkInterface => networkInterface.GetIPProperties().UnicastAddresses)
+                .Select(unicast => unicast.Address)
+                .Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+                .Distinct()
+                .ToList();
+        }
+        catch (NetworkInformationException)
+        {
+            return Array.Empty<IPAddress>();
+        }
+    }
+
+    /// <summary>本机主机名（用于 DNS SAN）。读取本地配置，不做名称解析查询。</summary>
+    private static IReadOnlyList<string> EnumerateLocalDnsNames()
+    {
+        try
+        {
+            var hostName = Dns.GetHostName();
+            if (string.IsNullOrWhiteSpace(hostName)
+                || string.Equals(hostName, "localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                return Array.Empty<string>();
+            }
+
+            return new[] { hostName };
+        }
+        catch (SocketException)
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>证书 SAN 是否覆盖全部所需 IP。SAN 缺失/无法解析一律判为不覆盖（fail-closed → 重新生成）。</summary>
+    private static bool CoversAddresses(
+        X509Certificate2 certificate,
+        IReadOnlyCollection<IPAddress> required)
+    {
+        if (required.Count == 0)
+        {
+            return true;
+        }
+
+        var present = ReadSanIpAddresses(certificate);
+        return required.All(present.Contains);
+    }
+
+    private static HashSet<IPAddress> ReadSanIpAddresses(X509Certificate2 certificate)
+    {
+        var present = new HashSet<IPAddress>();
+
+        foreach (var extension in certificate.Extensions)
+        {
+            if (!string.Equals(extension.Oid?.Value, SubjectAlternativeNameOid, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            try
+            {
+                var san = new X509SubjectAlternativeNameExtension(extension.RawData, extension.Critical);
+                foreach (var address in san.EnumerateIPAddresses())
+                {
+                    present.Add(address);
+                }
+            }
+            catch (CryptographicException)
+            {
+                // SAN 编码无法解析：不计入已覆盖集合（fail-closed）。
+            }
+        }
+
+        return present;
+    }
+
+    private byte[] GenerateSelfSignedPfx(IReadOnlyCollection<IPAddress> requiredAddresses)
     {
         var now = _clock.UtcNow;
         using var rsa = RSA.Create(SelfSignedKeyBits);
@@ -162,7 +338,31 @@ public sealed class RemoteCertificateService
 
         var san = new SubjectAlternativeNameBuilder();
         san.AddDnsName("localhost");
-        san.AddIpAddress(System.Net.IPAddress.Loopback);
+
+        foreach (var hostName in EnumerateLocalDnsNames())
+        {
+            try
+            {
+                san.AddDnsName(hostName);
+            }
+            catch (Exception exception) when (exception is ArgumentException or CryptographicException)
+            {
+                // 主机名不适合作为 DNS SAN（中文计算机名等非 ASCII 名称在此会被拒绝）：
+                // 跳过该 DNS 条目即可，局域网客户端按 IP 连入，IP SAN 覆盖不受影响。
+            }
+        }
+
+        var addresses = new HashSet<IPAddress> { IPAddress.Loopback, IPAddress.IPv6Loopback };
+        foreach (var address in requiredAddresses)
+        {
+            addresses.Add(address);
+        }
+
+        foreach (var address in addresses)
+        {
+            san.AddIpAddress(address);
+        }
+
         request.CertificateExtensions.Add(san.Build());
 
         using var selfSigned = request.CreateSelfSigned(now.AddDays(-1), now.AddYears(1));

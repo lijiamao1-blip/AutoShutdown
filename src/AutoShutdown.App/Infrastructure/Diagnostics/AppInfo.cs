@@ -8,9 +8,12 @@ namespace AutoShutdown.App.Infrastructure.Diagnostics;
 /// <summary>
 /// 关于页与诊断中心的只读产品/构建/签名信息快照（S-UI1）。
 ///
-/// 全部为运行时自证数据：版本、构建提交、候选包签名状态均如实读取，绝不伪称。
-/// 当前仓库无签名证书，发布候选在账本中登记为 unsigned-candidate；此处运行时可执行
-/// 文件做 Authenticode 探测并把结果如实附在标签之后。
+/// 全部为运行时自证数据：版本、构建提交、签名状态均如实读取，绝不伪称。
+///
+/// 签名状态（S-UI1-D1）：此前无论探测结果如何，标签一律以 unsigned-candidate 开头——
+/// 即使真的探测到了 Authenticode 证书，也会输出「unsigned-candidate（…带 Authenticode
+/// 证书…）」这种自相矛盾的句子，且一旦将来真的签了名，关于页仍会说没签名。
+/// 现在改为如实反映探测结果：探到证书报 signed，探不到报 unsigned，探测本身失败报未知。
 /// </summary>
 public static class AppInfo
 {
@@ -27,7 +30,11 @@ public static class AppInfo
         ? UiTestEnvironment.BuildCommit
         : FormatCommit(InformationalVersion);
 
-    /// <summary>候选包签名状态：如实标记 unsigned-candidate，并附运行时 Authenticode 探测结果。</summary>
+    /// <summary>
+    /// 当前运行的可执行文件的 Authenticode 签名状态，如实反映运行时探测结果。
+    /// 注意语义边界：探测只确认文件内嵌了证书，不校验证书链、吊销状态与时间戳，
+    /// 因此 signed 只表示「带签名」，不表示「签名可信」。
+    /// </summary>
     public static string SigningStatusText { get; } = DetectSigningStatus();
 
     /// <summary>数据目录（AUTOSHUTDOWN_DATA_ROOT 覆盖或默认 %LocalAppData%\AutoShutdown）。</summary>
@@ -66,7 +73,7 @@ public static class AppInfo
         var path = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(path))
         {
-            return "unsigned-candidate（无法定位可执行文件，未做 Authenticode 签名）";
+            return "unknown（无法定位当前可执行文件，签名状态不可判定）";
         }
 
         try
@@ -75,15 +82,16 @@ public static class AppInfo
             var subject = string.IsNullOrWhiteSpace(certificate.Subject)
                 ? "（未知颁发者）"
                 : certificate.Subject;
-            return $"unsigned-candidate（候选包发布物；本机运行文件带 Authenticode 证书 {subject}，仍以发布签名清单为准）";
+            // 仅确认内嵌了证书；未校验证书链/吊销/时间戳，措辞不得越过这一边界。
+            return $"signed（当前运行文件带 Authenticode 证书 {subject}；未校验证书链与吊销状态）";
         }
         catch (CryptographicException)
         {
-            return "unsigned-candidate（当前运行文件未做 Authenticode 签名，如实标记）";
+            return "unsigned（当前运行文件未做 Authenticode 签名）";
         }
         catch (Exception)
         {
-            return "unsigned-candidate（签名状态检测不可用，如实标记）";
+            return "unknown（签名状态检测不可用）";
         }
     }
 }

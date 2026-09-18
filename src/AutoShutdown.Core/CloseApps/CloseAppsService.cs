@@ -22,13 +22,6 @@ public sealed class CloseAppsService
 {
     private const int MaxSummaryLength = 200;
 
-    private static readonly HashSet<string> CriticalProcessNames =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "system", "idle", "registry", "memory compression", "csrss", "winlogon",
-            "services", "lsass", "smss", "wininit", "dwm", "fontdrvhost", "audiodg", "svchost"
-        };
-
     private readonly IConfigurationService _configurationService;
     private readonly IProcessManager _processManager;
     private readonly IAppWindowManager _windowManager;
@@ -304,7 +297,9 @@ public sealed class CloseAppsService
         }
 
         // 系统关键进程（防御纵深；会话检查之外再按关键名收敛）。
-        return CriticalProcessNames.Contains(process.ProcessName);
+        // 清单与选择端共用 CriticalSystemProcesses（S-CRIT1）：两端各自维护会漂移，
+        // 导致「界面拦得住、执行端拦不住」——手改 config.json 的目标可绕过选择端保护。
+        return CriticalSystemProcesses.IsCritical(process.ProcessName);
     }
 
     private static bool IsSuccess(CloseAppStatus status) => status switch

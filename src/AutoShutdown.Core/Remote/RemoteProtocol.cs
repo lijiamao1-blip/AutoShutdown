@@ -29,8 +29,22 @@ public static class RemoteProtocol
     /// <summary>时间戳容差（毫秒）。|now - timestamp| 超过即拒绝（Unauthorized）。</summary>
     public const long TimestampToleranceMs = 5 * 60 * 1000;
 
-    /// <summary>nonce 防重放缓存 TTL（毫秒），与时间窗一致。</summary>
-    public const long NonceTtlMs = TimestampToleranceMs;
+    /// <summary>
+    /// nonce 防重放缓存 TTL（毫秒）。必须覆盖「同一条请求仍可能被接受」的完整区间，
+    /// 否则 nonce 会在请求仍处于有效时间窗内被清理，打开重放窗口。
+    ///
+    /// 推导：时间戳判据是 |now - timestamp| ≤ TimestampToleranceMs，即同时容忍落后与超前
+    /// 各 TimestampToleranceMs。设一条请求携带的时间戳为 T、首次到达时刻为 A：
+    /// 客户端时钟超前时 T 最大可达 A + TimestampToleranceMs，而该请求的时间戳窗口一直
+    /// 延续到 T + TimestampToleranceMs = A + 2 × TimestampToleranceMs。
+    /// 若 TTL 只取 1 × TimestampToleranceMs，nonce 在 A + TimestampToleranceMs 即被清理，
+    /// 而原请求在此后仍有最长 TimestampToleranceMs 的时间窗可通过校验——抓包重放一次即可成功。
+    /// 因此 TTL 取 2 × TimestampToleranceMs，保证 nonce 的存活期完整覆盖时间戳有效期。
+    ///
+    /// 注意：TTL 加倍会使 nonce 在缓存中的驻留时间加倍，容量压力相应上升；
+    /// <see cref="NonceCacheMaxEntries"/> 按此已留有余量（10000 条 / 10 分钟 ≈ 16 请求每秒）。
+    /// </summary>
+    public const long NonceTtlMs = 2 * TimestampToleranceMs;
 
     /// <summary>nonce 防重放缓存最大条目数（到达后先清理过期项，仍满则拒绝新条目，绝不越限）。</summary>
     public const int NonceCacheMaxEntries = 10000;

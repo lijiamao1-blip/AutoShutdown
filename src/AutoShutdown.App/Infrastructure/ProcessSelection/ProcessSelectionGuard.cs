@@ -34,14 +34,13 @@ public sealed record ProcessSelectionDecision(bool Selectable, string? Reason)
 /// </summary>
 public static class ProcessSelectionGuard
 {
-    /// <summary>Windows 核心系统进程名（与 CloseApps 执行边界关键名一致 + 补充防御）。</summary>
-    public static readonly IReadOnlySet<string> CriticalSystemProcessNames =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "system", "idle", "registry", "memory compression", "csrss", "winlogon",
-            "services", "lsass", "smss", "wininit", "dwm", "fontdrvhost", "audiodg",
-            "svchost", "lsaiso", "wininit", "conhost", "fontdrvhost"
-        };
+    /// <summary>
+    /// Windows 核心系统进程名。单一事实源是 <see cref="CriticalSystemProcesses.Names"/>
+    /// （S-CRIT1）；此处保留同名公开成员作为别名，选择端与执行端共用同一份清单，
+    /// 不会再出现两份手工清单漂移（原清单中 wininit / fontdrvhost 各重复了一次，
+    /// 正是手工维护留下的痕迹）。
+    /// </summary>
+    public static IReadOnlySet<string> CriticalSystemProcessNames => CriticalSystemProcesses.Names;
 
     /// <summary>AutoShutdown 辅助进程的可执行文件基名（不含扩展名）。</summary>
     public static readonly IReadOnlySet<string> KnownHelperExecutableNames =
@@ -141,9 +140,9 @@ public static class ProcessSelectionGuard
             return ProcessSelectionDecision.NotSelectable("AutoShutdown 辅助进程，不可选择");
         }
 
-        // Windows 核心系统进程：按进程名与可执行文件基名双查。
-        if (CriticalSystemProcessNames.Contains(info.ProcessName)
-            || CriticalSystemProcessNames.Contains(fileName))
+        // Windows 核心系统进程：按进程名与可执行文件基名双查（共享清单）。
+        if (CriticalSystemProcesses.IsCritical(info.ProcessName)
+            || CriticalSystemProcesses.IsCritical(fileName))
         {
             return ProcessSelectionDecision.NotSelectable("Windows 系统关键进程，不可选择");
         }

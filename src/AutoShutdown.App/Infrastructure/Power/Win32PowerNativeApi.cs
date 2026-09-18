@@ -28,11 +28,15 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
     private const uint TOKEN_QUERY = 0x0008;
     private const uint SE_PRIVILEGE_ENABLED = 0x00000002;
 
+    // AdjustTokenPrivileges 的「部分成功」语义：调用本身可以成功（返回 TRUE），
+    // 同时因为账户并不持有请求的权限而什么都没启用，此时 LastError = ERROR_NOT_ALL_ASSIGNED。
+    private const int ErrorSuccess = 0;
+
     public (bool Succeeded, int? NativeErrorCode) Shutdown(bool forceIfHung = false)
     {
-        if (!EnableShutdownPrivilege())
+        if (!EnableShutdownPrivilege(out var privilegeError))
         {
-            return (false, Marshal.GetLastWin32Error());
+            return (false, privilegeError);
         }
 
         var flags = EWX_SHUTDOWN | EWX_POWEROFF | (forceIfHung ? EWX_FORCEIFHUNG : 0);
@@ -42,9 +46,9 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
 
     public (bool Succeeded, int? NativeErrorCode) Restart(bool forceIfHung = false)
     {
-        if (!EnableShutdownPrivilege())
+        if (!EnableShutdownPrivilege(out var privilegeError))
         {
-            return (false, Marshal.GetLastWin32Error());
+            return (false, privilegeError);
         }
 
         var flags = EWX_REBOOT | (forceIfHung ? EWX_FORCEIFHUNG : 0);
@@ -64,14 +68,29 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
         return ok ? (true, null) : (false, Marshal.GetLastWin32Error());
     }
 
-    /// <summary>为关机/重启获取 SE_SHUTDOWN_NAME 权限；失败时返回 false 并设置 LastWin32Error。</summary>
-    private static bool EnableShutdownPrivilege()
+    /// <summary>
+    /// 为关机/重启获取 SE_SHUTDOWN_NAME 权限。成功返回 true；失败返回 false，并经
+    /// <paramref name="nativeErrorCode"/> 交回**发生在权限环节**的原生错误码。
+    ///
+    /// 关键点（S-POWER-D1）：<c>AdjustTokenPrivileges</c> 的返回值只表示「调用本身没出错」。
+    /// 当账户实际不持有 SeShutdownPrivilege 时它**仍然返回 TRUE**，只是把 LastError 置为
+    /// ERROR_NOT_ALL_ASSIGNED(1300) —— 这是该 API 的既定行为。此前直接以返回值判成功，
+    /// 会让「权限没拿到」伪装成「权限拿到了」，随后 ExitWindowsEx 以 ACCESS_DENIED 失败，
+    /// 日志里呈现的失败原因指向错误的环节，排查会被带偏。因此这里显式复核 LastError。
+    ///
+    /// 错误码在 <c>CloseHandle</c> 之前就地取出：CloseHandle 未声明 SetLastError，
+    /// 不会覆盖托管侧缓存的错误码，但就地取值不依赖这一实现细节。
+    /// </summary>
+    private static bool EnableShutdownPrivilege(out int nativeErrorCode)
     {
+        nativeErrorCode = ErrorSuccess;
+
         if (!OpenProcessToken(
                 GetCurrentProcess(),
                 TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
                 out var token))
         {
+            nativeErrorCode = Marshal.GetLastWin32Error();
             return false;
         }
 
@@ -82,6 +101,7 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
                     "SeShutdownPrivilege",
                     out var luid))
             {
+                nativeErrorCode = Marshal.GetLastWin32Error();
                 return false;
             }
 
@@ -95,13 +115,28 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
                 }
             };
 
-            return AdjustTokenPrivileges(
-                token,
-                disableAllPrivileges: false,
-                ref tokenPrivileges,
-                bufferLength: 0,
-                previousState: IntPtr.Zero,
-                returnLength: IntPtr.Zero);
+            if (!AdjustTokenPrivileges(
+                    token,
+                    disableAllPrivileges: false,
+                    ref tokenPrivileges,
+                    bufferLength: 0,
+                    previousState: IntPtr.Zero,
+                    returnLength: IntPtr.Zero))
+            {
+                nativeErrorCode = Marshal.GetLastWin32Error();
+                return false;
+            }
+
+            // 返回 TRUE 之后必须复核 LastError：典型值 ERROR_NOT_ALL_ASSIGNED(1300)
+            // 表示请求的权限一个都没有被启用。
+            var lastError = Marshal.GetLastWin32Error();
+            if (lastError != ErrorSuccess)
+            {
+                nativeErrorCode = lastError;
+                return false;
+            }
+
+            return true;
         }
         finally
         {
@@ -114,8 +149,16 @@ public sealed class Win32PowerNativeApi : IPowerNativeApi
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ExitWindowsEx(uint uFlags, uint dwReason);
 
+    // SetSuspendState 的原生签名收发的都是 BOOLEAN（1 字节），而 C# 的 bool 默认按 Win32
+    // BOOL（4 字节）编组。参数侧通常无碍，但**返回值**会把寄存器高位的残留字节一并读进来，
+    // 使「睡眠/休眠实际成功」被随机判成失败（或反之）——这类偶发错判极难复现与排查。
+    // 因此返回值与三个参数全部显式声明为 U1（1 字节），与原生 BOOLEAN 对齐（S-POWER-D2）。
     [DllImport("powrprof.dll", SetLastError = true)]
-    private static extern bool SetSuspendState(bool bHibernate, bool fForce, bool fWakeupEventsDisabled);
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool SetSuspendState(
+        [MarshalAs(UnmanagedType.U1)] bool bHibernate,
+        [MarshalAs(UnmanagedType.U1)] bool fForce,
+        [MarshalAs(UnmanagedType.U1)] bool fWakeupEventsDisabled);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetCurrentProcess();

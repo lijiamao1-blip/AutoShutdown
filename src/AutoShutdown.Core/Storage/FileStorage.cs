@@ -5,6 +5,19 @@ namespace AutoShutdown.Core.Storage;
 
 public sealed class FileStorage : IStorage, IDisposable
 {
+    /// <summary>
+    /// 每个逻辑文件保留的 .bak 备份份数上限（S-STORE-D1）。
+    ///
+    /// 此前每次写入都会生成一个以 GUID 命名的备份，且全代码库没有任何清理逻辑
+    /// （日志有 LogRetentionService，备份没有）。任务每次状态迁移都会写一次运行时状态，
+    /// 长期运行的机器上 backups 目录会累积成千上万个小文件——单个只有几 KB，撑不爆磁盘，
+    /// 但会让目录枚举变慢、也让"出问题时翻备份"这件事实际不可用。
+    ///
+    /// 保留最近 N 份即可满足备份的真实用途（回滚到上一个好状态）。按份数而不是按天数保留：
+    /// 份数是确定性的，不依赖系统时钟，也便于测试断言。
+    /// </summary>
+    private const int MaxBackupsPerFile = 10;
+
     private readonly string _dataRoot;
     private readonly string _backupRoot;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -131,6 +144,8 @@ public sealed class FileStorage : IStorage, IDisposable
                 Directory.CreateDirectory(_backupRoot);
                 backupPath = CreateBackupPath(targetPath);
                 File.Replace(temporaryPath, targetPath, backupPath, ignoreMetadataErrors: true);
+                // 备份保留：尽力而为，绝不因清理失败影响这次写入的成功判定。
+                PruneBackups(Path.GetFileName(targetPath));
             }
             else
             {
@@ -219,6 +234,59 @@ public sealed class FileStorage : IStorage, IDisposable
         }
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// 只保留某个逻辑文件最近 <see cref="MaxBackupsPerFile"/> 份备份，其余按最后写入时间删除。
+    /// 全程尽力而为：目录不存在、枚举失败、单个文件被占用都直接跳过，绝不抛出——
+    /// 备份清理是卫生工作，不能反过来让一次成功的写入被判为失败。
+    /// 调用方须持有 <see cref="_writeGate"/>（在 WriteAsync 的写入临界区内调用），
+    /// 因此不会与并发写入产生竞争。
+    /// </summary>
+    private void PruneBackups(string targetFileName)
+    {
+        try
+        {
+            if (!Directory.Exists(_backupRoot))
+            {
+                return;
+            }
+
+            var prefix = targetFileName + ".";
+            // 通配符筛选后再在托管侧复核前后缀：Windows 的通配符匹配会连带命中 8.3 短名，
+            // 单靠 GetFiles 的模式可能误伤同目录下的其他文件。
+            var candidates = Directory.GetFiles(_backupRoot, prefix + "*.bak")
+                .Where(path =>
+                {
+                    var name = Path.GetFileName(path);
+                    return name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                        && name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase);
+                })
+                .Select(path => new FileInfo(path))
+                .OrderByDescending(info => info.LastWriteTimeUtc)
+                .Skip(MaxBackupsPerFile)
+                .ToList();
+
+            foreach (var stale in candidates)
+            {
+                try
+                {
+                    stale.Delete();
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private string CreateBackupPath(string targetPath)
