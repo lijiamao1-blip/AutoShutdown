@@ -1,6 +1,6 @@
 # 电脑自动关机助手 AutoShutdown
 
-AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.16**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
+AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.17**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
 
 > 本软件能够执行真实系统电源操作。首次使用请先保存重要文件，并认真阅读下面的安全提醒。
 
@@ -18,12 +18,14 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 
 ## 下载和使用
 
-普通用户不需要下载源码或安装 .NET SDK。请前往仓库右侧的 **Releases**，下载最新的“发给别人使用”ZIP 压缩包：
+普通用户不需要下载源码或安装 .NET SDK。请下载 [v2.0.17 Windows x64 发布包](https://github.com/lijiamao1-blip/AutoShutdown/releases/download/v2.0.17/AutoShutdown-v2.0.17-win-x64.zip)：
 
 1. 下载 ZIP 文件并完整解压。
-2. 双击其中的 `AutoShutdown-*.exe`。
+2. 双击其中的 `AutoShutdown-v2.0.17-S25.a749bb1.exe`，不要单独移动 EXE，需保留解压后的辅助文件。
 3. Windows 首次提示安全确认时，请核对文件来源后再运行。
 4. 在首页选择时间模式、电源动作和提醒时间，然后创建任务。
+
+v2.0.17 正式发布包首次启动会自动启用真实电源模式，顶部显示“真实电源模式”；创建真实电源任务时仍需明确确认。本版不需要寻找“关闭安全测试”按钮。此前 v2.0.12 发布包默认进入安全测试模式，无法在界面中关闭，请更新到 v2.0.17。
 
 [前往 Releases 下载页面](https://github.com/lijiamao1-blip/AutoShutdown/releases)
 
@@ -72,7 +74,7 @@ dotnet test .\AutoShutdown.sln --configuration Release --no-build
 生成发布候选包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.16 -Step S24 -Build release -DistributionMode Production
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.17 -Step S25 -DistributionMode Production
 ```
 
 ## 项目结构
@@ -85,4 +87,4 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 
 ## 当前版本
 
-**v2.0.16** — 保留 v2.0.15 的正式配置初始化和 Explorer 关闭修复，将自包含运行时更新到 .NET 8.0.31，并隔离单实例测试使用的互斥锁，避免正在运行的正式程序干扰构建验证。
+**v2.0.17** — 正式分发包首次启动自动启用真实电源配置，包含此前的 Explorer 关闭修复和单实例测试隔离；修正发布文件的 FileVersion/AssemblyVersion 为 2.0.17.0。
