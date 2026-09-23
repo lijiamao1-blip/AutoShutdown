@@ -105,7 +105,7 @@ function Test-TextLeak {
         [Parameter(Mandatory = $true)][string]$Label
     )
     # 只检查文本类文件；绝不读取二进制 DLL。
-    $badText = @('D:\电脑定时关机重建完整版', 'C:\Users\李佳茂', 'new-chat-5', '\.dotnet-sdk\', 'Codex')
+    $badText = @('D:\电脑定时关机重建完整版', 'C:\Users\', 'new-chat-5', '\.dotnet-sdk\', 'Codex')
     $files = Get-ChildItem -LiteralPath $Stage -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
         $_.Extension -in @('.json', '.config', '.txt', '.md', '.cmd', '.ps1')
     }

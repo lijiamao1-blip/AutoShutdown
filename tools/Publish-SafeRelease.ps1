@@ -9,10 +9,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir   # tools 的上一级 = 项目根
 $version = '1.0.0'
 
-# ---- 1. 定位 .NET SDK：项目已知 SDK 优先，回退 PATH ----
-$knownSdk = 'C:\Users\李佳茂\Documents\Codex\2026-08-10\new-chat-5\work\.dotnet-sdk\dotnet.exe'
+# ---- 1. 定位 .NET SDK：显式指定优先，回退 PATH ----
+$knownSdk = $env:AUTOSHUTDOWN_DOTNET
 $dotnet = $null
-if (Test-Path -LiteralPath $knownSdk) {
+if ($knownSdk -and (Test-Path -LiteralPath $knownSdk)) {
     $dotnet = $knownSdk
 } else {
     $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -120,7 +120,7 @@ function Test-ForbiddenStage([string]$stage, [string]$label) {
     return $hits.Count
 }
 
-$badText = @('D:\电脑定时关机重建完整版', 'C:\Users\李佳茂', 'new-chat-5', '\.dotnet-sdk\', 'Codex')
+$badText = @('D:\电脑定时关机重建完整版', 'C:\Users\', 'new-chat-5', '\.dotnet-sdk\', 'Codex')
 function Test-TextLeak([string]$stage, [string]$label) {
     Write-Host "检查文本泄露: $label"
     # 只检查文本类文件；绝不读取二进制 DLL（-LiteralPath 下 -Include 不生效，故按扩展名过滤）。

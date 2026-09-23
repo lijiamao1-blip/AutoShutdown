@@ -15,14 +15,14 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$sdk = 'C:\Users\李佳茂\Documents\Codex\2026-08-10\new-chat-5\work\.dotnet-sdk\dotnet.exe'
+$sdk = $env:AUTOSHUTDOWN_DOTNET
 $exe = Join-Path $root 'src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.exe'
 
 if ($Build) {
     # ---------- 启动UI预览：先构建再启动 ----------
 
     $dotnet = $null
-    if (Test-Path -LiteralPath $sdk) {
+    if ($sdk -and (Test-Path -LiteralPath $sdk)) {
         $dotnet = $sdk
     }
     elseif (Get-Command dotnet -ErrorAction SilentlyContinue) {
@@ -31,9 +31,8 @@ if ($Build) {
 
     if (-not $dotnet) {
         Write-Host '未找到可用的 .NET SDK。'
-        Write-Host "指定路径不存在：$sdk"
         Write-Host '系统 PATH 中也未找到 dotnet 命令。'
-        Write-Host '请先安装 .NET SDK，或修正脚本中的 SDK 路径。'
+        Write-Host '请先安装 .NET SDK，或通过 AUTOSHUTDOWN_DOTNET 指定 SDK 路径。'
         Read-Host '按回车键退出'
         exit 1
     }
