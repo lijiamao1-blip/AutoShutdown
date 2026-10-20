@@ -4,7 +4,8 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/Colors.xaml" />
+                <!-- 第 0 项为当前皮肤（令牌字典），运行时由 SkinManager 整体替换；控件样式只引用令牌。 -->
+                <ResourceDictionary Source="Themes/Skins/classic-glass.xaml" />
                 <ResourceDictionary Source="Themes/Controls.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

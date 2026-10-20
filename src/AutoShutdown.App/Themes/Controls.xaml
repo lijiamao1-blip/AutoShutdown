@@ -3,41 +3,37 @@
 
     <!-- 玻璃卡片 -->
     <Style x:Key="GlassCardStyle" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource GlassFillBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource GlassFillBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource GlassBorderBrush}" />
         <Setter Property="BorderThickness" Value="2" />
         <Setter Property="CornerRadius" Value="20" />
         <Setter Property="Padding" Value="20" />
-        <Setter Property="Effect" Value="{StaticResource CardShadowEffect}" />
+        <Setter Property="Effect" Value="{DynamicResource CardShadowEffect}" />
     </Style>
 
     <Style x:Key="NavHomeButtonStyle" TargetType="Button">
-        <Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="23"/><Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource HighlightTextBrush}"/><Setter Property="FontSize" Value="23"/><Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="18,10"/><Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-            <Border Background="#2688EE" BorderBrush="#D8FFFFFF" BorderThickness="1.5" CornerRadius="20">
+            <Border Background="{DynamicResource HighlightBrush}" BorderBrush="{DynamicResource NavHomeButtonBorderBrush}" BorderThickness="1.5" CornerRadius="20">
                 <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
             </Border>
         </ControlTemplate></Setter.Value></Setter>
     </Style>
 
-    <Style x:Key="ComingSoonTagStyle" TargetType="Border">
-        <Setter Property="Background" Value="#20FFFFFF"/><Setter Property="BorderBrush" Value="#65FFFFFF"/><Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="6,2"/>
-    </Style>
 
     <Style x:Key="InnerPanelStyle" TargetType="Border">
-        <Setter Property="Background" Value="#72FFFFFF"/><Setter Property="BorderBrush" Value="#70FFFFFF"/><Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Background" Value="{DynamicResource InnerPanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource InnerPanelBorderBrush}"/><Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="18"/><Setter Property="Padding" Value="14,10"/>
     </Style>
 
     <Style x:Key="MicroLabelStyle" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/><Setter Property="FontSize" Value="11"/><Setter Property="Margin" Value="2,0,0,4"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Setter Property="FontSize" Value="11"/><Setter Property="Margin" Value="2,0,0,4"/>
     </Style>
 
     <!-- 分段选择与动作选择：用原生 RadioButton 实现按钮式单选 -->
     <Style x:Key="SegmentRadioStyle" TargetType="RadioButton">
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -51,20 +47,20 @@
                             MinHeight="38"
                             Padding="12,7"
                             CornerRadius="16"
-                            Background="#A8FFFFFF"
-                            BorderBrush="#666A7EB6"
+                            Background="{DynamicResource ChoiceBackgroundBrush}"
+                            BorderBrush="{DynamicResource ChoiceBorderBrush}"
                             BorderThickness="1">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="ChoiceBorder" Property="Background" Value="{StaticResource AccentBlueSoftBrush}" />
-                            <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="#FF9FD7FF" />
-                            <Setter Property="Foreground" Value="White" />
+                            <Setter TargetName="ChoiceBorder" Property="Background" Value="{DynamicResource AccentBlueSoftBrush}" />
+                            <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{DynamicResource ChoiceCheckedBorderBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ChoiceCheckedTextBrush}" />
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{StaticResource HighlightBrush}" />
+                            <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{DynamicResource ChoiceHoverBorderBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="ChoiceBorder" Property="Opacity" Value="0.45" />
@@ -83,41 +79,28 @@
     </Style>
 
     <Style x:Key="GlassCardPurpleStyle" TargetType="Border" BasedOn="{StaticResource GlassCardStyle}">
-        <Setter Property="Background" Value="{StaticResource GlassFillPurpleBrush}" />
-        <Setter Property="BorderBrush" Value="#EEFFFFFF"/>
+        <Setter Property="Background" Value="{DynamicResource GlassFillPurpleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource GlassPurpleBorderBrush}"/>
     </Style>
 
     <Style x:Key="CardTitleOnPurpleStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="#20345F"/>
+        <Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{DynamicResource AccentCardTitleBrush}"/>
     </Style>
 
     <!-- 胶囊标签 -->
     <Style x:Key="CapsuleTagStyle" TargetType="Border">
-        <Setter Property="Background" Value="#3857E5C5" />
-        <Setter Property="BorderBrush" Value="#AA92F6DE" />
+        <Setter Property="Background" Value="{DynamicResource ModeTagBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ModeTagBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="16" />
         <Setter Property="Padding" Value="10,3" />
     </Style>
 
-    <Style x:Key="StatusCardBaseStyle" TargetType="Border" BasedOn="{StaticResource GlassCardStyle}">
-        <Setter Property="Padding" Value="9"/><Setter Property="MinHeight" Value="108"/>
-    </Style>
-    <Style x:Key="StatusCardCyanStyle" TargetType="Border" BasedOn="{StaticResource StatusCardBaseStyle}"><Setter Property="Background" Value="#9980D0F2"/></Style>
-    <Style x:Key="StatusCardBlueStyle" TargetType="Border" BasedOn="{StaticResource StatusCardBaseStyle}"><Setter Property="Background" Value="#99B8A8F0"/></Style>
-    <Style x:Key="StatusCardGreenStyle" TargetType="Border" BasedOn="{StaticResource StatusCardBaseStyle}"><Setter Property="Background" Value="#9986E0B4"/></Style>
-    <Style x:Key="IconCircleBaseStyle" TargetType="Border"><Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="CornerRadius" Value="20"/><Setter Property="BorderBrush" Value="#E8FFFFFF"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Margin" Value="0,0,0,5"/></Style>
-    <Style x:Key="CyanIconCircleStyle" TargetType="Border" BasedOn="{StaticResource IconCircleBaseStyle}"><Setter Property="Background" Value="#80D0F2"/></Style>
-    <Style x:Key="BlueIconCircleStyle" TargetType="Border" BasedOn="{StaticResource IconCircleBaseStyle}"><Setter Property="Background" Value="#B8A8F0"/></Style>
-    <Style x:Key="GreenIconCircleStyle" TargetType="Border" BasedOn="{StaticResource IconCircleBaseStyle}"><Setter Property="Background" Value="#86E0B4"/></Style>
-    <Style x:Key="StatusIconTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="19"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
-    <Style x:Key="StatusTitleStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
-    <Style x:Key="StatusValueStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/><Setter Property="FontSize" Value="11"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,4,0,0"/></Style>
 
-    <!-- 主按钮：统一操作蓝实心（与"倒计时"选中态同源 #2F80ED） -->
+    <!-- 主按钮：统一操作蓝实心（与"倒计时"选中态同源 AccentBlueBrush） -->
     <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource AccentBlueBrush}" />
-        <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="Background" Value="{DynamicResource AccentBlueBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryButtonTextBrush}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Padding" Value="20,10" />
@@ -127,7 +110,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
-                            BorderBrush="{StaticResource AccentBlueBorderBrush}"
+                            BorderBrush="{DynamicResource AccentBlueBorderBrush}"
                             BorderThickness="2"
                             CornerRadius="16">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
@@ -136,10 +119,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBlueHoverBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBlueHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBluePressedBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBluePressedBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
@@ -158,7 +141,7 @@
     <!-- 次级按钮：蓝色描边（边框加粗至 2px，内边距加大，改善浅色背景上的可辨识度） -->
     <Style x:Key="SecondaryButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource HighlightBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource SecondaryButtonTextBrush}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="22,10" />
         <Setter Property="Cursor" Value="Hand" />
@@ -167,7 +150,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
-                            BorderBrush="{StaticResource HighlightBrush}"
+                            BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
                             BorderThickness="2"
                             CornerRadius="16">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
@@ -176,7 +159,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#182F80ED" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SecondaryButtonHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
@@ -190,7 +173,7 @@
     <!-- 危险按钮：红色描边 -->
     <Style x:Key="DangerButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="18,9" />
         <Setter Property="Cursor" Value="Hand" />
@@ -199,7 +182,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
-                            BorderBrush="{StaticResource DangerBrush}"
+                            BorderBrush="{DynamicResource DangerBrush}"
                             BorderThickness="1.5"
                             CornerRadius="16">
                         <ContentPresenter HorizontalAlignment="Center"
@@ -207,7 +190,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#18E5484D" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource DangerHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
@@ -220,8 +203,8 @@
 
     <!-- 危险按钮（实心深红）：供"取消任务"使用，不应用给普通按钮 -->
     <Style x:Key="DangerSolidButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource DangerSolidBrush}" />
-        <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="Background" Value="{DynamicResource DangerSolidBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource DangerTextOnSolidBrush}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Padding" Value="18,9" />
@@ -231,7 +214,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
-                            BorderBrush="{StaticResource DangerSolidBorderBrush}"
+                            BorderBrush="{DynamicResource DangerSolidBorderBrush}"
                             BorderThickness="1.5"
                             CornerRadius="16">
                         <ContentPresenter HorizontalAlignment="Center"
@@ -239,10 +222,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DangerSolidHoverBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource DangerSolidHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DangerSolidPressedBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource DangerSolidPressedBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
@@ -256,7 +239,7 @@
     <!-- 弱化文字按钮（清除记录用） -->
     <Style x:Key="SubtleButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Padding" Value="10,5" />
         <Setter Property="Cursor" Value="Hand" />
@@ -271,7 +254,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#142F80ED" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleButtonHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
@@ -283,27 +266,21 @@
     </Style>
 
     <Style x:Key="HeaderButtonStyle" TargetType="Button">
-        <Setter Property="Foreground" Value="#29496F"/><Setter Property="Padding" Value="10,5"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Foreground" Value="{DynamicResource HeaderButtonTextBrush}"/><Setter Property="Padding" Value="10,5"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="MinHeight" Value="32"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-            <Border x:Name="HeaderButtonBorder" Background="#99FFFFFF" BorderBrush="#66B4C8E6" BorderThickness="1" CornerRadius="10">
+            <Border x:Name="HeaderButtonBorder" Background="{DynamicResource HeaderButtonBackgroundBrush}" BorderBrush="{DynamicResource HeaderButtonBorderBrush}" BorderThickness="1" CornerRadius="10">
                 <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderButtonBorder" Property="Background" Value="#32FFFFFF"/><Setter TargetName="HeaderButtonBorder" Property="BorderBrush" Value="White"/></Trigger>
-                <Trigger Property="IsPressed" Value="True"><Setter TargetName="HeaderButtonBorder" Property="Background" Value="#48FFFFFF"/></Trigger>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderButtonBorder" Property="Background" Value="{DynamicResource HeaderButtonHoverBrush}"/><Setter TargetName="HeaderButtonBorder" Property="BorderBrush" Value="{DynamicResource HeaderButtonHoverBorderBrush}"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="HeaderButtonBorder" Property="Background" Value="{DynamicResource HeaderButtonPressedBrush}"/></Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate></Setter.Value></Setter>
-    </Style>
-    <Style x:Key="LightOutlineButtonStyle" TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
-        <Setter Property="Foreground" Value="White"/><Setter Property="Padding" Value="14,9"/>
-    </Style>
-    <Style x:Key="SubtleOnDarkButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-        <Setter Property="Foreground" Value="#C9D4F2"/>
     </Style>
 
     <!-- 清除记录专用按钮：浅色玻璃卡片上的弱化文字按钮（替代误用于浅底的 SubtleOnDarkButtonStyle） -->
     <Style x:Key="ClearRecordButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="FontSize" Value="13" />
     </Style>
 
@@ -314,7 +291,7 @@
 
     <!-- 导航项 -->
     <Style x:Key="NavItemStyle" TargetType="ListBoxItem">
-        <Setter Property="Foreground" Value="{StaticResource TextOnDarkBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextOnDarkBrush}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="12,10" />
         <Setter Property="Cursor" Value="Hand" />
@@ -329,11 +306,11 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HighlightBrush}" />
-                            <Setter Property="Foreground" Value="{StaticResource HighlightTextBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HighlightBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource HighlightTextBrush}" />
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavItemHoverBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource NavItemHoverBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -345,22 +322,22 @@
     <Style x:Key="CardTitleStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="20" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
     <!-- 卡片字段标签 -->
     <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="16" />
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
 
     <!-- 输入框 -->
     <Style x:Key="InputBoxStyle" TargetType="TextBox">
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="8,6" />
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
-        <Setter Property="Background" Value="#CCFFFFFF" />
-        <Setter Property="BorderBrush" Value="#66435A9C" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
@@ -384,9 +361,9 @@
     <Style x:Key="InputComboStyle" TargetType="ComboBox">
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="8,6" />
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
-        <Setter Property="Background" Value="#CCFFFFFF" />
-        <Setter Property="BorderBrush" Value="#80B4C8E6" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ComboBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
@@ -408,18 +385,17 @@
                                         <Grid Margin="12,0,10,0">
                                             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="22"/></Grid.ColumnDefinitions>
                                             <ContentPresenter Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="1" Text="⌄" FontSize="15" Foreground="#536985" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="⌄" FontSize="15" Foreground="{DynamicResource ComboArrowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="#2688EE"/></Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource InputHoverBorderBrush}"/></Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
                         <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
-                            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="260" Background="#F8FFFFFF" BorderBrush="#662688EE" BorderThickness="1" CornerRadius="12" Padding="4">
-                                <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.10"/></Border.Effect>
+                            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="260" Background="{DynamicResource PopupBackgroundBrush}" BorderBrush="{DynamicResource PopupBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="4" Effect="{DynamicResource PopupShadowEffect}">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel IsItemsHost="True"/></ScrollViewer>
                             </Border>
                         </Popup>
@@ -437,7 +413,7 @@
     </Style>
 
     <Style x:Key="ActivityItemStyle" TargetType="ListBoxItem">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Padding" Value="4,2" />
         <Setter Property="Template">

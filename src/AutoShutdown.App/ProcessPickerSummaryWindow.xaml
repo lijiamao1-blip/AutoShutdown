@@ -4,8 +4,8 @@
         Title="确认添加运行中的程序目标"
         Width="720" Height="520" MinWidth="600" MinHeight="400"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource TextPrimaryBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
 
     <Window.Resources>
         <!-- S-CLOSEUI1-D1：独立窗口必须自带 BoolToVisibility（MainWindow/选择窗的实例资源
@@ -26,25 +26,25 @@
 
         <!-- 标题 + 提示文字 -->
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"
+            <TextBlock FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" TextWrapping="Wrap"
                        Text="{Binding TitleText}" />
-            <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
+            <TextBlock FontSize="12" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
                        Text="任务执行时只按以下完整路径匹配。不会按进程名自动兜底，也不会自动授予强制结束权限。" />
         </StackPanel>
 
         <!-- 重新选择模式：原路径 / 新路径 -->
         <StackPanel Grid.Row="1" Margin="0,0,0,12" Visibility="{Binding ShowOriginalPath, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,3">
+            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,3">
                 <Run Text="原路径："/><Run Text="{Binding OriginalPath, Mode=OneWay}"/>
             </TextBlock>
-            <TextBlock FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,0,0,3">
+            <TextBlock FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}" TextWrapping="Wrap" Margin="0,0,0,3">
                 <Run Text="新路径："/><Run Text="{Binding NewPathText, Mode=OneWay}"/>
             </TextBlock>
-            <TextBlock Text="确认替换：将用新路径替换原失效目标。" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap"/>
+            <TextBlock Text="确认替换：将用新路径替换原失效目标。" FontSize="12" Foreground="{DynamicResource WarningTextBrush}" TextWrapping="Wrap"/>
         </StackPanel>
 
         <!-- 摘要条目 -->
-        <TextBlock Grid.Row="2" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"
+        <TextBlock Grid.Row="2" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"
                    Text="{Binding SummaryCountText}" />
         <ScrollViewer x:Name="SummaryItemsScrollViewer" Grid.Row="3" Margin="0,0,0,10"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
@@ -59,11 +59,11 @@
                                     <ColumnDefinition Width="80"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding ProcessNameDisplay}" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
+                                <TextBlock Text="{Binding ProcessNameDisplay}" FontSize="13" Foreground="{DynamicResource TextPrimaryBrush}"
                                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+                                <TextBlock Grid.Column="1" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"
                                            Text="{Binding ProcessId, StringFormat=PID {0}}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                <TextBlock Grid.Column="2" Text="{Binding PathDisplay}" FontSize="12" Foreground="{StaticResource TextPrimaryBrush}"
+                                <TextBlock Grid.Column="2" Text="{Binding PathDisplay}" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}"
                                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0,0,0"
                                            ToolTip="{Binding PathDisplay}"/>
                             </Grid>
@@ -74,12 +74,12 @@
         </ScrollViewer>
 
         <!-- 窗口标题（仅展示） -->
-        <TextBlock Grid.Row="4" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
+        <TextBlock Grid.Row="4" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
             <Run Text="窗口标题："/><Run Text="{Binding WindowTitlesText, Mode=OneWay}"/>
         </TextBlock>
 
         <!-- 排除项警告 -->
-        <TextBlock Grid.Row="5" Text="{Binding Warnings}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap"
+        <TextBlock Grid.Row="5" Text="{Binding Warnings}" FontSize="12" Foreground="{DynamicResource ErrorTextBrush}" TextWrapping="Wrap"
                    Margin="0,0,0,10" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}"/>
 
         <!-- 底部按钮 -->

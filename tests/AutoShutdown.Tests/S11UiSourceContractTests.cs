@@ -440,7 +440,8 @@ public sealed class S11UiSourceContractTests
     [Fact]
     public void ThemeResourceDictionaries_ExistAndAreNonEmpty()
     {
-        var colors = ReadAppFile("Themes", "Colors.xaml");
+        // 颜色令牌已迁入皮肤字典：经典皮肤 classic-glass.xaml 是令牌契约的唯一事实源。
+        var colors = ReadAppFile("Themes", "Skins", "classic-glass.xaml");
         var controls = ReadAppFile("Themes", "Controls.xaml");
 
         Assert.Contains("ResourceDictionary", colors);

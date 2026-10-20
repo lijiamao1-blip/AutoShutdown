@@ -5,8 +5,8 @@
         Title="从运行中的进程选择关闭目标"
         Width="1080" Height="620" MinWidth="980" MinHeight="520"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource TextPrimaryBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
@@ -15,8 +15,8 @@
         <Style x:Key="PickerRowStyle" TargetType="DataGridRow">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Selectable}" Value="False">
-                    <Setter Property="Foreground" Value="#9AA3B2" />
-                    <Setter Property="Background" Value="#F1F3F8" />
+                    <Setter Property="Foreground" Value="{DynamicResource PickerDisabledRowTextBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PickerDisabledRowBackgroundBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -31,18 +31,18 @@
     <DockPanel Margin="16,14,16,14">
         <!-- 顶栏（S-CLOSEUI1-D1）：搜索 + 两个筛选开关 + 刷新 + 已选择数量 -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-            <TextBlock Text="搜索：" VerticalAlignment="Center" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" />
+            <TextBlock Text="搜索：" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource TextPrimaryBrush}" />
             <TextBox Width="330" Margin="6,0,10,0" VerticalContentAlignment="Center"
                      Style="{StaticResource InputBoxStyle}"
                      AutomationProperties.Name="搜索进程"
                      Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="按进程名、路径、窗口标题、产品名称或公司名称搜索" />
             <CheckBox Content="仅显示有窗口" VerticalAlignment="Center" FontSize="13" Margin="0,0,14,0"
-                      IsChecked="{Binding ShowWindowedOnly}" Foreground="{StaticResource TextPrimaryBrush}"
+                      IsChecked="{Binding ShowWindowedOnly}" Foreground="{DynamicResource TextPrimaryBrush}"
                       AutomationProperties.Name="仅显示有窗口"
                       ToolTip="开启时只显示具有非空窗口标题或可确认主窗口的普通进程（默认开启）"/>
             <CheckBox Content="仅显示可选项" VerticalAlignment="Center" FontSize="13" Margin="0,0,14,0"
-                      IsChecked="{Binding ShowSelectableOnly}" Foreground="{StaticResource TextPrimaryBrush}"
+                      IsChecked="{Binding ShowSelectableOnly}" Foreground="{DynamicResource TextPrimaryBrush}"
                       AutomationProperties.Name="仅显示可选项"
                       ToolTip="开启时隐藏所有不可选项；关闭后可查看系统进程/路径不可读/已添加等项目及其不可用原因（默认开启）"/>
             <Button Content="刷新" Style="{StaticResource SecondaryButtonStyle}" Padding="16,7"
@@ -50,10 +50,10 @@
             <!-- S-CLOSEUI1-D1：不设 AutomationProperties.Name 覆盖，UIA Name 即可见文本「已选择 N 项」，
                  供 UI 冒烟按实时数量断言。 -->
             <TextBlock VerticalAlignment="Center" Margin="12,0,0,0"
-                       FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
+                       FontSize="13" Foreground="{DynamicResource TextPrimaryBrush}"
                        Text="{Binding SelectedCount, StringFormat=已选择 {0} 项}" />
             <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="14,0,0,0"
-                       FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
+                       FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
         </DockPanel>
 
         <!-- 工具行（S-CLOSEUI1-D1）：全选当前可用项 / 取消当前选择 / 取消全部选择 -->
@@ -82,8 +82,8 @@
             </StackPanel>
             <StackPanel>
                 <TextBlock Text="这里只读取当前进程信息，不会启动、关闭或结束任何程序。保存后，任务执行时仅按确认过的完整路径匹配。"
-                           FontSize="12" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,0,8,4" />
-                <TextBlock Text="{Binding WarningText}" FontSize="12" Foreground="#C62828" TextWrapping="Wrap"
+                           FontSize="12" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,0,8,4" />
+                <TextBlock Text="{Binding WarningText}" FontSize="12" Foreground="{DynamicResource ErrorTextBrush}" TextWrapping="Wrap"
                            Margin="0,0,8,4" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}" />
             </StackPanel>
         </DockPanel>

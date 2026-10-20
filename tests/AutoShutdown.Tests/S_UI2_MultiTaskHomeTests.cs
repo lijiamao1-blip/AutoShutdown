@@ -872,12 +872,17 @@ public sealed class S_UI2_MultiTaskHomeTests
     public void Homepage_CurrentTaskCard_TextStaysBlack_OrHighContrast()
     {
         // 当前任务卡内信息文字保持黑/高对比（S-UI1-D3 已将 4 行说明改为 Black，须保持不变）。
+        // 皮肤化后颜色经令牌引用：界面引用令牌，经典皮肤里令牌取值仍为原来的高对比颜色。
         var home = ExtractElementWithVisibility(ReadAppFile("MainWindow.xaml"), "IsHomeVisible");
+        var classic = ReadAppFile("Themes", "Skins", "classic-glass.xaml");
 
         Assert.Contains("下次执行：", home);
-        Assert.Contains("Foreground=\"Black\"", home);
-        Assert.Contains("Foreground=\"#294064\"", home);   // 状态行（深蓝高对比）
-        Assert.Contains("Foreground=\"#E9E1FF\"", home);   // 计数徽标（紫色卡上浅色高对比）
+        Assert.Contains("Foreground=\"{DynamicResource AccentCardTextBrush}\"", home);
+        Assert.Contains("Foreground=\"{DynamicResource CountdownCaptionBrush}\"", home);   // 状态行（深蓝高对比）
+        Assert.Contains("Foreground=\"{DynamicResource CountdownBadgeBrush}\"", home);     // 计数徽标（紫色卡上浅色高对比）
+        Assert.Contains("<SolidColorBrush x:Key=\"AccentCardTextBrush\" Color=\"#000000\" />", classic);
+        Assert.Contains("<SolidColorBrush x:Key=\"CountdownCaptionBrush\" Color=\"#294064\" />", classic);
+        Assert.Contains("<SolidColorBrush x:Key=\"CountdownBadgeBrush\" Color=\"#E9E1FF\" />", classic);
     }
 
     [Fact]
