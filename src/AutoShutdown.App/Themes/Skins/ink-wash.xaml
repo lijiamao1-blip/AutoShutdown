@@ -1,0 +1,163 @@
+<!-- 墨韵 · 水墨：宣纸、叠墨远山与朱砂小印，黛青操作配浓墨数字。
+主色 #F4EFE6；强调 #2E5E6E；危险实心 #A81727 / 描边 #A81727。
+倒计时 #282E30，紧急态 #A81727；浅色克制辉光，深色保留数字边缘清晰。
+不复刻参考图；以同一任务布局独立设计配色与静态矢量。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/AutoShutdown.App;component/Themes/SkinSystemControls.xaml" /></ResourceDictionary.MergedDictionaries>
+    <sys:String x:Key="SkinId">ink-wash</sys:String>
+    <sys:String x:Key="SkinDisplayName">墨韵 · 水墨</sys:String>
+    <sys:String x:Key="SkinDescription">宣纸、叠墨远山与朱砂小印，黛青操作配浓墨数字。</sys:String>
+    <sys:Boolean x:Key="SkinIsDark">False</sys:Boolean>
+    <SolidColorBrush x:Key="SkinPreviewAccentBrush" Color="#B83A2E" />
+    <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#F4EFE6" Offset="0" /><GradientStop Color="#F0ECE3" Offset="0.5" /><GradientStop Color="#E8E5DC" Offset="1" /></LinearGradientBrush>
+    <SolidColorBrush x:Key="CyanGlowBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="PurpleGlowBrush" Color="#00000000" />
+    <DataTemplate x:Key="SkinBackdropTemplate"><Grid ClipToBounds="True"><Viewbox Stretch="UniformToFill" HorizontalAlignment="Right" VerticalAlignment="Bottom"><Canvas Width="1080" Height="640" ClipToBounds="True"><Path Data="M 220,615 Q 325,570 375,584 L 451,530 Q 480,521 540,579 Q 645,553 720,601 L 853,514 Q 900,493 949,570 L 1015,535 L 1080,583 V 640 H 220 Z" Fill="#9EA7A2" Opacity="0.22"/><Path Data="M 220,639 L 340,602 Q 432,561 520,620 Q 610,580 700,623 L 877,555 Q 940,545 990,596 L 1080,566 V 640 H 220 Z" Fill="#647875" Opacity="0.25"/><Path Data="M 220,639 Q 480,616 660,635 Q 851,603 1080,620 V 640 Z" Fill="#3F5655" Opacity="0.28"/><Canvas Canvas.Left="1012" Canvas.Top="560" Opacity="0.55"><Path Data="M 0,0 L 25,1 24,32 1,31 Z" Fill="#B83A2E"/><Path Data="M 6,7 H 19 M 12,5 V 25 M 6,15 H 19 M 6,24 H 19" Stroke="#FFF1DF" StrokeThickness="1.5"/></Canvas></Canvas></Viewbox></Grid></DataTemplate>
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#EAE8DF" />
+    <SolidColorBrush x:Key="HeaderBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="LogoRingBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="LogoRingBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="LogoGlyphBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="HeaderTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="HeaderHintTextBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="HeaderStatusTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ModeTagBackgroundBrush" Color="#FFF0C9" />
+    <SolidColorBrush x:Key="ModeTagBorderBrush" Color="#99752A" />
+    <SolidColorBrush x:Key="ModeTagTextBrush" Color="#563600" />
+    <SolidColorBrush x:Key="HeaderButtonBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="HeaderButtonBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="HeaderButtonTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="HeaderButtonHoverBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="HeaderButtonHoverBorderBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="HeaderButtonPressedBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="NavBackgroundBrush" Color="#EAE8DF" />
+    <SolidColorBrush x:Key="NavBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="NavItemHoverBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="HighlightBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="HighlightTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavHomeButtonBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="NavIconBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="NavTextBrush" Color="#2B2B2B" />
+    <!-- 导航选中项（底色为 HighlightBrush）上的图标与文字 -->
+    <SolidColorBrush x:Key="NavSelectedIconBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavSelectedTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavDividerBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="NavFooterTextBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="GlassFillBrush" Color="#FFFCF5" />
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="GlassFillPurpleBrush" Color="#FBF8F0" />
+    <SolidColorBrush x:Key="GlassPurpleBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="AccentCardTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="AccentCardTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="AccentCardEmphasisBrush" Color="#2B2B2B" />
+    <DropShadowEffect x:Key="CardShadowEffect" Color="#162335" BlurRadius="8" ShadowDepth="1" Opacity="0.07" />
+    <SolidColorBrush x:Key="InnerPanelBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="InnerPanelBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="StatusCardCyanBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="StatusCardBlueBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="StatusCardGreenBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="StatusCardTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="StatusCardValueBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="InfoBoxBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="InfoBoxBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="InfoBoxTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="InfoBoxTextBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="InfoBoxEmphasisBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="PageTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#2B2B2B" />
+    <!-- 未单独指定颜色的文字（窗口默认前景）与下拉框选中值 -->
+    <SolidColorBrush x:Key="DefaultTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ComboTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="TextHintBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="TextEmphasisBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="TextOnDarkBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ProductTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ErrorTextBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#80501B" />
+    <SolidColorBrush x:Key="SuccessTextBrush" Color="#276A42" />
+    <SolidColorBrush x:Key="ActivityTimeBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="ActivityTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ChoiceBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="ChoiceBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="ChoiceHoverBorderBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="AccentBlueSoftBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="ChoiceCheckedBorderBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="ChoiceCheckedTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="AccentBlueHoverBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="AccentBluePressedBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="AccentBlueBorderBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="PrimaryButtonTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SecondaryButtonTextBrush" Color="#282E30" />
+    <SolidColorBrush x:Key="SecondaryButtonBorderBrush" Color="#282E30" />
+    <SolidColorBrush x:Key="SecondaryButtonHoverBrush" Color="#182E5E6E" />
+    <SolidColorBrush x:Key="SubtleButtonHoverBrush" Color="#182E5E6E" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="DangerHoverBrush" Color="#18A81727" />
+    <SolidColorBrush x:Key="DangerSolidBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="DangerSolidHoverBrush" Color="#A71925" />
+    <SolidColorBrush x:Key="DangerSolidPressedBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="DangerSolidBorderBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="DangerTextOnSolidBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="InputBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="ComboBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="InputHoverBorderBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="ComboArrowBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="PopupBackgroundBrush" Color="#FFFCF5" />
+    <SolidColorBrush x:Key="PopupBorderBrush" Color="#D4D0C6" />
+    <DropShadowEffect x:Key="PopupShadowEffect" Color="#162335" BlurRadius="8" ShadowDepth="1" Opacity="0.07" />
+    <SolidColorBrush x:Key="TooltipBackgroundBrush" Color="#18222E" />
+    <SolidColorBrush x:Key="TooltipTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputCaretBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="ListRowHoverBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="ListRowSelectedBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="ListRowSelectedTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="CheckBoxBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="CheckBoxBorderBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="CheckBoxCheckedBackgroundBrush" Color="#2E5E6E" />
+    <SolidColorBrush x:Key="CheckBoxGlyphBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="DataGridBackgroundBrush" Color="#FFFCF5" />
+    <SolidColorBrush x:Key="DataGridAlternateRowBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="DataGridLineBrush" Color="#D4D0C6" />
+    <SolidColorBrush x:Key="DataGridHeaderBackgroundBrush" Color="#F1EEE5" />
+    <SolidColorBrush x:Key="DataGridHeaderTextBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="CalendarBackgroundBrush" Color="#F8FAF7" />
+    <SolidColorBrush x:Key="CalendarBorderBrush" Color="#64716B" />
+    <SolidColorBrush x:Key="CalendarDayTextBrush" Color="#243B35" />
+    <SolidColorBrush x:Key="CalendarInactiveDayTextBrush" Color="#64716B" />
+    <SolidColorBrush x:Key="CalendarTodayBorderBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarTodayTextBrush" Color="#243B35" />
+    <SolidColorBrush x:Key="CalendarHoverBrush" Color="#DFEBE5" />
+    <SolidColorBrush x:Key="CalendarSelectedBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarSelectedBorderBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarSelectedTextBrush" Color="#FFFFFF" />
+    <FontFamily x:Key="CountdownFontFamily">Segoe UI, Microsoft YaHei UI</FontFamily>
+    <SolidColorBrush x:Key="CountdownTextBrush" Color="#282E30" />
+    <DropShadowEffect x:Key="CountdownGlowEffect" Color="#2E5E6E" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="CountdownUrgentBrush" Color="#A81727" />
+    <DropShadowEffect x:Key="CountdownUrgentGlowEffect" Color="#A81727" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="CountdownCaptionBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="CountdownBadgeBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="CountdownIdleTextBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="ReminderWindowBackgroundBrush" Color="#F4EFE6" />
+    <SolidColorBrush x:Key="ReminderGlowBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="ReminderCardFillBrush" Color="#FBF8F0" />
+    <SolidColorBrush x:Key="ReminderCardBorderBrush" Color="#5D5D55" />
+    <DropShadowEffect x:Key="ReminderCardShadowEffect" Color="#162335" BlurRadius="12" ShadowDepth="2" Opacity="0.3" />
+    <SolidColorBrush x:Key="ReminderTitleBrush" Color="#2B2B2B" />
+    <SolidColorBrush x:Key="ReminderMessageBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="ReminderCountdownBrush" Color="#282E30" />
+    <DropShadowEffect x:Key="ReminderCountdownGlowEffect" Color="#2E5E6E" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="ReminderCountdownUrgentBrush" Color="#A81727" />
+    <DropShadowEffect x:Key="ReminderCountdownUrgentGlowEffect" Color="#A81727" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="ReminderErrorTextBrush" Color="#A81727" />
+    <SolidColorBrush x:Key="PickerDisabledRowTextBrush" Color="#5D5D55" />
+    <SolidColorBrush x:Key="PickerDisabledRowBackgroundBrush" Color="#F1EEE5" />
+</ResourceDictionary>

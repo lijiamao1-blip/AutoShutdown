@@ -855,7 +855,9 @@ public sealed class S_UI2_MultiTaskHomeTests
         Assert.Contains("Content=\"清除记录\" Style=\"{StaticResource DangerSolidButtonStyle}\"", home);
         Assert.Contains("Content=\"每周指定星期\"", home);
         Assert.Contains("Content=\"唤醒他机\"", home);
-        Assert.DoesNotContain("Viewbox", home);
+        // 唯一例外：大号倒计时外包一个只缩小不放大的 Viewbox（窄窗口下 88:88:88 不被裁切），其余文字不缩放。
+        Assert.Equal(1, CountOccurrences(home, "<Viewbox "));
+        Assert.Contains("<Viewbox x:Name=\"CountdownViewbox\" StretchDirection=\"DownOnly\"", home);
         Assert.DoesNotContain("TextTrimming", home);
         Assert.Contains("ModeIsCountdown", home);
         Assert.Contains("IsTimeInputVisible", home);

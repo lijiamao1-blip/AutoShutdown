@@ -92,6 +92,9 @@
     <SolidColorBrush x:Key="NavHomeButtonBorderBrush" Color="#D8FFFFFF" />
     <SolidColorBrush x:Key="NavIconBrush" Color="#315A81" />
     <SolidColorBrush x:Key="NavTextBrush" Color="#29496F" />
+    <!-- 导航选中项（底色为 HighlightBrush）上的图标与文字 -->
+    <SolidColorBrush x:Key="NavSelectedIconBrush" Color="#315A81" />
+    <SolidColorBrush x:Key="NavSelectedTextBrush" Color="#29496F" />
     <SolidColorBrush x:Key="NavDividerBrush" Color="#35FFFFFF" />
     <SolidColorBrush x:Key="NavFooterTextBrush" Color="#5B7392" />
 
@@ -140,6 +143,9 @@
     <!-- 直接位于窗口背景上的页面标题与说明 -->
     <SolidColorBrush x:Key="PageTextBrush" Color="#000000" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1C2740" />
+    <!-- 未单独指定颜色的文字（窗口默认前景）与下拉框选中值 -->
+    <SolidColorBrush x:Key="DefaultTextBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ComboTextBrush" Color="#000000" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#43536F" />
     <SolidColorBrush x:Key="TextMutedBrush" Color="#5A6B8C" />
     <SolidColorBrush x:Key="TextHintBrush" Color="#536985" />

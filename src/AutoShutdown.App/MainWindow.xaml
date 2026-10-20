@@ -4,7 +4,7 @@
         xmlns:presentation="clr-namespace:AutoShutdown.App.Presentation"
         xmlns:controls="clr-namespace:AutoShutdown.App.Controls"
         Title="电脑自动关机助手" Icon="/assets/icon.ico" Width="1080" Height="640" MinWidth="900" MinHeight="580"
-        WindowStartupLocation="Manual" Background="{DynamicResource WindowBackgroundBrush}"
+        WindowStartupLocation="Manual" Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource DefaultTextBrush}"
         FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
@@ -134,10 +134,32 @@
                                 <DataTemplate>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Icon}" FontSize="18" Foreground="{DynamicResource NavIconBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="-3,0,0,0"
-                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="17" Foreground="{DynamicResource NavTextBrush}" VerticalAlignment="Center"
-                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
+                                        <TextBlock Text="{Binding Icon}" FontSize="18" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="-3,0,0,0"
+                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource NavIconBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource NavSelectedIconBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="17" VerticalAlignment="Center"
+                                                   LineHeight="23" LineStackingStrategy="BlockLineHeight">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource NavTextBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource NavSelectedTextBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -370,7 +392,21 @@
                                     </Grid>
                                     <StackPanel Margin="0,8,0,0">
                                         <TextBlock Text="{Binding CurrentStateText}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource CountdownCaptionBrush}"/>
-                                        <TextBlock Text="{Binding CountdownText}" Margin="0,2,0,4" CacheMode="BitmapCache"
+                                        <!-- 倒计时只允许按卡片宽度等比缩小（不会放大）：窄窗口或宽字体下 88:88:88 也不被裁切；
+                                             空闲等待的小字说明不缩放。这是首页唯一允许缩放的文字。
+                                             缩放时必须用 Ideal 文字格式：窗口级的 Display 格式在非整数缩放下字形不绘制。 -->
+                                        <Viewbox x:Name="CountdownViewbox" StretchDirection="DownOnly" HorizontalAlignment="Left" Margin="0,2,0,4" TextOptions.TextFormattingMode="Ideal">
+                                            <Viewbox.Style>
+                                                <Style TargetType="Viewbox">
+                                                    <Setter Property="Stretch" Value="Uniform"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsIdleStatusVisible}" Value="True">
+                                                            <Setter Property="Stretch" Value="None"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Viewbox.Style>
+                                        <TextBlock Text="{Binding CountdownText}"
                                                    TextWrapping="NoWrap" MinWidth="390" HorizontalAlignment="Left">
                                             <!-- S-UI1-D2：常规倒计时为 40px 大字白字 + 紫色辉光；空闲任务等待触发（IsIdleStatusVisible）
                                                  时切换为小字号深色换行文本，展示真实空闲时长/阈值，避免长句撑爆卡片。
@@ -400,6 +436,7 @@
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
+                                        </Viewbox>
                                     </StackPanel>
                                     <Grid Margin="0,0,0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

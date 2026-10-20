@@ -21,7 +21,8 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="PickerCheckBoxStyle" TargetType="CheckBox">
+        <!-- 基于当前皮肤的复选框样式（非经典皮肤由 SkinSystemControls 提供；经典皮肤即 Windows 默认）。 -->
+        <Style x:Key="PickerCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="IsEnabled" Value="{Binding Selectable}" />

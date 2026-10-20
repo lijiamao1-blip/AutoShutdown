@@ -1,0 +1,163 @@
+<!-- 森林 · 晨光：晨光天空与层叠针叶林，搭配深森林绿倒计时。
+主色 #DBF1FC；强调 #327548；危险实心 #C62828 / 描边 #C62828。
+倒计时 #205438，紧急态 #B51F2B；浅色克制辉光，深色保留数字边缘清晰。
+只借鉴森林参考图的天空与层林氛围，树形与地形均为原创几何。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/AutoShutdown.App;component/Themes/SkinSystemControls.xaml" /></ResourceDictionary.MergedDictionaries>
+    <sys:String x:Key="SkinId">forest-morning</sys:String>
+    <sys:String x:Key="SkinDisplayName">森林 · 晨光</sys:String>
+    <sys:String x:Key="SkinDescription">晨光天空与层叠针叶林，搭配深森林绿倒计时。</sys:String>
+    <sys:Boolean x:Key="SkinIsDark">False</sys:Boolean>
+    <SolidColorBrush x:Key="SkinPreviewAccentBrush" Color="#3E8E5B" />
+    <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#DBF1FC" Offset="0" /><GradientStop Color="#EDF7EF" Offset="0.5" /><GradientStop Color="#DDEDD0" Offset="1" /></LinearGradientBrush>
+    <SolidColorBrush x:Key="CyanGlowBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="PurpleGlowBrush" Color="#00000000" />
+    <DataTemplate x:Key="SkinBackdropTemplate"><Grid ClipToBounds="True"><Viewbox Stretch="UniformToFill" HorizontalAlignment="Right" VerticalAlignment="Bottom"><Canvas Width="1080" Height="640" ClipToBounds="True"><Ellipse Canvas.Left="855" Canvas.Top="72" Width="160" Height="160"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="#A0FFF7CB" Offset="0"/><GradientStop Color="#00FFF7CB" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse><Path Fill="#BBD8BB" Data="M 220,600 Q 400,544 660,596 Q 880,521 1080,552 V 640 H 220 Z"/><Path Fill="#93BDB1" Data="M 235,552 l -11.375,16.34 h 5.2325 l -15.925,14.44 h 6.825 l -13.65,7.22 h 57.785 l -13.65,-7.22 h 6.825 l -15.925,-14.44 h 5.2325 Z" /><Path Fill="#93BDB1" Data="M 299,529 l -12.8125,26.23 h 5.89375 l -17.9375,23.18 h 7.6875 l -15.375,11.59 h 65.0875 l -15.375,-11.59 h 7.6875 l -17.9375,-23.18 h 5.89375 Z" /><Path Fill="#93BDB1" Data="M 363,506 l -14.25,36.12 h 6.555 l -19.95,31.92 h 8.55 l -17.1,15.96 h 72.39 l -17.1,-15.96 h 8.55 l -19.95,-31.92 h 6.555 Z" /><Path Fill="#93BDB1" Data="M 427,550 l -11.5,17.2 h 5.29 l -16.1,15.2 h 6.9 l -13.8,7.6 h 58.42 l -13.8,-7.6 h 6.9 l -16.1,-15.2 h 5.29 Z" /><Path Fill="#93BDB1" Data="M 491,527 l -12.9375,27.09 h 5.95125 l -18.1125,23.94 h 7.7625 l -15.525,11.97 h 65.7225 l -15.525,-11.97 h 7.7625 l -18.1125,-23.94 h 5.95125 Z" /><Path Fill="#93BDB1" Data="M 555,504 l -14.375,36.98 h 6.6125 l -20.125,32.68 h 8.625 l -17.25,16.34 h 73.025 l -17.25,-16.34 h 8.625 l -20.125,-32.68 h 6.6125 Z" /><Path Fill="#93BDB1" Data="M 619,548 l -11.625,18.06 h 5.3475 l -16.275,15.96 h 6.975 l -13.95,7.98 h 59.055 l -13.95,-7.98 h 6.975 l -16.275,-15.96 h 5.3475 Z" /><Path Fill="#93BDB1" Data="M 683,525 l -13.0625,27.95 h 6.00875 l -18.2875,24.7 h 7.8375 l -15.675,12.35 h 66.3575 l -15.675,-12.35 h 7.8375 l -18.2875,-24.7 h 6.00875 Z" /><Path Fill="#93BDB1" Data="M 747,502 l -14.5,37.84 h 6.67 l -20.3,33.44 h 8.7 l -17.4,16.72 h 73.66 l -17.4,-16.72 h 8.7 l -20.3,-33.44 h 6.67 Z" /><Path Fill="#93BDB1" Data="M 811,546 l -11.75,18.92 h 5.405 l -16.45,16.72 h 7.05 l -14.1,8.36 h 59.69 l -14.1,-8.36 h 7.05 l -16.45,-16.72 h 5.405 Z" /><Path Fill="#93BDB1" Data="M 875,523 l -13.1875,28.81 h 6.06625 l -18.4625,25.46 h 7.9125 l -15.825,12.73 h 66.9925 l -15.825,-12.73 h 7.9125 l -18.4625,-25.46 h 6.06625 Z" /><Path Fill="#93BDB1" Data="M 939,500 l -14.625,38.7 h 6.7275 l -20.475,34.2 h 8.775 l -17.55,17.1 h 74.295 l -17.55,-17.1 h 8.775 l -20.475,-34.2 h 6.7275 Z" /><Path Fill="#93BDB1" Data="M 1003,544 l -11.875,19.78 h 5.4625 l -16.625,17.48 h 7.125 l -14.25,8.74 h 60.325 l -14.25,-8.74 h 7.125 l -16.625,-17.48 h 5.4625 Z" /><Path Fill="#93BDB1" Data="M 1067,521 l -13.3125,29.67 h 6.12375 l -18.6375,26.22 h 7.9875 l -15.975,13.11 h 67.6275 l -15.975,-13.11 h 7.9875 l -18.6375,-26.22 h 6.12375 Z" /><Path Fill="#93BDB1" Data="M 1131,498 l -14.75,39.56 h 6.785 l -20.65,34.96 h 8.85 l -17.7,17.48 h 74.93 l -17.7,-17.48 h 8.85 l -20.65,-34.96 h 6.785 Z" /><Path Fill="#579689" Data="M 252,560 l -12.4375,23.65 h 5.72125 l -17.4125,20.9 h 7.4625 l -14.925,10.45 h 63.1825 l -14.925,-10.45 h 7.4625 l -17.4125,-20.9 h 5.72125 Z" /><Path Fill="#579689" Data="M 316,537 l -13.875,33.54 h 6.3825 l -19.425,29.64 h 8.325 l -16.65,14.82 h 70.485 l -16.65,-14.82 h 8.325 l -19.425,-29.64 h 6.3825 Z" /><Path Fill="#579689" Data="M 380,514 l -15.3125,43.43 h 7.04375 l -21.4375,38.38 h 9.1875 l -18.375,19.19 h 77.7875 l -18.375,-19.19 h 9.1875 l -21.4375,-38.38 h 7.04375 Z" /><Path Fill="#579689" Data="M 444,558 l -12.5625,24.51 h 5.77875 l -17.5875,21.66 h 7.5375 l -15.075,10.83 h 63.8175 l -15.075,-10.83 h 7.5375 l -17.5875,-21.66 h 5.77875 Z" /><Path Fill="#579689" Data="M 508,535 l -14,34.4 h 6.44 l -19.6,30.4 h 8.4 l -16.8,15.2 h 71.12 l -16.8,-15.2 h 8.4 l -19.6,-30.4 h 6.44 Z" /><Path Fill="#579689" Data="M 572,512 l -15.4375,44.29 h 7.10125 l -21.6125,39.14 h 9.2625 l -18.525,19.57 h 78.4225 l -18.525,-19.57 h 9.2625 l -21.6125,-39.14 h 7.10125 Z" /><Path Fill="#579689" Data="M 636,556 l -12.6875,25.37 h 5.83625 l -17.7625,22.42 h 7.6125 l -15.225,11.21 h 64.4525 l -15.225,-11.21 h 7.6125 l -17.7625,-22.42 h 5.83625 Z" /><Path Fill="#579689" Data="M 700,533 l -14.125,35.26 h 6.4975 l -19.775,31.16 h 8.475 l -16.95,15.58 h 71.755 l -16.95,-15.58 h 8.475 l -19.775,-31.16 h 6.4975 Z" /><Path Fill="#579689" Data="M 764,577 l -11.375,16.34 h 5.2325 l -15.925,14.44 h 6.825 l -13.65,7.22 h 57.785 l -13.65,-7.22 h 6.825 l -15.925,-14.44 h 5.2325 Z" /><Path Fill="#579689" Data="M 828,554 l -12.8125,26.23 h 5.89375 l -17.9375,23.18 h 7.6875 l -15.375,11.59 h 65.0875 l -15.375,-11.59 h 7.6875 l -17.9375,-23.18 h 5.89375 Z" /><Path Fill="#579689" Data="M 892,531 l -14.25,36.12 h 6.555 l -19.95,31.92 h 8.55 l -17.1,15.96 h 72.39 l -17.1,-15.96 h 8.55 l -19.95,-31.92 h 6.555 Z" /><Path Fill="#579689" Data="M 956,575 l -11.5,17.2 h 5.29 l -16.1,15.2 h 6.9 l -13.8,7.6 h 58.42 l -13.8,-7.6 h 6.9 l -16.1,-15.2 h 5.29 Z" /><Path Fill="#579689" Data="M 1020,552 l -12.9375,27.09 h 5.95125 l -18.1125,23.94 h 7.7625 l -15.525,11.97 h 65.7225 l -15.525,-11.97 h 7.7625 l -18.1125,-23.94 h 5.95125 Z" /><Path Fill="#579689" Data="M 1084,529 l -14.375,36.98 h 6.6125 l -20.125,32.68 h 8.625 l -17.25,16.34 h 73.025 l -17.25,-16.34 h 8.625 l -20.125,-32.68 h 6.6125 Z" /><Path Fill="#579689" Data="M 1148,573 l -11.625,18.06 h 5.3475 l -16.275,15.96 h 6.975 l -13.95,7.98 h 59.055 l -13.95,-7.98 h 6.975 l -16.275,-15.96 h 5.3475 Z" /><Path Fill="#2F7065" Data="M 269,568 l -13.5,30.96 h 6.21 l -18.9,27.36 h 8.1 l -16.2,13.68 h 68.58 l -16.2,-13.68 h 8.1 l -18.9,-27.36 h 6.21 Z" /><Path Fill="#2F7065" Data="M 333,545 l -14.9375,40.85 h 6.87125 l -20.9125,36.1 h 8.9625 l -17.925,18.05 h 75.8825 l -17.925,-18.05 h 8.9625 l -20.9125,-36.1 h 6.87125 Z" /><Path Fill="#2F7065" Data="M 397,589 l -12.1875,21.93 h 5.60625 l -17.0625,19.38 h 7.3125 l -14.625,9.69 h 61.9125 l -14.625,-9.69 h 7.3125 l -17.0625,-19.38 h 5.60625 Z" /><Path Fill="#2F7065" Data="M 461,566 l -13.625,31.82 h 6.2675 l -19.075,28.12 h 8.175 l -16.35,14.06 h 69.215 l -16.35,-14.06 h 8.175 l -19.075,-28.12 h 6.2675 Z" /><Path Fill="#2F7065" Data="M 525,543 l -15.0625,41.71 h 6.92875 l -21.0875,36.86 h 9.0375 l -18.075,18.43 h 76.5175 l -18.075,-18.43 h 9.0375 l -21.0875,-36.86 h 6.92875 Z" /><Path Fill="#2F7065" Data="M 589,587 l -12.3125,22.79 h 5.66375 l -17.2375,20.14 h 7.3875 l -14.775,10.07 h 62.5475 l -14.775,-10.07 h 7.3875 l -17.2375,-20.14 h 5.66375 Z" /><Path Fill="#2F7065" Data="M 653,564 l -13.75,32.68 h 6.325 l -19.25,28.88 h 8.25 l -16.5,14.44 h 69.85 l -16.5,-14.44 h 8.25 l -19.25,-28.88 h 6.325 Z" /><Path Fill="#2F7065" Data="M 717,541 l -15.1875,42.57 h 6.98625 l -21.2625,37.62 h 9.1125 l -18.225,18.81 h 77.1525 l -18.225,-18.81 h 9.1125 l -21.2625,-37.62 h 6.98625 Z" /><Path Fill="#2F7065" Data="M 781,585 l -12.4375,23.65 h 5.72125 l -17.4125,20.9 h 7.4625 l -14.925,10.45 h 63.1825 l -14.925,-10.45 h 7.4625 l -17.4125,-20.9 h 5.72125 Z" /><Path Fill="#2F7065" Data="M 845,562 l -13.875,33.54 h 6.3825 l -19.425,29.64 h 8.325 l -16.65,14.82 h 70.485 l -16.65,-14.82 h 8.325 l -19.425,-29.64 h 6.3825 Z" /><Path Fill="#2F7065" Data="M 909,539 l -15.3125,43.43 h 7.04375 l -21.4375,38.38 h 9.1875 l -18.375,19.19 h 77.7875 l -18.375,-19.19 h 9.1875 l -21.4375,-38.38 h 7.04375 Z" /><Path Fill="#2F7065" Data="M 973,583 l -12.5625,24.51 h 5.77875 l -17.5875,21.66 h 7.5375 l -15.075,10.83 h 63.8175 l -15.075,-10.83 h 7.5375 l -17.5875,-21.66 h 5.77875 Z" /><Path Fill="#2F7065" Data="M 1037,560 l -14,34.4 h 6.44 l -19.6,30.4 h 8.4 l -16.8,15.2 h 71.12 l -16.8,-15.2 h 8.4 l -19.6,-30.4 h 6.44 Z" /><Path Fill="#2F7065" Data="M 1101,537 l -15.4375,44.29 h 7.10125 l -21.6125,39.14 h 9.2625 l -18.525,19.57 h 78.4225 l -18.525,-19.57 h 9.2625 l -21.6125,-39.14 h 7.10125 Z" /><Path Fill="#2F7065" Data="M 1165,581 l -12.6875,25.37 h 5.83625 l -17.7625,22.42 h 7.6125 l -15.225,11.21 h 64.4525 l -15.225,-11.21 h 7.6125 l -17.7625,-22.42 h 5.83625 Z" /><Path Fill="#B5D395" Data="M 220,634 Q 480,593 700,625 Q 950,591 1080,610 V 640 H 220 Z"/><Path Data="M 870,624 Q 970,612 1080,620" Stroke="#FFF1BE" StrokeThickness="5" Opacity="0.6"/></Canvas></Viewbox></Grid></DataTemplate>
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#F2EAF4E9" />
+    <SolidColorBrush x:Key="HeaderBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="LogoRingBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="LogoRingBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="LogoGlyphBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="HeaderTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="HeaderHintTextBrush" Color="#486052" />
+    <SolidColorBrush x:Key="HeaderStatusTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ModeTagBackgroundBrush" Color="#FFF0C9" />
+    <SolidColorBrush x:Key="ModeTagBorderBrush" Color="#99752A" />
+    <SolidColorBrush x:Key="ModeTagTextBrush" Color="#563600" />
+    <SolidColorBrush x:Key="HeaderButtonBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="HeaderButtonBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="HeaderButtonTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="HeaderButtonHoverBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="HeaderButtonHoverBorderBrush" Color="#327548" />
+    <SolidColorBrush x:Key="HeaderButtonPressedBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="NavBackgroundBrush" Color="#F2EAF4E9" />
+    <SolidColorBrush x:Key="NavBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="NavItemHoverBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="HighlightBrush" Color="#327548" />
+    <SolidColorBrush x:Key="HighlightTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavHomeButtonBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="NavIconBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="NavTextBrush" Color="#213D31" />
+    <!-- 导航选中项（底色为 HighlightBrush）上的图标与文字 -->
+    <SolidColorBrush x:Key="NavSelectedIconBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavSelectedTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="NavDividerBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="NavFooterTextBrush" Color="#486052" />
+    <SolidColorBrush x:Key="GlassFillBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="GlassFillPurpleBrush" Color="#F7FCF5" />
+    <SolidColorBrush x:Key="GlassPurpleBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="AccentCardTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="AccentCardTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="AccentCardEmphasisBrush" Color="#213D31" />
+    <DropShadowEffect x:Key="CardShadowEffect" Color="#162335" BlurRadius="8" ShadowDepth="1" Opacity="0.07" />
+    <SolidColorBrush x:Key="InnerPanelBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="InnerPanelBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="StatusCardCyanBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="StatusCardBlueBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="StatusCardGreenBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="StatusCardTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="StatusCardValueBrush" Color="#486052" />
+    <SolidColorBrush x:Key="InfoBoxBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="InfoBoxBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="InfoBoxTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="InfoBoxTextBrush" Color="#486052" />
+    <SolidColorBrush x:Key="InfoBoxEmphasisBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="PageTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#213D31" />
+    <!-- 未单独指定颜色的文字（窗口默认前景）与下拉框选中值 -->
+    <SolidColorBrush x:Key="DefaultTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ComboTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#486052" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#486052" />
+    <SolidColorBrush x:Key="TextHintBrush" Color="#486052" />
+    <SolidColorBrush x:Key="TextEmphasisBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="TextOnDarkBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ProductTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ErrorTextBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#80501B" />
+    <SolidColorBrush x:Key="SuccessTextBrush" Color="#276A42" />
+    <SolidColorBrush x:Key="ActivityTimeBrush" Color="#486052" />
+    <SolidColorBrush x:Key="ActivityTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ChoiceBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="ChoiceBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="ChoiceHoverBorderBrush" Color="#327548" />
+    <SolidColorBrush x:Key="AccentBlueSoftBrush" Color="#327548" />
+    <SolidColorBrush x:Key="ChoiceCheckedBorderBrush" Color="#327548" />
+    <SolidColorBrush x:Key="ChoiceCheckedTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="#327548" />
+    <SolidColorBrush x:Key="AccentBlueHoverBrush" Color="#327548" />
+    <SolidColorBrush x:Key="AccentBluePressedBrush" Color="#327548" />
+    <SolidColorBrush x:Key="AccentBlueBorderBrush" Color="#327548" />
+    <SolidColorBrush x:Key="PrimaryButtonTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SecondaryButtonTextBrush" Color="#205438" />
+    <SolidColorBrush x:Key="SecondaryButtonBorderBrush" Color="#205438" />
+    <SolidColorBrush x:Key="SecondaryButtonHoverBrush" Color="#18327548" />
+    <SolidColorBrush x:Key="SubtleButtonHoverBrush" Color="#18327548" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="DangerHoverBrush" Color="#18C62828" />
+    <SolidColorBrush x:Key="DangerSolidBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="DangerSolidHoverBrush" Color="#A71925" />
+    <SolidColorBrush x:Key="DangerSolidPressedBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="DangerSolidBorderBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="DangerTextOnSolidBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="InputBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="ComboBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="InputHoverBorderBrush" Color="#327548" />
+    <SolidColorBrush x:Key="ComboArrowBrush" Color="#486052" />
+    <SolidColorBrush x:Key="PopupBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="PopupBorderBrush" Color="#C9DCCA" />
+    <DropShadowEffect x:Key="PopupShadowEffect" Color="#162335" BlurRadius="8" ShadowDepth="1" Opacity="0.07" />
+    <SolidColorBrush x:Key="TooltipBackgroundBrush" Color="#18222E" />
+    <SolidColorBrush x:Key="TooltipTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputCaretBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#486052" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#327548" />
+    <SolidColorBrush x:Key="ListRowHoverBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="ListRowSelectedBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="ListRowSelectedTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="CheckBoxBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="CheckBoxBorderBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="CheckBoxCheckedBackgroundBrush" Color="#327548" />
+    <SolidColorBrush x:Key="CheckBoxGlyphBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="DataGridBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="DataGridAlternateRowBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="DataGridLineBrush" Color="#C9DCCA" />
+    <SolidColorBrush x:Key="DataGridHeaderBackgroundBrush" Color="#F0F6ED" />
+    <SolidColorBrush x:Key="DataGridHeaderTextBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="CalendarBackgroundBrush" Color="#F8FAF7" />
+    <SolidColorBrush x:Key="CalendarBorderBrush" Color="#64716B" />
+    <SolidColorBrush x:Key="CalendarDayTextBrush" Color="#243B35" />
+    <SolidColorBrush x:Key="CalendarInactiveDayTextBrush" Color="#64716B" />
+    <SolidColorBrush x:Key="CalendarTodayBorderBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarTodayTextBrush" Color="#243B35" />
+    <SolidColorBrush x:Key="CalendarHoverBrush" Color="#DFEBE5" />
+    <SolidColorBrush x:Key="CalendarSelectedBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarSelectedBorderBrush" Color="#345E68" />
+    <SolidColorBrush x:Key="CalendarSelectedTextBrush" Color="#FFFFFF" />
+    <FontFamily x:Key="CountdownFontFamily">Segoe UI, Microsoft YaHei UI</FontFamily>
+    <SolidColorBrush x:Key="CountdownTextBrush" Color="#205438" />
+    <DropShadowEffect x:Key="CountdownGlowEffect" Color="#327548" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="CountdownUrgentBrush" Color="#B51F2B" />
+    <DropShadowEffect x:Key="CountdownUrgentGlowEffect" Color="#B51F2B" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="CountdownCaptionBrush" Color="#486052" />
+    <SolidColorBrush x:Key="CountdownBadgeBrush" Color="#486052" />
+    <SolidColorBrush x:Key="CountdownIdleTextBrush" Color="#486052" />
+    <SolidColorBrush x:Key="ReminderWindowBackgroundBrush" Color="#DBF1FC" />
+    <SolidColorBrush x:Key="ReminderGlowBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="ReminderCardFillBrush" Color="#F7FCF5" />
+    <SolidColorBrush x:Key="ReminderCardBorderBrush" Color="#486052" />
+    <DropShadowEffect x:Key="ReminderCardShadowEffect" Color="#162335" BlurRadius="12" ShadowDepth="2" Opacity="0.3" />
+    <SolidColorBrush x:Key="ReminderTitleBrush" Color="#213D31" />
+    <SolidColorBrush x:Key="ReminderMessageBrush" Color="#486052" />
+    <SolidColorBrush x:Key="ReminderCountdownBrush" Color="#205438" />
+    <DropShadowEffect x:Key="ReminderCountdownGlowEffect" Color="#327548" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="ReminderCountdownUrgentBrush" Color="#B51F2B" />
+    <DropShadowEffect x:Key="ReminderCountdownUrgentGlowEffect" Color="#B51F2B" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <SolidColorBrush x:Key="ReminderErrorTextBrush" Color="#C62828" />
+    <SolidColorBrush x:Key="PickerDisabledRowTextBrush" Color="#486052" />
+    <SolidColorBrush x:Key="PickerDisabledRowBackgroundBrush" Color="#F0F6ED" />
+</ResourceDictionary>
