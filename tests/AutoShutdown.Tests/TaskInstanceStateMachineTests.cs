@@ -5,19 +5,20 @@ namespace AutoShutdown.Tests;
 
 /// <summary>
 /// V2 8 态状态机测试（架构 V2-DRAFT-004 S13 §5；GATE-A2 裁决）。
-/// 白名单 = 15 条唯一状态边；触发场景 = 16 个（waiting→cancelled 两个：
+/// 白名单 = 17 条唯一状态边（含 confirming→waiting 提醒中延迟、executing→cancelled 执行中止）；触发场景 = 18 个（waiting→cancelled 两个：
 /// 用户取消 与 一次性任务过期，修正 6d）。
 /// </summary>
 public sealed class TaskInstanceStateMachineTests
 {
     private readonly TaskInstanceStateMachine _machine = new();
 
-    // ===== 15 条唯一状态边（均允许） =====
+    // ===== 17 条唯一状态边（均允许） =====
 
     [Theory]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Confirming, TaskInstanceStateTransitionCause.ScheduleTriggered)]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.CancelByUser)]
     [InlineData(TaskInstanceState.Waiting, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.ConfigCorrupt)]
+    [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Waiting, TaskInstanceStateTransitionCause.SnoozedDuringConfirmation)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Running, TaskInstanceStateTransitionCause.PowerConfirmed)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.CancelledDuringConfirmation)]
     [InlineData(TaskInstanceState.Confirming, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
@@ -27,10 +28,11 @@ public sealed class TaskInstanceStateMachineTests
     [InlineData(TaskInstanceState.Running, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
     [InlineData(TaskInstanceState.Running, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.RuntimeConfigCorrupt)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Executed, TaskInstanceStateTransitionCause.PowerCompleted)]
+    [InlineData(TaskInstanceState.Executing, TaskInstanceState.Cancelled, TaskInstanceStateTransitionCause.CancelledDuringExecution)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Interrupted, TaskInstanceStateTransitionCause.CrashRecovered)]
     [InlineData(TaskInstanceState.Executing, TaskInstanceState.Faulted, TaskInstanceStateTransitionCause.PowerFailed)]
     [InlineData(TaskInstanceState.Executed, TaskInstanceState.Waiting, TaskInstanceStateTransitionCause.Reschedule)]
-    public void TryTransition_All15UniqueStateEdges_AreAllowed(
+    public void TryTransition_All17UniqueStateEdges_AreAllowed(
         TaskInstanceState current,
         TaskInstanceState target,
         TaskInstanceStateTransitionCause cause)
@@ -73,10 +75,10 @@ public sealed class TaskInstanceStateMachineTests
         Assert.Equal(TaskInstanceStateTransitionDecisionCode.Allowed, result.DecisionCode);
     }
 
-    // ===== 白名单完整性：恰好 15 条边 / 16 个触发场景 =====
+    // ===== 白名单完整性：恰好 17 条边 / 18 个触发场景 =====
 
     [Fact]
-    public void Whitelist_HasExactly15UniqueStateEdges()
+    public void Whitelist_HasExactly17UniqueStateEdges()
     {
         var allowedEdges = new HashSet<(TaskInstanceState, TaskInstanceState)>();
 
@@ -90,11 +92,11 @@ public sealed class TaskInstanceStateMachineTests
             }
         }
 
-        Assert.Equal(15, allowedEdges.Count);
+        Assert.Equal(17, allowedEdges.Count);
     }
 
     [Fact]
-    public void Whitelist_HasExactly16TriggerScenarios()
+    public void Whitelist_HasExactly18TriggerScenarios()
     {
         var scenarioCount = 0;
 
@@ -108,7 +110,7 @@ public sealed class TaskInstanceStateMachineTests
             }
         }
 
-        Assert.Equal(16, scenarioCount);
+        Assert.Equal(18, scenarioCount);
     }
 
     // ===== 终态不可逆 =====

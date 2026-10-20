@@ -4,7 +4,12 @@ namespace AutoShutdown.Core.Scheduling;
 
 public sealed class SystemAsyncDeadline : IAsyncDeadline
 {
-    private static readonly TimeSpan MaxDelay = TimeSpan.FromMilliseconds(int.MaxValue);
+    /// <summary>
+    /// 单次等待上限。Windows 上 Task.Delay 基于不含睡眠/休眠的计时（unbiased interrupt time），
+    /// 一次性长等待会在睡眠后整体推迟（睡 2 小时就晚 2 小时触发），也感知不到系统时间被调整。
+    /// 分段等待并每段按墙钟重新核对，唤醒或改时后最多延迟一个分段即可纠正。
+    /// </summary>
+    private static readonly TimeSpan MaxDelay = TimeSpan.FromSeconds(15);
 
     private readonly IClock _clock;
 

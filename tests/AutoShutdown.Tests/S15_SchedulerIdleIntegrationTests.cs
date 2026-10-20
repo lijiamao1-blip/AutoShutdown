@@ -133,10 +133,12 @@ public sealed class S15_SchedulerIdleIntegrationTests
             new CreateTaskCommand(IdleDefinition(IdleId1, idleThresholdSeconds: 300)),
             CancellationToken.None);
 
-        await WaitUntilAsync(() => handler.CallCount == 1);
+        // handler 返回后引擎才写入 Executed 终态：等待终态本身，而非仅等 handler 被调用。
+        await WaitUntilAsync(() => handler.CallCount == 1
+            && Current(engine.GetSnapshot())?.State == TaskInstanceState.Executed);
 
         var instance = Current(engine.GetSnapshot())!;
-        Assert.Equal(TaskInstanceState.Executed, instance.State);
+        Assert.Equal(1, handler.CallCount);
         Assert.True(instance.HasExecuted);
         Assert.True(instance.IsIdleTriggered);
     }

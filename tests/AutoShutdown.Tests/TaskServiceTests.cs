@@ -142,23 +142,50 @@ public sealed class TaskServiceTests
 
         Assert.True(result.Succeeded);
         Assert.Equal(TaskInstanceState.Waiting, result.Instance!.State);
-        Assert.Equal(Now.AddMinutes(5).ToUniversalTime(), result.Instance.ScheduledFireTime);
+        // 在原触发时间 12:00 上顺延，而非
         Assert.Null(result.Instance.WarningStartTime);
         Assert.Equal(StageToken3, result.Instance.StageToken);
         Assert.Empty(machine.Calls); // Waiting→Waiting 是字段级重排，不走状态机。
     }
 
     [Fact]
-    public void Snooze_FromConfirming_ReturnsTransitionRejected()
+    public void Snooze_FromConfirming_ReturnsToWaitingAndKeepsReminderLead()
     {
-        var current = WarningInstance();
+        // 提醒窗口里的「延迟 10 分钟」：11:50 开始提醒、12:00 执行 → 12:10 执行、12:00 再次提醒。
+        var current = WarningInstance() with { WarningStartTime = new DateTimeOffset(2024, 1, 15, 11, 50, 0, TimeSpan.Zero) };
+        var service = CreateService(generator: new SequentialIdentifierGenerator(StageToken3));
+
+        var result = service.Snooze(current, TimeSpan.FromMinutes(10), new DateTimeOffset(2024, 1, 15, 11, 52, 0, TimeSpan.Zero));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(TaskInstanceState.Waiting, result.Instance!.State);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 10, 0, TimeSpan.Zero), result.Instance.ScheduledFireTime);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero), result.Instance.WarningStartTime);
+        Assert.Equal(StageToken3, result.Instance.StageToken);
+    }
+
+    [Fact]
+    public void Snooze_FromWaiting_KeepsReminderLead()
+    {
+        var current = ScheduledInstance() with { WarningStartTime = new DateTimeOffset(2024, 1, 15, 11, 50, 0, TimeSpan.Zero) };
+        var service = CreateService(generator: new SequentialIdentifierGenerator(StageToken3));
+
+        var result = service.Snooze(current, TimeSpan.FromMinutes(10), Now);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 10, 0, TimeSpan.Zero), result.Instance!.ScheduledFireTime);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero), result.Instance.WarningStartTime);
+    }
+
+    [Fact]
+    public void Snooze_IdleTriggeredConfirming_IsRejected()
+    {
+        var current = WarningInstance() with { IsIdleTriggered = true };
         var service = CreateService();
 
         var result = service.Snooze(current, TimeSpan.FromMinutes(10), Now);
 
-        // V2 白名单无 confirming→waiting 边：确认态实例不可 snooze。
         Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
-        Assert.NotNull(result.TransitionDecisionCode);
         Assert.Null(result.Instance);
     }
 
@@ -188,7 +215,6 @@ public sealed class TaskServiceTests
     }
 
     [Theory]
-    [InlineData(TaskInstanceState.Confirming)]
     [InlineData(TaskInstanceState.Executing)]
     [InlineData(TaskInstanceState.Cancelled)]
     [InlineData(TaskInstanceState.Executed)]
@@ -250,8 +276,9 @@ public sealed class TaskServiceTests
 
         var result = service.Cancel(BaseInstance() with { State = TaskInstanceState.Executing });
 
+        // executing→cancelled 只接受引擎的执行中止（CancelledDuringExecution），用户取消原因不匹配。
         Assert.Equal(TaskCommandStatus.TransitionRejected, result.Status);
-        Assert.Equal(TaskInstanceStateTransitionDecisionCode.TransitionNotAllowed, result.TransitionDecisionCode);
+        Assert.Equal(TaskInstanceStateTransitionDecisionCode.CauseMismatch, result.TransitionDecisionCode);
         Assert.Null(result.Instance);
     }
 

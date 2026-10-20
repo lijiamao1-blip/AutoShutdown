@@ -114,6 +114,18 @@ public sealed class S13_T08_TaskListUiTests
         Assert.False(confirming.CanSnooze);
         Assert.True(confirming.CanStop);
 
+        var executing = RunningEngine(new Dictionary<Guid, TaskInstance>
+        {
+            [Task1] = WaitingInstance(Task1, Now, PowerAction.Shutdown, Instance1, Token1)
+                with { State = TaskInstanceState.Executing, HasExecuted = true }
+        });
+        var executingViewModel = CreateViewModel(executing);
+        executingViewModel.Refresh(executing.Snapshot, Now);
+        var executingRow = executingViewModel.TaskItems.Single();
+        Assert.True(executingRow.CanStop);
+        Assert.False(executingRow.CanSnooze);
+        Assert.False(executingRow.CanClear);
+
         var terminal = viewModel.TaskItems.Single(row => row.State == TaskInstanceState.Executed);
         Assert.True(terminal.CanClear);
         Assert.False(terminal.CanStop);

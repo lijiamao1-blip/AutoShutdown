@@ -192,9 +192,27 @@ public sealed class TaskService : ITaskService
                 "Snooze duration must be greater than zero and at most 7 days.");
         }
 
-        if (current.State != TaskInstanceState.Waiting)
+        if (current.State == TaskInstanceState.Confirming && !current.IsIdleTriggered)
         {
-            // V2 白名单无 confirming→waiting 边：确认/终态实例不可 snooze，仅 Waiting 可顺延。
+            // 提醒中延迟：confirming → waiting（SnoozedDuringConfirmation）。
+            // 空闲触发的倒计时由输入恢复取消，不提供延迟。
+            var snoozeTransition = _stateMachine.TryTransition(
+                current.State,
+                TaskInstanceState.Waiting,
+                TaskInstanceStateTransitionCause.SnoozedDuringConfirmation,
+                SourceName);
+            if (!snoozeTransition.Allowed)
+            {
+                return new TaskCommandResult
+                {
+                    Status = TaskCommandStatus.TransitionRejected,
+                    TransitionDecisionCode = snoozeTransition.DecisionCode,
+                    Message = snoozeTransition.Reason
+                };
+            }
+        }
+        else if (current.State != TaskInstanceState.Waiting)
+        {
             var rejected = _stateMachine.TryTransition(
                 current.State,
                 TaskInstanceState.Waiting,
@@ -204,7 +222,7 @@ public sealed class TaskService : ITaskService
             {
                 Status = TaskCommandStatus.TransitionRejected,
                 TransitionDecisionCode = rejected.DecisionCode,
-                Message = "Only Waiting instances can be snoozed: " + rejected.Reason
+                Message = "Only Waiting or reminder (Confirming) instances can be snoozed: " + rejected.Reason
             };
         }
 
@@ -216,11 +234,24 @@ public sealed class TaskService : ITaskService
                 "The generated stage token is not valid.");
         }
 
-        // Waiting → Waiting：仅顺延触发时间并刷新 StageToken（字段级重排，非状态转换）。
+        // 延迟 = 在原触发时间上顺延（绝不能提前：远期任务点「延迟 10 分钟」不得变成 10 分钟后执行），
+        // 并保留原提醒提前量，顺延后照常再次提醒。
+        var utcNow = now.ToUniversalTime();
+        var baseFireTime = current.ScheduledFireTime > utcNow ? current.ScheduledFireTime : utcNow;
+        var fireTime = baseFireTime.Add(duration);
+        DateTimeOffset? warningStartTime = null;
+        if (current.WarningStartTime is { } originalWarning && originalWarning < current.ScheduledFireTime)
+        {
+            var lead = current.ScheduledFireTime - originalWarning;
+            var candidate = fireTime - lead;
+            warningStartTime = candidate < utcNow ? utcNow : candidate;
+        }
+
         var snoozed = current with
         {
-            ScheduledFireTime = now.ToUniversalTime().Add(duration),
-            WarningStartTime = null,
+            State = TaskInstanceState.Waiting,
+            ScheduledFireTime = fireTime,
+            WarningStartTime = warningStartTime,
             StageToken = stageToken
         };
 

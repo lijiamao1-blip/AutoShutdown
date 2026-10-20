@@ -5,7 +5,7 @@ namespace AutoShutdown.Core.State;
 
 /// <summary>
 /// V2 8 态任务实例状态机（架构 V2-DRAFT-004 S13 §5，GATE-A2 裁决）。
-/// 白名单 = 15 条唯一 (当前→目标) 状态边；每条边接受一个或多个触发原因
+/// 白名单 = 17 条唯一 (当前→目标) 状态边（含提醒中延迟 confirming→waiting、执行中止 executing→cancelled）；每条边接受一个或多个触发原因
 /// （waiting→cancelled 接受 CancelByUser 与 OneTimeExpired 两个触发场景，修正 6d）。
 /// 终态（cancelled/faulted/interrupted）一律不可逆，拒绝一切出边转换。
 /// 纯逻辑：无日志依赖、无日志写入；调用方负责 Error 审计日志。
@@ -24,7 +24,8 @@ public sealed class TaskInstanceStateMachine : ITaskInstanceStateMachine
                 TaskInstanceStateTransitionCause.OneTimeExpired),
             [(TaskInstanceState.Waiting, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.ConfigCorrupt),
 
-            // confirming：4 出（Countdown/确认窗口）
+            // confirming：5 出（Countdown/确认窗口；提醒中可延迟回到等待）
+            [(TaskInstanceState.Confirming, TaskInstanceState.Waiting)] = C(TaskInstanceStateTransitionCause.SnoozedDuringConfirmation),
             [(TaskInstanceState.Confirming, TaskInstanceState.Running)] = C(TaskInstanceStateTransitionCause.PowerConfirmed),
             [(TaskInstanceState.Confirming, TaskInstanceState.Cancelled)] = C(TaskInstanceStateTransitionCause.CancelledDuringConfirmation),
             [(TaskInstanceState.Confirming, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
@@ -36,8 +37,9 @@ public sealed class TaskInstanceStateMachine : ITaskInstanceStateMachine
             [(TaskInstanceState.Running, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
             [(TaskInstanceState.Running, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.RuntimeConfigCorrupt),
 
-            // executing：3 出（电源操作）
+            // executing：4 出（电源操作；用户可在电源调用发出前中止）
             [(TaskInstanceState.Executing, TaskInstanceState.Executed)] = C(TaskInstanceStateTransitionCause.PowerCompleted),
+            [(TaskInstanceState.Executing, TaskInstanceState.Cancelled)] = C(TaskInstanceStateTransitionCause.CancelledDuringExecution),
             [(TaskInstanceState.Executing, TaskInstanceState.Interrupted)] = C(TaskInstanceStateTransitionCause.CrashRecovered),
             [(TaskInstanceState.Executing, TaskInstanceState.Faulted)] = C(TaskInstanceStateTransitionCause.PowerFailed),
 

@@ -2592,7 +2592,8 @@ public sealed class MainWindowViewModel : ObservableObject
             : (instance.InstanceId == Guid.Empty || instance.StageToken == Guid.Empty
                 ? "任务标识或阶段令牌缺失"
                 : "当前状态不允许延迟");
-        CanCancel = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming;
+        // 执行中（保存文档/关闭应用阶段）也允许停止：引擎在电源调用发出前就地中止。
+        CanCancel = instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming or TaskInstanceState.Executing;
         CancelDisabledReason = CanCancel ? string.Empty : "当前状态不允许取消";
         CanClear = instance.State is TaskInstanceState.Cancelled
             or TaskInstanceState.Executed
@@ -3360,7 +3361,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 localWarning?.ToString("HH:mm:ss") ?? "无",
                 instance.IsIdleTriggered ? "空闲" : "定时",
                 instance.State,
-                instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming,
+                instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming or TaskInstanceState.Executing,
                 instance.State == TaskInstanceState.Waiting,
                 instance.State is TaskInstanceState.Cancelled
                     or TaskInstanceState.Executed

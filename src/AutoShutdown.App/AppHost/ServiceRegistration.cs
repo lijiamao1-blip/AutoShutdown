@@ -269,7 +269,8 @@ public static class ServiceRegistration
             provider.GetRequiredService<IIdleMonitor>(),
             IdleShutdownRule.GlobalDefaultThreshold,
             provider.GetRequiredService<IUnattendedPolicyService>(),
-            provider.GetRequiredService<UnattendedConfirmationEvaluator>()));
+            provider.GetRequiredService<UnattendedConfirmationEvaluator>(),
+            notice: (eventName, message) => provider.GetRequiredService<IApplicationLogger>().Info(eventName, message)));
 
         // S21：设置页分区视图模型（WoL 目标机器管理 + RTC 唤醒能力状态）。测试发送只由
         // 用户逐目标点击触发；RTC 分区仅能力探测，不设置任何真实唤醒定时器。

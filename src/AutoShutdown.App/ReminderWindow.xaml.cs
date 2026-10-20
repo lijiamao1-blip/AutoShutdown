@@ -48,6 +48,18 @@ public partial class ReminderWindow : Window
 
     private void UpdateCountdown()
     {
+        if (_engine.GetSnapshot().Instances.Values.FirstOrDefault(i => i.InstanceId == _instance.InstanceId)
+            is { State: TaskInstanceState.Executing })
+        {
+            // 到点后先保存文档、关闭应用（可能持续数十秒），这段时间仍可中止。
+            MessageText.Text = $"正在保存文档并关闭应用，随后执行{UiTextMapper.Map(_instance.ActionSnapshot)}。"
+                + "点击「停止执行」可立即中止（系统已开始关机后无法撤回）。";
+            CountdownText.Text = "执行中";
+            SnoozeButton.Visibility = Visibility.Collapsed;
+            CancelButton.Content = "停止执行";
+            return;
+        }
+
         var remaining = _instance.ScheduledFireTime - _clock.UtcNow;
         CountdownText.Text = remaining > TimeSpan.Zero
             ? remaining.ToString(@"hh\:mm\:ss")

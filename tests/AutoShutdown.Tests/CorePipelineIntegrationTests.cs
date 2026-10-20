@@ -110,14 +110,22 @@ public sealed class CorePipelineIntegrationTests
         Assert.True(snoozed.Succeeded);
         var snoozedInstance = harness.CurrentInstance!;
         Assert.NotEqual(instance.StageToken, snoozedInstance.StageToken);
-        Assert.Equal(new DateTimeOffset(2024, 1, 15, 11, 30, 0, TimeSpan.Zero), snoozedInstance.ScheduledFireTime);
+        // 延迟在原触发时间（12:00）上顺延，绝不提前；保留 60 秒提醒提前量。
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 30, 0, TimeSpan.Zero), snoozedInstance.ScheduledFireTime);
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 29, 0, TimeSpan.Zero), snoozedInstance.WarningStartTime);
 
         harness.Deadline.CompleteNext();
         harness.Deadline.CompleteAll();
         await Task.Delay(50);
         Assert.Equal(0, harness.Power.CallCount);
 
-        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 11, 30, 0, TimeSpan.Zero);
+        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 29, 0, TimeSpan.Zero);
+        await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
+        harness.Deadline.CompleteNext();
+        await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Confirming);
+
+        harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 30, 0, TimeSpan.Zero);
+        await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
         harness.Deadline.CompleteNext();
         await WaitUntilAsync(() => harness.CurrentInstance?.State == TaskInstanceState.Executed);
 
@@ -218,6 +226,7 @@ public sealed class CorePipelineIntegrationTests
         using var harness = new Harness();
         var created = await harness.SubmitCreateAsync(CountdownDefinition());
         Assert.True(created.Succeeded);
+        await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 12, 0, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();

@@ -11,6 +11,7 @@ public sealed class NotificationCoordinator : IDisposable
     private readonly IApplicationLogger _logger;
     private readonly object _sync = new();
     private readonly HashSet<(Guid InstanceId, Guid StageToken, TaskInstanceState State)> _shownKeys = new();
+    private readonly HashSet<(Guid InstanceId, Guid StageToken, TaskInstanceState State)> _failedKeys = new();
 
     private (Guid InstanceId, Guid StageToken)? _activeReminder;
     private readonly CancellationTokenSource _cts = new();
@@ -95,6 +96,7 @@ public sealed class NotificationCoordinator : IDisposable
         {
             CloseActiveReminder();
             _shownKeys.Clear();
+            _failedKeys.Clear();
         }
 
         _cts.Dispose();
@@ -123,9 +125,19 @@ public sealed class NotificationCoordinator : IDisposable
         {
             // 多实例：任一实例进入 Confirming（提醒中）即弹提醒；无提醒实例则收起。
             // 完整列表交互（多实例并排展示）留待 T08 UI 切片。
-            var confirming = instances.FirstOrDefault(i => i.State == TaskInstanceState.Confirming);
+            var snapshot = instances as IReadOnlyCollection<TaskInstance> ?? instances.ToList();
+            var confirming = snapshot.FirstOrDefault(i => i.State == TaskInstanceState.Confirming);
             if (confirming is null)
             {
+                // 提醒中的实例进入执行阶段（保存文档/关闭应用）：保留窗口，用户仍可「停止执行」。
+                if (_activeReminder is { } active
+                    && snapshot.Any(i => i.InstanceId == active.InstanceId
+                        && i.StageToken == active.StageToken
+                        && i.State == TaskInstanceState.Executing))
+                {
+                    return;
+                }
+
                 CloseActiveReminder();
                 return;
             }
@@ -134,10 +146,27 @@ public sealed class NotificationCoordinator : IDisposable
             if (_shownKeys.Add(key))
             {
                 CloseActiveReminder();
+                try
+                {
+                    _notifications.ShowReminder(confirming);
+                }
+                catch (Exception exception)
+                {
+                    // 显示失败不得吞掉提醒：移除标记，下一轮（500ms）重试；同一实例只记一次警告。
+                    _shownKeys.Remove(key);
+                    if (_failedKeys.Add(key))
+                    {
+                        _logger.Warning(
+                            "ReminderShowFailed",
+                            "关机前提醒窗口显示失败，将重试：" + exception.Message);
+                    }
+
+                    return;
+                }
+
                 _logger.Info(
                     "ReminderShown",
                     "显示关机前提醒，动作：" + confirming.ActionSnapshot);
-                _notifications.ShowReminder(confirming);
                 _activeReminder = (confirming.InstanceId, confirming.StageToken);
             }
         }

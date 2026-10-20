@@ -191,7 +191,8 @@ public sealed class SchedulerEngineTests
         var current = Current(snapshot)!;
         Assert.Equal(TaskInstanceState.Waiting, current.State);
         Assert.NotEqual(instance.StageToken, current.StageToken);
-        Assert.Equal(ClockBase.AddMinutes(5), current.ScheduledFireTime);
+        // 原定 12:00，延迟 5 分钟 = 12:05（在原时间上顺延，绝不提前）。
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 12, 5, 0, TimeSpan.Zero), current.ScheduledFireTime);
         Assert.Equal(0, handler.CallCount);
     }
 

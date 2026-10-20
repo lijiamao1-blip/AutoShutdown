@@ -55,13 +55,24 @@ public sealed class WpfNotificationService : INotificationService
             }
 
             _openWindow?.Close();
-            _openWindow = new ReminderWindow(instance, _engine, _clock, _logger)
+            var window = new ReminderWindow(instance, _engine, _clock, _logger);
+
+            // 主窗口常驻托盘（Hide）或最小化时，被拥有的窗口会随之隐藏/最小化，提醒就看不到了；
+            // 只有主窗口确实可见时才挂 Owner，否则作为独立置顶窗口弹出。
+            var mainWindow = application.MainWindow;
+            if (mainWindow is not null
+                && !ReferenceEquals(mainWindow, window)
+                && mainWindow.IsVisible
+                && mainWindow.WindowState != WindowState.Minimized)
             {
-                Owner = application.MainWindow
-            };
-            _openWindow.Closed += OnReminderClosed;
+                window.Owner = mainWindow;
+            }
+
+            // 置顶但不抢焦点：用户正在打字/游戏时，空格或回车不会误触「延迟」「取消任务」。
+            window.Show();
+            window.Closed += OnReminderClosed;
+            _openWindow = window;
             _openInstanceId = instance.InstanceId;
-            _openWindow.Show();
         }
     }
 

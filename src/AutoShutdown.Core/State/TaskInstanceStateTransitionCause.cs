@@ -47,5 +47,14 @@ public enum TaskInstanceStateTransitionCause
     PowerFailed = 12,
 
     /// <summary>executed → waiting：重复任务下一轮排程（刷新 StageToken）。</summary>
-    Reschedule = 13
+    Reschedule = 13,
+
+    /// <summary>
+    /// executing → cancelled：用户在关机前流程（保存 Office / 关闭应用）期间停止或停用任务，
+    /// 电源调用尚未发出即中止。电源已发出后无法撤回，仍按 executed/faulted 终结。
+    /// </summary>
+    CancelledDuringExecution = 14,
+
+    /// <summary>confirming → waiting：用户在提醒窗口中延迟（顺延触发时间并重新安排提醒）。</summary>
+    SnoozedDuringConfirmation = 15
 }

@@ -43,7 +43,11 @@ public sealed class LoggingShutdownWorkflowDecorator : IShutdownWorkflow
         }
         catch (OperationCanceledException)
         {
-            throw; // Cancellation is not a logging concern; propagate unchanged.
+            // 用户在执行阶段停止/停用（或应用退出）：记录中止事实，取消语义原样传播。
+            _logger.Info(
+                "ShutdownWorkflowAborted",
+                "关机前流程已中止，未执行电源操作，动作：" + instance.ActionSnapshot);
+            throw;
         }
         catch (Exception exception)
         {
@@ -57,6 +61,22 @@ public sealed class LoggingShutdownWorkflowDecorator : IShutdownWorkflow
 
     private void LogResult(ShutdownWorkflowResult result)
     {
+        // 逐步记录关机前动作（保存 Office / 运行命令 / 关闭应用）的成败与耗时，便于事后排查。
+        // ErrorMessage 已由 PrePipelineRunner 脱敏，不含命令参数、文档内容或凭据。
+        foreach (var action in result.PrePipeline?.Actions ?? [])
+        {
+            var text = $"关机前步骤 {action.ActionName}：{(action.Succeeded ? "成功" : "失败")}，耗时 {action.Duration.TotalSeconds:F1} 秒"
+                + (action.Succeeded ? string.Empty : "，原因：" + action.ErrorMessage);
+            if (action.Succeeded)
+            {
+                _logger.Info("PrePipelineAction", text);
+            }
+            else
+            {
+                _logger.Warning("PrePipelineAction", text);
+            }
+        }
+
         switch (result.Status)
         {
             case ShutdownWorkflowStatus.Simulated:

@@ -17,6 +17,13 @@ public sealed class SchedulerEngine : ISchedulerEngine
 
     private static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// 错过触发容差：调度循环在触发时刻之后超过该时长才看到到期实例，说明期间电脑关机/睡眠
+    /// 或应用未运行，用户既没看到提醒也无法取消——一律不补执行（周期任务顺延到下一次，
+    /// 其余任务作废）。正常调度延迟为毫秒级；外部触发闸门同类容差为 5 分钟。
+    /// </summary>
+    public static readonly TimeSpan MissedFireTolerance = TimeSpan.FromMinutes(2);
+
     private readonly Channel<PendingCommand> _channel;
     private readonly IClock _clock;
     private readonly IAsyncDeadline _deadline;
@@ -31,9 +38,12 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private readonly TimeSpan _globalDefaultIdleThreshold;
     private readonly IUnattendedPolicyService? _unattendedPolicyService;
     private readonly UnattendedConfirmationEvaluator? _unattendedEvaluator;
+    private readonly Action<string, string>? _notice;
     private readonly object _sync = new();
+    private readonly object _executionSync = new();
 
     private SchedulerSnapshot _snapshot = SchedulerSnapshot.Empty;
+    private ActiveExecution? _activeExecution;
     private Task? _runTask;
 
     public SchedulerEngine(
@@ -48,7 +58,8 @@ public sealed class SchedulerEngine : ISchedulerEngine
         IIdleMonitor? idleMonitor = null,
         TimeSpan? globalDefaultIdleThreshold = null,
         IUnattendedPolicyService? unattendedPolicyService = null,
-        UnattendedConfirmationEvaluator? unattendedEvaluator = null)
+        UnattendedConfirmationEvaluator? unattendedEvaluator = null,
+        Action<string, string>? notice = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(clock);
@@ -70,6 +81,7 @@ public sealed class SchedulerEngine : ISchedulerEngine
         _globalDefaultIdleThreshold = globalDefaultIdleThreshold ?? IdleShutdownRule.GlobalDefaultThreshold;
         _unattendedPolicyService = unattendedPolicyService;
         _unattendedEvaluator = unattendedEvaluator;
+        _notice = notice;
         _runtimeStateStore = new RuntimeStateStore(storage);
         _tasksDocumentStore = new TasksDocumentStore(storage);
 
@@ -140,6 +152,10 @@ public sealed class SchedulerEngine : ISchedulerEngine
                     SchedulerCommandStatus.NotRunning,
                     "The engine is not running."));
         }
+
+        // 执行阶段（保存 Office / 关闭应用）期间调度循环正在等待 handler，命令要等执行结束才会
+        // 被读取；停止/停用当前执行任务的命令必须在入队前就地中止执行，否则形同虚设。
+        RequestExecutionAbortIfTargeted(command);
 
         var tcs = new TaskCompletionSource<SchedulerCommandResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -275,7 +291,51 @@ public sealed class SchedulerEngine : ISchedulerEngine
         }
 
         // S14：载入任务定义（tasks.json）并登记到领域集合，供周期改期与重启恢复使用。
-        return await TryLoadDefinitionsAsync(cancellationToken).ConfigureAwait(false);
+        if (!await TryLoadDefinitionsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        return await TryRearmInterruptedRecurringAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 提醒/执行期间电脑被关机或应用被结束：崩溃恢复已把实例标为 Interrupted（绝不补执行）。
+    /// 周期任务不能因此永久停摆——按当前时刻重新排到下一次；一次性任务保持中断终态。
+    /// </summary>
+    private async Task<bool> TryRearmInterruptedRecurringAsync(CancellationToken cancellationToken)
+    {
+        var interrupted = GetSnapshot().Instances.Values
+            .Where(instance => instance.State == TaskInstanceState.Interrupted)
+            .ToList();
+
+        foreach (var instance in interrupted)
+        {
+            var definition = _taskService.Get(instance.SourceTaskId);
+            if (definition is null
+                || !definition.IsEnabled
+                || !TaskDefinitionValidator.IsRecurringKind(definition.Kind))
+            {
+                continue;
+            }
+
+            var now = _clock.UtcNow.ToUniversalTime();
+            var next = _taskService.Create(definition, now, _clock.LocalTimeZone);
+            if (!next.Succeeded || next.Instance is not { State: TaskInstanceState.Waiting } fresh)
+            {
+                continue;
+            }
+
+            if (!await PersistAndCommitInstanceAsync(fresh, now, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            Notice("InterruptedTaskRearmed", "上次提醒/执行期间电脑关机或程序退出，未补执行；周期任务已重新排到 "
+                + Local(fresh.ScheduledFireTime) + "。");
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -327,6 +387,14 @@ public sealed class SchedulerEngine : ISchedulerEngine
         if (due.Count == 0)
         {
             return false;
+        }
+
+        // 错过触发的实例先逐个跳过，绝不进入仲裁：否则多个过期实例会被「合并」进一个获胜者，
+        // 落选的周期任务按合并语义被取消而永久停摆，获胜者自身却因错过而并不执行。
+        if (due.FirstOrDefault(instance => IsMissedFire(instance, now)) is { } missed)
+        {
+            await SkipMissedFireAsync(missed, now, cancellationToken).ConfigureAwait(false);
+            return true;
         }
 
         // 待决仲裁（用户决策）期间：已纳入候选的实例不再重复仲裁，等待
@@ -1080,6 +1148,12 @@ public sealed class SchedulerEngine : ISchedulerEngine
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        if (IsMissedFire(instance, now))
+        {
+            await SkipMissedFireAsync(instance, now, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         switch (instance.State)
         {
             case TaskInstanceState.Waiting:
@@ -1091,7 +1165,10 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 }
                 else if (instance.ScheduledFireTime <= now)
                 {
-                    await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+                    if (!await TryRearmSkippedReminderAsync(instance, now, cancellationToken).ConfigureAwait(false))
+                    {
+                        await EnterExecutingAsync(instance, now, cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 break;
@@ -1102,6 +1179,135 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 }
 
                 break;
+        }
+    }
+
+    private static bool IsMissedFire(TaskInstance instance, DateTimeOffset now)
+        => instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming
+            && instance.ScheduledFireTime.Add(MissedFireTolerance) < now;
+
+    /// <summary>
+    /// 错过触发绝不补执行：周期任务按当前时刻重新排到下一次（新实例，含新的提醒窗口），
+    /// 其余任务（倒计时/一次性/今天指定/下个工作日）作废。无法安全终结时宁可停机也不执行。
+    /// </summary>
+    private async Task SkipMissedFireAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var definition = _taskService.Get(instance.SourceTaskId);
+        if (definition is not null && TaskDefinitionValidator.IsRecurringKind(definition.Kind))
+        {
+            var next = _taskService.Create(definition, now, _clock.LocalTimeZone);
+            if (next.Succeeded
+                && next.Instance is { State: TaskInstanceState.Waiting } fresh
+                && fresh.ScheduledFireTime > now)
+            {
+                await PersistAndCommitInstanceAsync(fresh, now, cancellationToken).ConfigureAwait(false);
+                Notice("MissedFireSkipped", "错过触发时间 " + Local(instance.ScheduledFireTime)
+                    + "（关机/睡眠或程序未运行），不补执行；已顺延到 " + Local(fresh.ScheduledFireTime) + "。");
+                return;
+            }
+        }
+
+        var cancelled = _taskService.Cancel(instance);
+        if (cancelled.Succeeded && cancelled.Instance is not null)
+        {
+            await PersistAndCommitInstanceAsync(cancelled.Instance, now, cancellationToken).ConfigureAwait(false);
+            Notice("MissedFireSkipped", "错过触发时间 " + Local(instance.ScheduledFireTime)
+                + "（关机/睡眠或程序未运行），不补执行；该一次性任务已作废。");
+            return;
+        }
+
+        SetFaulted("A missed task instance could not be skipped safely: " + cancelled.Message);
+    }
+
+    /// <summary>
+    /// 配置了提醒、却在到点时仍处于 Waiting：提醒窗口从未出现（如睡眠唤醒恰好越过整个提醒期）。
+    /// 绝不无提醒直接执行——以当前时刻为起点补一个完整提醒期（Waiting→Waiting 字段级重排，
+    /// 刷新 StageToken），随后照常进入提醒、可延迟/取消。返回 false 表示无需补提醒。
+    /// </summary>
+    private async Task<bool> TryRearmSkippedReminderAsync(
+        TaskInstance instance,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (instance.IsIdleTriggered
+            || instance.WarningStartTime is not { } warningStart
+            || warningStart >= instance.ScheduledFireTime)
+        {
+            return false;
+        }
+
+        Guid stageToken;
+        try
+        {
+            stageToken = _identifierGenerator.NewId();
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        if (stageToken == Guid.Empty || stageToken == instance.StageToken || stageToken == instance.InstanceId)
+        {
+            return false;
+        }
+
+        var lead = instance.ScheduledFireTime - warningStart;
+        var rearmed = instance with
+        {
+            ScheduledFireTime = now.Add(lead),
+            WarningStartTime = now,
+            StageToken = stageToken
+        };
+
+        await PersistAndCommitInstanceAsync(rearmed, now, cancellationToken).ConfigureAwait(false);
+        Notice("ReminderRearmed", "到点时提醒从未显示（可能刚从睡眠唤醒），不直接执行；重新提醒，改为 "
+            + Local(rearmed.ScheduledFireTime) + " 执行。");
+        return true;
+    }
+
+    private string Local(DateTimeOffset utc)
+        => TimeZoneInfo.ConvertTime(utc, _clock.LocalTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
+
+    private void Notice(string eventName, string message)
+    {
+        try
+        {
+            _notice?.Invoke(eventName, message);
+        }
+        catch (Exception)
+        {
+            // 诊断回调失败绝不影响调度。
+        }
+    }
+
+    private void RequestExecutionAbortIfTargeted(SchedulerCommand command)
+    {
+        lock (_executionSync)
+        {
+            if (_activeExecution is not { } active)
+            {
+                return;
+            }
+
+            var reason = command switch
+            {
+                CancelTaskCommand cancel when cancel.ExpectedInstanceId == active.Instance.InstanceId
+                    && cancel.ExpectedStageToken == active.Instance.StageToken => ExecutionAbortReason.Stop,
+                SetTaskEnabledCommand { IsEnabled: false } disable
+                    when disable.TaskId == active.Instance.SourceTaskId => ExecutionAbortReason.Disable,
+                _ => ExecutionAbortReason.None
+            };
+
+            if (reason == ExecutionAbortReason.None || active.AbortReason != ExecutionAbortReason.None)
+            {
+                return;
+            }
+
+            active.AbortReason = reason;
+            active.Cancellation.Cancel();
         }
     }
 
@@ -1299,9 +1505,22 @@ public sealed class SchedulerEngine : ISchedulerEngine
             return;
         }
 
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var active = new ActiveExecution(executing, executionCts);
+        lock (_executionSync)
+        {
+            _activeExecution = active;
+        }
+
         try
         {
-            await _handler.HandleDueAsync(executing, cancellationToken).ConfigureAwait(false);
+            await _handler.HandleDueAsync(executing, executionCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsUserAbort(exception, active, cancellationToken))
+        {
+            // 用户在电源调用发出前停止/停用：Pre-Pipeline 中止，绝不调用电源。
+            await CompleteAbortedExecutionAsync(executing, active, cancellationToken).ConfigureAwait(false);
+            return;
         }
         catch (ScheduledTaskHandlingException)
         {
@@ -1318,6 +1537,13 @@ public sealed class SchedulerEngine : ISchedulerEngine
             SetFaulted("The due task handler failed: " + exception.Message);
             return;
         }
+        finally
+        {
+            lock (_executionSync)
+            {
+                _activeExecution = null;
+            }
+        }
 
         var executed = await EnterTerminalAsync(
             executing,
@@ -1329,6 +1555,70 @@ public sealed class SchedulerEngine : ISchedulerEngine
         if (executed is not null)
         {
             await TryRescheduleRecurringAsync(executed, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 取消是否来自用户中止（而非应用退出）。Pre-Pipeline 动作可能把取消吞成失败结果，
+    /// 经 handler 转为 <see cref="ScheduledTaskHandlingException"/>，同样按用户中止处理。
+    /// </summary>
+    private bool IsUserAbort(Exception exception, ActiveExecution active, CancellationToken engineToken)
+    {
+        if (engineToken.IsCancellationRequested
+            || exception is not (OperationCanceledException or ScheduledTaskHandlingException))
+        {
+            return false;
+        }
+
+        lock (_executionSync)
+        {
+            return active.AbortReason != ExecutionAbortReason.None;
+        }
+    }
+
+    private async Task CompleteAbortedExecutionAsync(
+        TaskInstance executing,
+        ActiveExecution active,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow.ToUniversalTime();
+        var cancelled = await EnterTerminalAsync(
+            executing,
+            TaskInstanceState.Cancelled,
+            TaskInstanceStateTransitionCause.CancelledDuringExecution,
+            now,
+            cancellationToken).ConfigureAwait(false);
+        if (cancelled is null)
+        {
+            return;
+        }
+
+        ExecutionAbortReason reason;
+        lock (_executionSync)
+        {
+            reason = active.AbortReason;
+        }
+
+        Notice("ExecutionAborted", "执行阶段已按用户" + (reason == ExecutionAbortReason.Disable ? "停用" : "停止")
+            + "中止，未执行电源操作。");
+
+        // 停用只是暂停：周期任务排到下一次，紧随其后的停用命令再把它标记为停用，
+        // 重新启用后照常运行。停止则与提醒期间取消一致，本任务不再执行。
+        if (reason != ExecutionAbortReason.Disable)
+        {
+            return;
+        }
+
+        var definition = _taskService.Get(executing.SourceTaskId);
+        if (definition is null || !TaskDefinitionValidator.IsRecurringKind(definition.Kind))
+        {
+            return;
+        }
+
+        var next = _taskService.Create(definition, now, _clock.LocalTimeZone);
+        if (next.Succeeded && next.Instance is { State: TaskInstanceState.Waiting } fresh)
+        {
+            await PersistAndCommitInstanceAsync(fresh, now, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1528,6 +1818,12 @@ public sealed class SchedulerEngine : ISchedulerEngine
                 GetSnapshot(),
                 SchedulerCommandStatus.StaleCommand,
                 "The stage token does not match.");
+        }
+
+        // 执行阶段的停止已在入队时就地中止（executing→cancelled），此处如实回报成功。
+        if (instance.State == TaskInstanceState.Cancelled && instance.HasExecuted)
+        {
+            return Success("The running task was stopped before the power action.");
         }
 
         var taskResult = _taskService.Cancel(instance);
@@ -1885,4 +2181,21 @@ public sealed class SchedulerEngine : ISchedulerEngine
     private readonly record struct PendingCommand(
         SchedulerCommand Command,
         TaskCompletionSource<SchedulerCommandResult> Tcs);
+
+    private enum ExecutionAbortReason
+    {
+        None,
+        Stop,
+        Disable
+    }
+
+    /// <summary>当前正在执行（Pre-Pipeline/电源）的实例及其中止开关；字段在 _executionSync 下读写。</summary>
+    private sealed class ActiveExecution(TaskInstance instance, CancellationTokenSource cancellation)
+    {
+        public TaskInstance Instance { get; } = instance;
+
+        public CancellationTokenSource Cancellation { get; } = cancellation;
+
+        public ExecutionAbortReason AbortReason { get; set; }
+    }
 }

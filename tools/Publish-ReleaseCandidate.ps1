@@ -75,7 +75,8 @@ foreach ($d in @($candidateDir, $manifestsDir)) {
     $full = Assert-AllowedPath -Path $d -Root $allowedRoot
     if (Test-Path -LiteralPath $d) { Remove-Item -Recurse -Force -LiteralPath $d }
 }
-New-Item -ItemType Directory -Force -Path $candidateDir, $fdDir, $manifestsDir | Out-Null
+New-Item -ItemType Directory -Force -Path $candidateDir, $manifestsDir | Out-Null
+if (-not $SkipFdZip) { New-Item -ItemType Directory -Force -Path $fdDir | Out-Null }
 
 # ---- 3. 解决方案 Release 构建（0 错误 0 警告门；可选跳过） ----
 if (-not $SkipSolutionBuild) {
@@ -127,25 +128,36 @@ if (-not $SkipFdZip) {
     & $dotnet publish $appProject @fdCommon -o $fdDir
     if ($LASTEXITCODE -ne 0) { Write-Error '轻量版发布失败。'; exit 23 }
 
+    $isProduction = $DistributionMode -eq 'Production'
+    $readmeModeLine = if ($isProduction) {
+        '4. 本包为正式分发模式：首次启动启用真实电源模式，创建电源任务仍需明确确认；默认不启用开机自启动。'
+    } else {
+        '4. 本包默认安全测试模式（FakePowerService），默认不启用开机自启动。'
+    }
     $fdReadme = @"
 AutoShutdown v$Version ($Step.$Build) 轻量版（framework-dependent）使用说明
 
 1. 本包运行需要 .NET 8 Desktop Runtime x64：https://dotnet.microsoft.com/download/dotnet/8.0
 2. 解压到新目录后双击 AutoShutdown.App.exe 启动。
 3. 数据目录默认 %LocalAppData%\AutoShutdown；可用环境变量 AUTOSHUTDOWN_DATA_ROOT 指向隔离数据目录（S-PKG 验证构建）。
-4. 本包默认安全测试模式（FakePowerService），默认不启用开机自启动。
+$readmeModeLine
 "@
-    $modeLine = if ($DistributionMode -eq 'Production') {
+    $modeLine = if ($isProduction) {
         '- 正式分发模式：首次启动建立 TestMode=false、RealPowerEnabled=true 配置；创建任务仍需明确确认。'
     } else {
         '- 默认 TestMode=true：不执行真实电源操作。'
+    }
+    $signingLine = if ($isProduction) {
+        '- 本包未做代码签名，Windows 可能提示未知发布者；请核对 SHA-256 后再运行。'
+    } else {
+        '- 请勿将未签名候选用于生产环境的真实电源管理。'
     }
     $fdSafety = @"
 AutoShutdown v$Version ($Step.$Build) 安全说明
 $modeLine
 - 默认不启用开机自启动、不写注册表。
 - 候选状态：见 manifest（未签名候选 = 未使用正式签名证书，绝不伪称已签名发布）。
-- 请勿将未签名候选用于生产环境的真实电源管理。
+$signingLine
 "@
     Set-Content -Encoding UTF8 -LiteralPath (Join-Path $fdDir '使用说明.txt') -Value $fdReadme
     Set-Content -Encoding UTF8 -LiteralPath (Join-Path $fdDir '安全说明.txt') -Value $fdSafety
