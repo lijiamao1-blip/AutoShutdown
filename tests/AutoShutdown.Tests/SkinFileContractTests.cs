@@ -157,6 +157,54 @@ public sealed class SkinFileContractTests
 
     [Theory]
     [MemberData(nameof(SkinIds))]
+    public void StatusCards_AreThreeDistinctTints_ThatStandOutFromTheCard_WithReadableText(string skinId)
+    {
+        // 首页「当前任务」卡底部三张状态小卡（任务状态 / 调度服务 / 配置状态）：与经典皮肤一样各用一种色调，
+        // 彼此可辨、也要从所在卡片上凸显出来，标题与取值文字都要清楚。
+        var failures = OnSta(() =>
+        {
+            var d = Load(skinId);
+            var card = Over(Colors(d, "GlassFillPurpleBrush"), Colors(d, "WindowBackgroundBrush"));
+            var tints = new[] { "StatusCardCyanBrush", "StatusCardBlueBrush", "StatusCardGreenBrush" }
+                .Select(key => (Key: key, Colors: Over(Colors(d, key), card)))
+                .ToList();
+            var messages = new List<string>();
+            for (var i = 0; i < tints.Count; i++)
+            {
+                if (MinDistance(tints[i].Colors, card) < 18)
+                {
+                    messages.Add($"{tints[i].Key} 与所在卡片几乎同色（距离 {MinDistance(tints[i].Colors, card):F0} < 18）");
+                }
+
+                for (var j = i + 1; j < tints.Count; j++)
+                {
+                    if (MinDistance(tints[i].Colors, tints[j].Colors) < 20)
+                    {
+                        messages.Add($"{tints[i].Key} 与 {tints[j].Key} 难以区分（距离 {MinDistance(tints[i].Colors, tints[j].Colors):F0} < 20）");
+                    }
+                }
+
+                var title = MinContrast(Colors(d, "StatusCardTitleBrush"), tints[i].Colors);
+                var value = MinContrast(Colors(d, "StatusCardValueBrush"), tints[i].Colors);
+                if (title < 4.5)
+                {
+                    messages.Add($"{tints[i].Key} 上的标题对比度 {title:F2} < 4.5");
+                }
+
+                if (value < 3.0)
+                {
+                    messages.Add($"{tints[i].Key} 上的取值对比度 {value:F2} < 3");
+                }
+            }
+
+            return messages;
+        });
+
+        Assert.True(failures.Count == 0, $"{skinId} 状态小卡：\n" + string.Join("\n", failures));
+    }
+
+    [Theory]
+    [MemberData(nameof(SkinIds))]
     public void SkinFile_DangerIsUnmistakablyRed_AndDistinctFromAccent(string skinId)
     {
         var (danger, dangerSolid, accent) = OnSta(() =>
@@ -295,6 +343,10 @@ public sealed class SkinFileContractTests
         byte Mix(byte a, byte b) => (byte)Math.Round(a * alpha + b * (1 - alpha));
         return Color.FromRgb(Mix(top.R, bottom.R), Mix(top.G, bottom.G), Mix(top.B, bottom.B));
     }
+
+    /// <summary>两组颜色之间最接近的一对的 RGB 欧氏距离（0–441）。</summary>
+    private static double MinDistance(IReadOnlyList<Color> a, IReadOnlyList<Color> b)
+        => a.SelectMany(x => b.Select(y => Math.Sqrt(Math.Pow(x.R - y.R, 2) + Math.Pow(x.G - y.G, 2) + Math.Pow(x.B - y.B, 2)))).Min();
 
     internal static double MinContrast(IReadOnlyList<Color> foreground, IReadOnlyList<Color> background)
     {
