@@ -227,8 +227,12 @@
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource DangerSolidPressedBrush}" />
                         </Trigger>
+                        <!-- 禁用态由皮肤决定：浅色皮肤保持半透明红；深色皮肤改为暗底 + 淡红描边 + 灰字，避免半透明红在深底上发浑。 -->
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource DangerSolidDisabledBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource DangerSolidDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource DangerSolidDisabledTextBrush}" />
+                            <Setter TargetName="Bd" Property="Opacity" Value="{DynamicResource DangerSolidDisabledOpacity}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

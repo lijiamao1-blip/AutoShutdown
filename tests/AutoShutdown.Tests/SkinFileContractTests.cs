@@ -205,6 +205,27 @@ public sealed class SkinFileContractTests
 
     [Theory]
     [MemberData(nameof(SkinIds))]
+    public void DisabledDangerButton_IsLegibleAndStandsOffTheCard(string skinId)
+    {
+        // 禁用的危险实心按钮（如「清除记录」）：半透明方案沿用正常态配色；不透明方案（深色皮肤）须文字可读、轮廓可见。
+        var (opacity, text, background, border, card) = OnSta(() =>
+        {
+            var d = Load(skinId);
+            return ((double)d["DangerSolidDisabledOpacity"], Colors(d, "DangerSolidDisabledTextBrush"),
+                Colors(d, "DangerSolidDisabledBrush"), Colors(d, "DangerSolidDisabledBorderBrush"),
+                Over(Colors(d, "GlassFillPurpleBrush"), Colors(d, "WindowBackgroundBrush")));
+        });
+
+        Assert.InRange(opacity, 0.4, 1.0);
+        if (opacity >= 0.99)
+        {
+            Assert.True(MinContrast(text, Over(background, card)) >= 3.0, $"{skinId} 禁用态文字对比度不足 3:1。");
+            Assert.True(MinContrast(border, card) >= 1.5, $"{skinId} 禁用态描边在卡片上看不出轮廓。");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SkinIds))]
     public void SkinFile_DangerIsUnmistakablyRed_AndDistinctFromAccent(string skinId)
     {
         var (danger, dangerSolid, accent) = OnSta(() =>
