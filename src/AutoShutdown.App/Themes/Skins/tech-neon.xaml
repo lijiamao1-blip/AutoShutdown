@@ -54,11 +54,11 @@
     <SolidColorBrush x:Key="InnerPanelBrush" Color="#14283D" />
     <SolidColorBrush x:Key="InnerPanelBorderBrush" Color="#6600E5FF" />
     <SolidColorBrush x:Key="DividerBrush" Color="#6600E5FF" />
-    <SolidColorBrush x:Key="StatusCardCyanBrush" Color="#0A3A48" />
-    <SolidColorBrush x:Key="StatusCardBlueBrush" Color="#2A1F4E" />
-    <SolidColorBrush x:Key="StatusCardGreenBrush" Color="#0D3B30" />
-    <SolidColorBrush x:Key="StatusCardTitleBrush" Color="#E3F7FF" />
-    <SolidColorBrush x:Key="StatusCardValueBrush" Color="#A9C7D9" />
+    <SolidColorBrush x:Key="StatusCardCyanBrush" Color="#0B6275" />
+    <SolidColorBrush x:Key="StatusCardBlueBrush" Color="#5A35A0" />
+    <SolidColorBrush x:Key="StatusCardGreenBrush" Color="#0F7052" />
+    <SolidColorBrush x:Key="StatusCardTitleBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="StatusCardValueBrush" Color="#C9F3FF" />
     <SolidColorBrush x:Key="InfoBoxBackgroundBrush" Color="#14283D" />
     <SolidColorBrush x:Key="InfoBoxBorderBrush" Color="#6600E5FF" />
     <SolidColorBrush x:Key="InfoBoxTitleBrush" Color="#E3F7FF" />
