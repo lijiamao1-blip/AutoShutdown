@@ -1,6 +1,6 @@
 # 电脑自动关机助手 AutoShutdown
 
-AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.17**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
+AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.18**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
 
 > 本软件能够执行真实系统电源操作。首次使用请先保存重要文件，并认真阅读下面的安全提醒。
 
@@ -18,16 +18,29 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 
 ## 下载和使用
 
-普通用户不需要下载源码或安装 .NET SDK。请下载 [v2.0.17 Windows x64 发布包](https://github.com/lijiamao1-blip/AutoShutdown/releases/download/v2.0.17/AutoShutdown-v2.0.17-win-x64.zip)：
+普通用户不需要下载源码或安装 .NET SDK。请下载 [v2.0.18 Windows x64 发布包](https://github.com/lijiamao1-blip/AutoShutdown/releases/download/v2.0.18/AutoShutdown-v2.0.18-win-x64.zip)：
 
 1. 下载 ZIP 文件并完整解压。
-2. 双击其中的 `AutoShutdown-v2.0.17-S25.a749bb1.exe`，不要单独移动 EXE，需保留解压后的辅助文件。
-3. Windows 首次提示安全确认时，请核对文件来源后再运行。
+2. 双击其中的 `AutoShutdown-v2.0.18-S26.57f6cbb.exe`，不要单独移动 EXE，需保留解压后的辅助文件。
+3. Windows 提示“已保护你的电脑”时，先核对来源和 SHA-256，再点“更多信息 → 仍要运行”。
 4. 在首页选择时间模式、电源动作和提醒时间，然后创建任务。
 
-v2.0.17 正式发布包首次启动会自动启用真实电源模式，顶部显示“真实电源模式”；创建真实电源任务时仍需明确确认。本版不需要寻找“关闭安全测试”按钮。此前 v2.0.12 发布包默认进入安全测试模式，无法在界面中关闭，请更新到 v2.0.17。
+正式发布包首次启动会自动启用真实电源模式，顶部显示“真实电源模式”；创建真实电源任务时仍需明确确认。
+
+### 从旧版本升级
+
+1. 在任务栏托盘图标上右键，先退出旧版本。
+2. 解压并运行新版本；任务和设置保存在本机用户数据目录，会自动沿用。
+3. 若开启过开机自启，进入「软件设置 → 开机自启动」点「修复自启动」，否则开机时启动的仍是旧版本。
 
 [前往 Releases 下载页面](https://github.com/lijiamao1-blip/AutoShutdown/releases)
+
+## 定时与提醒规则
+
+- **错过时间不补执行**：到点时电脑处于关机、睡眠或软件未运行，开机或唤醒后不会再突然关机。每天、每周等周期任务顺延到下一次，一次性任务作废。
+- **提醒窗口**：置顶显示且不抢键盘焦点，可“延迟 10 分钟”或“取消任务”。延迟是在原定时间上往后推，并会再次提醒。
+- **执行中可停止**：到点后会先保存文档、关闭应用，这期间提醒窗口显示“执行中”，点“停止执行”或在任务管理中点“停止/停用”可立即中止。系统已开始关机后无法撤回。
+- **唤醒补提醒**：唤醒时刚好过了时间而提醒从未出现，会先补一次完整提醒，不会直接关机。
 
 ## 常用设置说明
 
@@ -63,7 +76,7 @@ v2.0.17 正式发布包首次启动会自动启用真实电源模式，顶部显
 
 ## 开发与构建
 
-开发环境需要 Windows 和 .NET 8.0.131 SDK（包含 .NET 8.0.31 运行时）：
+开发环境需要 Windows 和 .NET 8.0.130 及以上的 8.0.1xx SDK（`global.json` 允许 latestPatch，发布包内置 .NET 8.0.31 运行时）：
 
 ```powershell
 dotnet restore .\AutoShutdown.sln
@@ -74,7 +87,7 @@ dotnet test .\AutoShutdown.sln --configuration Release --no-build
 生成发布候选包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.17 -Step S25 -DistributionMode Production
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.18 -Step S26 -DistributionMode Production -SkipFdZip
 ```
 
 ## 项目结构
@@ -86,5 +99,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 - `tools`：构建、测试和发布脚本。
 
 ## 当前版本
+
+**v2.0.18** — 修复错过时间后开机/唤醒被强行关机、关机流程中无法停止、提醒窗口被隐藏、“延迟 10 分钟”反而提前关机、提醒中延迟失败、睡眠后计时推迟等问题；日志记录关机前每一步的结果。
 
 **v2.0.17** — 正式分发包首次启动自动启用真实电源配置，包含此前的 Explorer 关闭修复和单实例测试隔离；修正发布文件的 FileVersion/AssemblyVersion 为 2.0.17.0。
