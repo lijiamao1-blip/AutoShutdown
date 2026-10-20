@@ -60,15 +60,12 @@
                         <TextBlock Text="⏻" FontFamily="Segoe UI Symbol" FontSize="27" FontWeight="Bold" Foreground="{DynamicResource LogoGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
                     </Border>
                     <TextBlock Grid.Column="1" Text="电脑自动关机助手" FontSize="21" FontWeight="Bold" Foreground="{DynamicResource HeaderTitleBrush}" VerticalAlignment="Center" Margin="0,0,22,0"/>
-                    <Border Grid.Column="2" Style="{StaticResource CapsuleTagStyle}" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <Border Grid.Column="2" Style="{StaticResource CapsuleTagStyle}" VerticalAlignment="Center" Margin="0,0,16,0" ToolTip="{Binding HeaderModeHint}">
                         <TextBlock Text="{Binding HeaderModeText}" FontSize="12" Foreground="{DynamicResource ModeTagTextBrush}"/>
                     </Border>
-                    <!-- 窄窗口下提示文字以省略号收尾（悬停看全文），不再压到右侧「服务运行中」；空间足够时排布与原先一致。 -->
-                    <DockPanel Grid.Column="3" LastChildFill="False" VerticalAlignment="Center">
-                        <TextBlock DockPanel.Dock="Left" Text="{Binding HeaderModeHint}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}"
-                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding HeaderModeHint}"/>
-                        <TextBlock DockPanel.Dock="Left" Text="{Binding VersionText}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}" Opacity="0.8" Margin="18,0,0,0"/>
-                    </DockPanel>
+                    <!-- 模式说明（如「当前将执行真实系统电源操作，请谨慎使用」）不再常驻顶栏，悬停模式标签可查看。 -->
+                    <TextBlock Grid.Column="3" Text="{Binding VersionText}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}" Opacity="0.8"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     <TextBlock Grid.Column="4" Text="服务运行中" Foreground="{DynamicResource HeaderStatusTextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
                     <!-- 皮肤入口（任何页面都可见）：点击弹出皮肤画廊。浮层打开时按钮不参与命中测试，
                          点击按钮只会关闭浮层（StaysOpen=False），不会关了又立即重新打开。 -->
