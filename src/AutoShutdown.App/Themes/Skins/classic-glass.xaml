@@ -186,11 +186,6 @@
     <SolidColorBrush x:Key="DangerSolidPressedBrush" Color="#C62828" />
     <SolidColorBrush x:Key="DangerSolidBorderBrush" Color="#B71C1C" />
     <SolidColorBrush x:Key="DangerTextOnSolidBrush" Color="#FFFFFF" />
-    <!-- 危险实心按钮的禁用态（如没有可清除记录时的「清除记录」） -->
-    <SolidColorBrush x:Key="DangerSolidDisabledBrush" Color="#D32F2F" />
-    <SolidColorBrush x:Key="DangerSolidDisabledBorderBrush" Color="#B71C1C" />
-    <SolidColorBrush x:Key="DangerSolidDisabledTextBrush" Color="#FFFFFF" />
-    <sys:Double x:Key="DangerSolidDisabledOpacity">0.5</sys:Double>
 
     <!-- ========== 输入框 / 下拉框 / 浮层 ========== -->
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#CCFFFFFF" />
