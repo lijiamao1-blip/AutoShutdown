@@ -1,6 +1,6 @@
 # 电脑自动关机助手 AutoShutdown
 
-AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.18**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
+AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具。当前版本为 **v2.0.19**，支持真实关机、重启、睡眠、休眠、唤醒他机，以及多种定时规则。
 
 > 本软件能够执行真实系统电源操作。首次使用请先保存重要文件，并认真阅读下面的安全提醒。
 
@@ -15,13 +15,14 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 - 支持多个例外日期，每行填写一个 `yyyy-MM-dd` 日期。
 - 支持托盘菜单、开机自启、Windows 任务计划程序同步、日志诊断和安全自检。
 - 支持局域网远程控制、TLS、设备配对及命令白名单，默认关闭并以只读能力为主。
+- 10 套界面皮肤，顶栏「皮肤」按钮一键切换，立即生效并自动保存。
 
 ## 下载和使用
 
-普通用户不需要下载源码或安装 .NET SDK。请下载 [v2.0.18 Windows x64 发布包](https://github.com/lijiamao1-blip/AutoShutdown/releases/download/v2.0.18/AutoShutdown-v2.0.18-win-x64.zip)：
+普通用户不需要下载源码或安装 .NET SDK。请下载 [v2.0.19 Windows x64 发布包](https://github.com/lijiamao1-blip/AutoShutdown/releases/download/v2.0.19/AutoShutdown-v2.0.19-win-x64.zip)：
 
 1. 下载 ZIP 文件并完整解压。
-2. 双击其中的 `AutoShutdown-v2.0.18-S26.57f6cbb.exe`，不要单独移动 EXE，需保留解压后的辅助文件。
+2. 双击其中的 `AutoShutdown-v2.0.19-S27.f0ec2ad.exe`，不要单独移动 EXE，需保留解压后的辅助文件。
 3. Windows 提示“已保护你的电脑”时，先核对来源和 SHA-256，再点“更多信息 → 仍要运行”。
 4. 在首页选择时间模式、电源动作和提醒时间，然后创建任务。
 
@@ -41,6 +42,25 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 - **提醒窗口**：置顶显示且不抢键盘焦点，可“延迟 10 分钟”或“取消任务”。延迟是在原定时间上往后推，并会再次提醒。
 - **执行中可停止**：到点后会先保存文档、关闭应用，这期间提醒窗口显示“执行中”，点“停止执行”或在任务管理中点“停止/停用”可立即中止。系统已开始关机后无法撤回。
 - **唤醒补提醒**：唤醒时刚好过了时间而提醒从未出现，会先补一次完整提醒，不会直接关机。
+
+## 皮肤
+
+点击顶栏「皮肤」按钮（或进入「软件设置 → 外观 · 皮肤」），在画廊中点选即可切换，立即生效并自动保存，重启后保持。缩略图直接展示该皮肤下的界面与倒计时效果。
+
+| 皮肤 | 风格 |
+|---|---|
+| 浅色 · 简洁 | 近白界面、墨蓝数字 |
+| 深色 · 夜间 | 石墨深色表面、低亮蓝光，适合夜间 |
+| 经典 · 蓝紫玻璃 | 软件原有外观（默认） |
+| 科技 · 霓虹 | 深色网格、青色仪表数字 |
+| 森林 · 晨光 | 晨光天空与层叠针叶林 |
+| 海湾 · 午睡猫 | 柔蓝海湾、小木船与蜷睡白猫 |
+| 梦幻 · 极光 | 粉紫薄荷极光、渐变数字 |
+| 暖阳 · 日落 | 桃金日落与远山 |
+| 墨韵 · 水墨 | 宣纸、水墨远山与朱印 |
+| 护眼 · 豆沙绿 | 柔和豆沙绿，适合长时间常驻 |
+
+皮肤只改变外观，不影响任务、提醒和电源设置。外观选择单独保存在用户数据目录的 `appearance.json`，文件损坏时自动回到经典皮肤。倒计时剩余 1 分钟内会切换为醒目的紧急色。
 
 ## 常用设置说明
 
@@ -87,7 +107,7 @@ dotnet test .\AutoShutdown.sln --configuration Release --no-build
 生成发布候选包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.18 -Step S26 -DistributionMode Production -SkipFdZip
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -Version 2.0.19 -Step S27 -DistributionMode Production -SkipFdZip
 ```
 
 ## 项目结构
@@ -99,6 +119,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 - `tools`：构建、测试和发布脚本。
 
 ## 当前版本
+
+**v2.0.19** — 新增 10 套皮肤（顶栏「皮肤」按钮与设置页「外观 · 皮肤」）；倒计时最后 1 分钟显示紧急色；首页倒计时在窄窗口下自动缩小完整显示；顶栏不再常驻模式说明文字。
 
 **v2.0.18** — 修复错过时间后开机/唤醒被强行关机、关机流程中无法停止、提醒窗口被隐藏、“延迟 10 分钟”反而提前关机、提醒中延迟失败、睡眠后计时推迟等问题；日志记录关机前每一步的结果。
 
