@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using AutoShutdown.App.AppHost;
 using AutoShutdown.App.Infrastructure;
+using AutoShutdown.App.Infrastructure.Appearance;
 using AutoShutdown.App.Infrastructure.Logging;
 using AutoShutdown.Core.Abstractions;
 using AutoShutdown.Core.Recovery;
@@ -162,6 +163,10 @@ public partial class App : System.Windows.Application
                 _startupGuard.Disarm();
                 return;
             }
+
+            // 皮肤纯属外观：在创建主窗口之前应用已保存的皮肤，避免启动时先闪一下默认皮肤；
+            // 读取失败或未知皮肤只回退默认外观并记录警告，绝不阻止启动。
+            _serviceProvider.GetRequiredService<ISkinService>().ApplySavedSkin();
 
             logger.Info("LifetimeCoordinatorResolving", "解析应用生命周期协调器。");
             _coordinator = _serviceProvider.GetRequiredService<ApplicationLifetimeCoordinator>();

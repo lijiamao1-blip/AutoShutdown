@@ -190,8 +190,33 @@
     <SolidColorBrush x:Key="PopupBackgroundBrush" Color="#F8FFFFFF" />
     <SolidColorBrush x:Key="PopupBorderBrush" Color="#662688EE" />
     <DropShadowEffect x:Key="PopupShadowEffect" BlurRadius="12" ShadowDepth="2" Opacity="0.10" />
+    <!-- 悬停提示胶囊（皮肤画廊卡片上方显示皮肤名） -->
+    <SolidColorBrush x:Key="TooltipBackgroundBrush" Color="#F2161A22" />
+    <SolidColorBrush x:Key="TooltipTextBrush" Color="#FFFFFF" />
 
-    <!-- ========== 日期选择日历 ========== -->
+    <SolidColorBrush x:Key="InputCaretBrush" Color="#000000" />
+
+    <!-- ========== 系统控件（Themes/SkinSystemControls.xaml 的隐式样式使用） ==========
+         经典皮肤不合并 SkinSystemControls.xaml（滚动条、复选框、表格等保持 Windows 默认外观），
+         以下取值仅为保持令牌契约完整；其他皮肤必须合并该文件并给出与自身配色一致的取值。 -->
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#14000000" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#808A97B3" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#B05A6B8C" />
+    <SolidColorBrush x:Key="ListRowHoverBrush" Color="#262F80ED" />
+    <SolidColorBrush x:Key="ListRowSelectedBrush" Color="#402F80ED" />
+    <SolidColorBrush x:Key="ListRowSelectedTextBrush" Color="#1C2740" />
+    <SolidColorBrush x:Key="CheckBoxBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxBorderBrush" Color="#8A97B3" />
+    <SolidColorBrush x:Key="CheckBoxCheckedBackgroundBrush" Color="#2F80ED" />
+    <SolidColorBrush x:Key="CheckBoxGlyphBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="DataGridBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="DataGridAlternateRowBrush" Color="#F6F8FC" />
+    <SolidColorBrush x:Key="DataGridLineBrush" Color="#E1E6EF" />
+    <SolidColorBrush x:Key="DataGridHeaderBackgroundBrush" Color="#EEF2F8" />
+    <SolidColorBrush x:Key="DataGridHeaderTextBrush" Color="#1C2740" />
+
+    <!-- ========== 日期选择日历 ==========
+         下拉日历的标题、星期行沿用 Windows 默认深色文字，所以每套皮肤的日历都必须是浅色表面。 -->
     <SolidColorBrush x:Key="CalendarBackgroundBrush" Color="#F8FBFF" />
     <SolidColorBrush x:Key="CalendarBorderBrush" Color="#98C4F5" />
     <SolidColorBrush x:Key="CalendarDayTextBrush" Color="#243B5A" />
@@ -208,7 +233,7 @@
     <SolidColorBrush x:Key="CountdownTextBrush" Color="#FFFFFF" />
     <DropShadowEffect x:Key="CountdownGlowEffect" Color="#B681FF" BlurRadius="12" ShadowDepth="0" Opacity="0.55" />
     <!-- 紧急态：提醒中且剩余 ≤ 60 秒 -->
-    <SolidColorBrush x:Key="CountdownUrgentBrush" Color="#D32F2F" />
+    <SolidColorBrush x:Key="CountdownUrgentBrush" Color="#B3261E" />
     <DropShadowEffect x:Key="CountdownUrgentGlowEffect" Color="#FFFFFF" BlurRadius="10" ShadowDepth="0" Opacity="0.9" />
     <!-- 倒计时上方的状态行、卡片右上角的任务计数、空闲任务等待中的小字说明 -->
     <SolidColorBrush x:Key="CountdownCaptionBrush" Color="#294064" />
@@ -235,7 +260,7 @@
     <SolidColorBrush x:Key="ReminderMessageBrush" Color="#43536F" />
     <SolidColorBrush x:Key="ReminderCountdownBrush" Color="#FFFFFF" />
     <DropShadowEffect x:Key="ReminderCountdownGlowEffect" Color="#C985FF" BlurRadius="16" ShadowDepth="0" Opacity="0.7" />
-    <SolidColorBrush x:Key="ReminderCountdownUrgentBrush" Color="#D32F2F" />
+    <SolidColorBrush x:Key="ReminderCountdownUrgentBrush" Color="#B3261E" />
     <DropShadowEffect x:Key="ReminderCountdownUrgentGlowEffect" Color="#FFFFFF" BlurRadius="12" ShadowDepth="0" Opacity="0.9" />
     <SolidColorBrush x:Key="ReminderErrorTextBrush" Color="#FFD3D8" />
 

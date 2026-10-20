@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Threading;
 using AutoShutdown.App.Infrastructure;
+using AutoShutdown.App.Infrastructure.Appearance;
 using AutoShutdown.App.Infrastructure.AutoStart;
 using AutoShutdown.App.Infrastructure.Diagnostics;
 using AutoShutdown.App.Infrastructure.CloseApps;
@@ -339,6 +340,12 @@ public static class ServiceRegistration
             () => Infrastructure.DataRootResolver.Resolve(),
             () => provider.GetRequiredService<MainWindowViewModel>().BuildDiagnosticsLiveSummary()));
 
+        // 皮肤：纯外观，appearance.json 与 config.json 分开存放；读写失败只回退默认皮肤。
+        services.AddSingleton<AppearanceSettingsStore>();
+        services.AddSingleton<ISkinResourceApplier, WpfSkinResourceApplier>();
+        services.AddSingleton<ISkinService, SkinService>();
+        services.AddSingleton<SkinSectionViewModel>();
+
         services.AddSingleton<MainWindowViewModel>(provider =>
             new MainWindowViewModel(
                 provider.GetRequiredService<ISchedulerEngine>(),
@@ -352,6 +359,7 @@ public static class ServiceRegistration
                 taskSyncSection: provider.GetRequiredService<TaskSyncSectionViewModel>(),
                 remoteSection: provider.GetRequiredService<RemoteSectionViewModel>(),
                 diagnosticsCenter: provider.GetRequiredService<DiagnosticsCenterViewModel>(),
+                skinSection: provider.GetRequiredService<SkinSectionViewModel>(),
                 // S-UI1-D2：注入任务定义集合与空闲监视器，供首页「当前任务」卡显示真实空闲状态。
                 taskService: provider.GetRequiredService<ITaskService>(),
                 idleMonitor: provider.GetRequiredService<IIdleMonitor>(),

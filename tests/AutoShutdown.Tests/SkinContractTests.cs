@@ -16,7 +16,9 @@ public sealed class SkinContractTests
         "ReminderWindow.xaml",
         "ProcessPickerWindow.xaml",
         "ProcessPickerSummaryWindow.xaml",
-        Path.Combine("Themes", "Controls.xaml")
+        Path.Combine("Themes", "Controls.xaml"),
+        Path.Combine("Themes", "SkinSystemControls.xaml"),
+        Path.Combine("Controls", "SkinThumbnail.xaml")
     ];
 
     private static readonly Regex HexColor = new(@"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?\b", RegexOptions.Compiled);

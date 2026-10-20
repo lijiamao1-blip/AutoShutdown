@@ -2,12 +2,14 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:presentation="clr-namespace:AutoShutdown.App.Presentation"
+        xmlns:controls="clr-namespace:AutoShutdown.App.Controls"
         Title="电脑自动关机助手" Icon="/assets/icon.ico" Width="1080" Height="640" MinWidth="900" MinHeight="580"
         WindowStartupLocation="Manual" Background="{DynamicResource WindowBackgroundBrush}"
         FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <presentation:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <presentation:InverseBoolConverter x:Key="InverseBoolConverter" />
         <presentation:BoolToTextConverter x:Key="BoolToTextConverter" />
         <!-- 安全自检健康标记：正常→成功色，待关注→警告色；用动态资源，切换皮肤时即时变色。 -->
         <Style x:Key="HealthRunStyle" TargetType="Run">
@@ -19,6 +21,23 @@
             </Style.Triggers>
         </Style>
         <presentation:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibilityConverter" />
+        <!-- 皮肤画廊卡片（顶栏浮层与设置页外观卡片共用）：点击即切换；悬停显示皮肤名胶囊。 -->
+        <DataTemplate x:Key="SkinGalleryItemTemplate">
+            <Button Style="{StaticResource SkinGalleryCardStyle}"
+                    Command="{Binding DataContext.SelectSkinCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    CommandParameter="{Binding}"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.HelpText="{Binding Description}"
+                    ToolTipService.InitialShowDelay="120" ToolTipService.BetweenShowDelay="0">
+                <Button.ToolTip>
+                    <ToolTip Style="{StaticResource SkinNameToolTipStyle}" Content="{Binding DisplayName}" />
+                </Button.ToolTip>
+                <controls:SkinThumbnail SkinUri="{Binding SkinUri}" />
+            </Button>
+        </DataTemplate>
+        <ItemsPanelTemplate x:Key="SkinGalleryPanelTemplate">
+            <UniformGrid Columns="5" />
+        </ItemsPanelTemplate>
     </Window.Resources>
 
     <Grid>
@@ -35,7 +54,7 @@
                 <Grid Margin="22,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Border Width="39" Height="39" CornerRadius="20" BorderBrush="{DynamicResource LogoRingBorderBrush}" BorderThickness="2" Background="{DynamicResource LogoRingBackgroundBrush}" VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="⏻" FontFamily="Segoe UI Symbol" FontSize="27" FontWeight="Bold" Foreground="{DynamicResource LogoGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
@@ -44,13 +63,53 @@
                     <Border Grid.Column="2" Style="{StaticResource CapsuleTagStyle}" VerticalAlignment="Center" Margin="0,0,16,0">
                         <TextBlock Text="{Binding HeaderModeText}" FontSize="12" Foreground="{DynamicResource ModeTagTextBrush}"/>
                     </Border>
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding HeaderModeHint}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}"/>
-                        <TextBlock Text="{Binding VersionText}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}" Opacity="0.8" Margin="18,0,0,0"/>
-                    </StackPanel>
+                    <!-- 窄窗口下提示文字以省略号收尾（悬停看全文），不再压到右侧「服务运行中」；空间足够时排布与原先一致。 -->
+                    <DockPanel Grid.Column="3" LastChildFill="False" VerticalAlignment="Center">
+                        <TextBlock DockPanel.Dock="Left" Text="{Binding HeaderModeHint}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}"
+                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding HeaderModeHint}"/>
+                        <TextBlock DockPanel.Dock="Left" Text="{Binding VersionText}" FontSize="12" Foreground="{DynamicResource HeaderHintTextBrush}" Opacity="0.8" Margin="18,0,0,0"/>
+                    </DockPanel>
                     <TextBlock Grid.Column="4" Text="服务运行中" Foreground="{DynamicResource HeaderStatusTextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
-                    <Button Grid.Column="5" Content="⚙  设置" Style="{StaticResource HeaderButtonStyle}" Command="{Binding SettingsCommand}" Margin="0,0,10,0"/>
-                    <Button Grid.Column="6" Content="▣  托盘菜单" Style="{StaticResource HeaderButtonStyle}" Command="{Binding TrayMenuCommand}"/>
+                    <!-- 皮肤入口（任何页面都可见）：点击弹出皮肤画廊。浮层打开时按钮不参与命中测试，
+                         点击按钮只会关闭浮层（StaysOpen=False），不会关了又立即重新打开。 -->
+                    <Button x:Name="SkinButton" Grid.Column="5" Style="{StaticResource HeaderButtonStyle}" Margin="0,0,10,0"
+                            Command="{Binding SkinSection.ToggleGalleryCommand}"
+                            IsHitTestVisible="{Binding SkinSection.IsGalleryOpen, Converter={StaticResource InverseBoolConverter}, FallbackValue=True}"
+                            ToolTip="选择皮肤：切换软件外观，立即生效" AutomationProperties.Name="皮肤">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE790;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock Text="皮肤" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Popup x:Name="SkinGalleryPopup" PlacementTarget="{Binding ElementName=SkinButton}" Placement="Custom"
+                           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" Focusable="False"
+                           IsOpen="{Binding SkinSection.IsGalleryOpen, Mode=TwoWay}">
+                        <!-- 浮层底下先垫一层不透明的窗口背景，避免半透明浮层底色透出下方的大号倒计时。 -->
+                        <Border Margin="14" CornerRadius="16" Background="{DynamicResource WindowBackgroundBrush}" Effect="{DynamicResource PopupShadowEffect}">
+                        <Border Padding="18,14,18,12" CornerRadius="16" BorderThickness="1"
+                                Background="{DynamicResource PopupBackgroundBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
+                                DataContext="{Binding SkinSection}">
+                            <Border.InputBindings>
+                                <KeyBinding Key="Escape" Command="{Binding CloseGalleryCommand}"/>
+                            </Border.InputBindings>
+                            <StackPanel Width="720">
+                                <TextBlock Text="选择皮肤" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock Text="点击即可切换，立即生效并自动保存" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,10"/>
+                                <ItemsControl x:Name="SkinGalleryItems" ItemsSource="{Binding Options}"
+                                              ItemTemplate="{StaticResource SkinGalleryItemTemplate}" ItemsPanel="{StaticResource SkinGalleryPanelTemplate}"
+                                              KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once"
+                                              AutomationProperties.Name="皮肤列表" Focusable="False"/>
+                                <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{DynamicResource ErrorTextBrush}" TextWrapping="Wrap" Margin="6,6,0,0"
+                                           Visibility="{Binding StatusText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}"/>
+                                <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="6,10,6,8"/>
+                                <Button Content="更多外观设置 →" Style="{StaticResource SubtleButtonStyle}" Foreground="{DynamicResource SecondaryButtonTextBrush}"
+                                        HorizontalAlignment="Right" Command="{Binding DataContext.AppearanceSettingsCommand, ElementName=SkinButton}"/>
+                            </StackPanel>
+                        </Border>
+                        </Border>
+                    </Popup>
+                    <Button Grid.Column="6" Content="⚙  设置" Style="{StaticResource HeaderButtonStyle}" Command="{Binding SettingsCommand}" Margin="0,0,10,0"/>
+                    <Button Grid.Column="7" Content="▣  托盘菜单" Style="{StaticResource HeaderButtonStyle}" Command="{Binding TrayMenuCommand}"/>
                 </Grid>
             </Border>
 
@@ -326,6 +385,11 @@
                                                     <Setter Property="Foreground" Value="{DynamicResource CountdownTextBrush}"/>
                                                     <Setter Property="Effect" Value="{DynamicResource CountdownGlowEffect}"/>
                                                     <Style.Triggers>
+                                                        <!-- 紧急态（剩余 ≤ 60 秒）：改用皮肤的紧急色与对应辉光 -->
+                                                        <DataTrigger Binding="{Binding IsCountdownUrgent}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource CountdownUrgentBrush}"/>
+                                                            <Setter Property="Effect" Value="{DynamicResource CountdownUrgentGlowEffect}"/>
+                                                        </DataTrigger>
                                                         <DataTrigger Binding="{Binding IsIdleStatusVisible}" Value="True">
                                                             <Setter Property="FontSize" Value="15"/>
                                                             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -449,7 +513,18 @@
                                                             <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="{DynamicResource TextHintBrush}" TextWrapping="Wrap">
                                                                 <Run Text="执行时间 "/><Run Text="{Binding FireTimeText, Mode=OneWay}"/>
                                                                 <Run Text="    提醒 "/><Run Text="{Binding WarningText, Mode=OneWay}"/>
-                                                                <Run Text="    倒计时 "/><Run Text="{Binding CountdownText, Mode=OneWay}"/>
+                                                                <Run Text="    倒计时 "/><Run Text="{Binding CountdownText, Mode=OneWay}">
+                                                                    <Run.Style>
+                                                                        <Style TargetType="Run">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsCountdownUrgent}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="{DynamicResource CountdownUrgentBrush}"/>
+                                                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Run.Style>
+                                                                </Run>
                                                                 <Run Text="    触发 "/><Run Text="{Binding TriggerText, Mode=OneWay}"/>
                                                             </TextBlock>
                                                         </StackPanel>
@@ -787,7 +862,24 @@
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="20,16,20,24">
                             <TextBlock Text="软件设置" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,12"/>
-                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16">
+                            <!-- 外观 · 皮肤（与顶栏「皮肤」画廊同一控件的大号版本） -->
+                            <Border x:Name="AppearanceCard" Style="{StaticResource GlassCardStyle}" Padding="20,16" DataContext="{Binding SkinSection}">
+                                <StackPanel>
+                                    <TextBlock Text="外观 · 皮肤" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
+                                    <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
+                                        <Run Text="当前皮肤："/><Run Text="{Binding CurrentDisplayName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <Run Text="  "/><Run Text="{Binding CurrentDescription, Mode=OneWay}"/>
+                                        <LineBreak/><Run Text="点击下方任一皮肤立即切换并自动保存；顶栏「皮肤」按钮可随时打开同一画廊。皮肤只改变外观，不影响任何任务与电源设置。" Foreground="{DynamicResource TextHintBrush}"/>
+                                    </TextBlock>
+                                    <ItemsControl ItemsSource="{Binding Options}" MaxWidth="900" HorizontalAlignment="Stretch"
+                                                  ItemTemplate="{StaticResource SkinGalleryItemTemplate}" ItemsPanel="{StaticResource SkinGalleryPanelTemplate}"
+                                                  KeyboardNavigation.DirectionalNavigation="Contained" KeyboardNavigation.TabNavigation="Once"
+                                                  AutomationProperties.Name="皮肤列表" Focusable="False" Margin="-6,0"/>
+                                    <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{DynamicResource ErrorTextBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                               Visibility="{Binding StatusText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource GlassCardStyle}" Padding="20,16" Margin="0,14,0,0">
                                 <StackPanel>
                                     <TextBlock Text="开机自启动" Style="{StaticResource CardTitleStyle}" FontSize="16" Margin="0,0,0,4"/>
                                     <TextBlock Text="仅对当前 Windows 用户生效，可随时关闭；默认不启用。" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>

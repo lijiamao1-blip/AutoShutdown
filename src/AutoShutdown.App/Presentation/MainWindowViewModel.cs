@@ -62,7 +62,19 @@ public sealed record TaskListItem(
     bool CanClear,
     bool IsEnabled,
     bool CanSetEnabled,
-    string EnabledText);
+    string EnabledText,
+    bool IsCountdownUrgent = false);
+
+/// <summary>倒计时紧急态：仍会执行的任务剩余不足 1 分钟（含已到期、执行中）时，倒计时改用皮肤的紧急色。</summary>
+public static class CountdownUrgency
+{
+    public static readonly TimeSpan Threshold = TimeSpan.FromSeconds(60);
+
+    public static bool IsUrgent(TaskInstance instance, TimeSpan remaining)
+        => instance.IsEnabled
+            && instance.State is TaskInstanceState.Waiting or TaskInstanceState.Confirming or TaskInstanceState.Executing
+            && remaining <= Threshold;
+}
 
 /// <summary>强制冲突待决仲裁的候选任务（供 UI 询问用户）。</summary>
 public sealed record PendingArbitrationItem(Guid TaskId, string ActionText, string FireTimeText);
@@ -90,6 +102,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly TaskSyncSectionViewModel? _taskSyncSection;
     private readonly RemoteSectionViewModel? _remoteSection;
     private readonly DiagnosticsCenterViewModel? _diagnosticsCenter;
+    private readonly SkinSectionViewModel? _skinSection;
     private readonly ITaskService? _taskService;
     private readonly IIdleMonitor? _idleMonitor;
     private readonly IProcessInfoProvider? _processInfoProvider;
@@ -132,7 +145,8 @@ public sealed class MainWindowViewModel : ObservableObject
         IIdleMonitor? idleMonitor = null,
         IProcessInfoProvider? processInfoProvider = null,
         Func<ProcessPickerViewModel, ProcessPickerResult?>? processPickerLauncher = null,
-        Func<bool>? closeAppsClearAllConfirmation = null)
+        Func<bool>? closeAppsClearAllConfirmation = null,
+        SkinSectionViewModel? skinSection = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(configurationService);
@@ -159,6 +173,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _taskSyncSection = taskSyncSection;
         _remoteSection = remoteSection;
         _diagnosticsCenter = diagnosticsCenter;
+        _skinSection = skinSection;
         _taskService = taskService;
         _idleMonitor = idleMonitor;
         _processInfoProvider = processInfoProvider;
@@ -238,6 +253,16 @@ public sealed class MainWindowViewModel : ObservableObject
         ResolveArbitrationCommand = new RelayCommand(ResolveArbitration);
         OneTimeTodayCommand = new RelayCommand(SelectTodayForOneTime);
         GoToLogsCommand = new RelayCommand(() => SelectedNav = NavItems[4]);
+        AppearanceSettingsCommand = new RelayCommand(() =>
+        {
+            if (_skinSection is not null)
+            {
+                _skinSection.IsGalleryOpen = false;
+            }
+
+            SelectedNav = NavItems[5];
+            AppearanceSettingsRequested?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     // ---- 导航 ----
@@ -898,6 +923,15 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>日志与诊断中心（S-UI1）。</summary>
     public DiagnosticsCenterViewModel? DiagnosticsCenter => _diagnosticsCenter;
 
+    /// <summary>皮肤选择（顶栏画廊与设置页外观卡片共用）。</summary>
+    public SkinSectionViewModel? SkinSection => _skinSection;
+
+    /// <summary>画廊底部「更多外观设置」：关闭画廊并跳到软件设置页的外观卡片。</summary>
+    public ICommand AppearanceSettingsCommand { get; }
+
+    /// <summary>请求视图把设置页滚动到外观卡片（纯视图行为，由 MainWindow 处理）。</summary>
+    public event EventHandler? AppearanceSettingsRequested;
+
     /// <summary>
     /// 从当前 VM 状态汇总诊断快照（供诊断中心的自检/导出使用）。只读，不触发任何副作用；
     /// 隐私字段是否包含由导出层依据 <see cref="DiagnosticsCenterViewModel.IncludePrivacyInfo"/> 决定，
@@ -997,6 +1031,15 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _countdownText;
         private set => SetProperty(ref _countdownText, value);
+    }
+
+    private bool _isCountdownUrgent;
+
+    /// <summary>当前任务倒计时是否处于紧急态（剩余 ≤ 60 秒）；空闲任务等待触发时恒为 false。</summary>
+    public bool IsCountdownUrgent
+    {
+        get => _isCountdownUrgent;
+        private set => SetProperty(ref _isCountdownUrgent, value);
     }
 
     private string _countdownSourceText = "—";
@@ -2532,6 +2575,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CountdownText = "—";
             CountdownSourceText = "—";
             IsIdleStatusVisible = false;
+            IsCountdownUrgent = false;
             NextFireTimeText = "--";
             TaskActionText = "--";
             WarningTimeText = "--";
@@ -2568,6 +2612,7 @@ public sealed class MainWindowViewModel : ObservableObject
             CountdownText = BuildIdleStatusText(instance.SourceTaskId);
             NextFireTimeText = "等待连续空闲达阈值后触发";
             IsIdleStatusVisible = true;
+            IsCountdownUrgent = false;
         }
         else
         {
@@ -2580,6 +2625,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 : "即将执行";
             NextFireTimeText = localFire.ToString("yyyy-MM-dd HH:mm:ss");
             IsIdleStatusVisible = false;
+            IsCountdownUrgent = CountdownUrgency.IsUrgent(instance, remaining);
         }
 
         TaskSummaryText = $"当前任务：{MapDisplayedState(instance)} / {UiTextMapper.Map(instance.ActionSnapshot)} / {localFire:yyyy-MM-dd HH:mm}";
@@ -3369,7 +3415,9 @@ public sealed class MainWindowViewModel : ObservableObject
                     or TaskInstanceState.Interrupted,
                 instance.IsEnabled,
                 true,
-                instance.IsEnabled ? "停用" : "启用"));
+                instance.IsEnabled ? "停用" : "启用",
+                CountdownUrgency.IsUrgent(instance, remaining)
+                    && !(instance.State == TaskInstanceState.Waiting && !instance.IsIdleTriggered && IsIdleTask(instance.SourceTaskId))));
         }
 
         HasTasks = instances.Count > 0;

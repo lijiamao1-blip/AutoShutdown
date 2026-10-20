@@ -17,6 +17,7 @@ public partial class ReminderWindow : Window
     private readonly DispatcherTimer _timer;
     private bool _submitting;
     private bool _closeLogged;
+    private bool? _countdownUrgent;
 
     public ReminderWindow(
         TaskInstance instance,
@@ -48,9 +49,10 @@ public partial class ReminderWindow : Window
 
     private void UpdateCountdown()
     {
-        if (_engine.GetSnapshot().Instances.Values.FirstOrDefault(i => i.InstanceId == _instance.InstanceId)
-            is { State: TaskInstanceState.Executing })
+        var current = _engine.GetSnapshot().Instances.Values.FirstOrDefault(i => i.InstanceId == _instance.InstanceId);
+        if (current is { State: TaskInstanceState.Executing })
         {
+            ApplyCountdownUrgency(urgent: true);
             // 到点后先保存文档、关闭应用（可能持续数十秒），这段时间仍可中止。
             MessageText.Text = $"正在保存文档并关闭应用，随后执行{UiTextMapper.Map(_instance.ActionSnapshot)}。"
                 + "点击「停止执行」可立即中止（系统已开始关机后无法撤回）。";
@@ -64,6 +66,24 @@ public partial class ReminderWindow : Window
         CountdownText.Text = remaining > TimeSpan.Zero
             ? remaining.ToString(@"hh\:mm\:ss")
             : "即将执行";
+        ApplyCountdownUrgency(CountdownUrgency.IsUrgent(current ?? _instance, remaining));
+    }
+
+    /// <summary>剩余 ≤ 60 秒（含执行中）时倒计时切到皮肤的紧急色；经资源引用设置，切换皮肤时同步变色。</summary>
+    private void ApplyCountdownUrgency(bool urgent)
+    {
+        if (_countdownUrgent == urgent)
+        {
+            return;
+        }
+
+        _countdownUrgent = urgent;
+        CountdownText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            urgent ? "ReminderCountdownUrgentBrush" : "ReminderCountdownBrush");
+        CountdownText.SetResourceReference(
+            EffectProperty,
+            urgent ? "ReminderCountdownUrgentGlowEffect" : "ReminderCountdownGlowEffect");
     }
 
     private async void SnoozeButton_Click(object sender, RoutedEventArgs e)

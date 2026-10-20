@@ -339,6 +339,7 @@
         <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{DynamicResource InputCaretBrush}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
@@ -400,6 +401,69 @@
                             </Border>
                         </Popup>
                     </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 皮肤画廊卡片：缩略图外留 3px 间隙的选中描边（参考主题选择器），右下角 ✓ 表示当前皮肤。
+         DataContext 为 SkinOptionViewModel。 -->
+    <Style x:Key="SkinGalleryCardStyle" TargetType="Button">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Margin" Value="6,4" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <StackPanel Background="Transparent">
+                        <Border x:Name="Frame" BorderThickness="2" BorderBrush="Transparent" CornerRadius="14" Padding="3">
+                            <Grid>
+                                <ContentPresenter />
+                                <Border x:Name="Check" Width="22" Height="22" CornerRadius="11" Visibility="Collapsed"
+                                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,5,5"
+                                        Background="{DynamicResource HighlightBrush}" BorderBrush="{DynamicResource HighlightTextBrush}" BorderThickness="1.5">
+                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{DynamicResource HighlightTextBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <TextBlock x:Name="Caption" Text="{Binding DisplayName}" FontSize="12" Margin="0,4,0,0"
+                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ChoiceBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource InputHoverBorderBrush}" />
+                        </Trigger>
+                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource HighlightBrush}" />
+                            <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="Caption" Property="FontWeight" Value="SemiBold" />
+                            <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    </Style>
+
+    <!-- 皮肤名称提示：卡片上方的深色胶囊 -->
+    <Style x:Key="SkinNameToolTipStyle" TargetType="ToolTip">
+        <Setter Property="Foreground" Value="{DynamicResource TooltipTextBrush}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Placement" Value="Top" />
+        <Setter Property="VerticalOffset" Value="-2" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{DynamicResource TooltipBackgroundBrush}" CornerRadius="12" Padding="14,6">
+                        <ContentPresenter />
+                    </Border>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
