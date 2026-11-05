@@ -9,9 +9,9 @@
     <!-- PerMonitorV2 DPI 感知（S-UI1）：随 app.manifest 声明，配合 ScrollViewer 自适应布局。
          WFAC010 为 WinForms 分析器建议改用 ApplicationHighDpiMode；本应用是 WPF 优先，
          WinForms 仅用于托盘/对话框，DPI 感知必须在进程启动前由清单建立（WPF 按清单渲染），
-         故保留清单声明并显式抑制该分析器。 -->
+         故保留清单声明并显式抑制该分析器。.NET 9 起同一条规则改名为 WFO0003，两个编号一并抑制。 -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <NoWarn>$(NoWarn);WFAC010;WFO0003</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(AutoShutdownDistributionMode)' == 'Production'">
     <DefineConstants>$(DefineConstants);AUTOSHUTDOWN_PRODUCTION</DefineConstants>
