@@ -1,0 +1,62 @@
+# 自动编译 + 测试：每次推送代码或提交 PR 时，在 GitHub 的 Windows 云端机器上运行。
+# 测试只使用替身（fake）电源接口，不会真的关机；
+# 需要真机的验收测试（Category=RealMachine，且需 S18_REALMACHINE=1）在这里一律排除。
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-test:
+    name: 编译与测试 (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      # global.json 固定 8.0.1xx 功能带（rollForward=latestPatch），
+      # 安装该功能带的最新补丁，满足 Directory.Build.props 里的 RuntimeFrameworkVersion。
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.1xx'
+
+      - name: 还原依赖
+        run: dotnet restore AutoShutdown.sln
+
+      - name: 编译 (Release，警告即错误)
+        run: dotnet build AutoShutdown.sln --configuration Release --no-restore
+
+      - name: 运行测试
+        run: >
+          dotnet test AutoShutdown.sln
+          --configuration Release
+          --no-build
+          --filter "Category!=RealMachine"
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: 上传测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          if-no-files-found: ignore
