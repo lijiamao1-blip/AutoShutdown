@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $sdk = $env:AUTOSHUTDOWN_DOTNET
-$exe = Join-Path $root 'src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.exe'
+$exe = Join-Path $root 'src\AutoShutdown.App\bin\Release\net10.0-windows\AutoShutdown.App.exe'
 
 if ($Build) {
     # ---------- 启动UI预览：先构建再启动 ----------

@@ -116,7 +116,9 @@ public sealed class S23_CP3_EngineRemoteCommandTests
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
         harness.Deadline.CompleteNext();
 
-        await WaitUntilAsync(() => harness.Handler.CallCount >= 1);
+        // CountingHandler 在调用内层处理器之前就计数，计数到 1 时电源请求可能还没发出；
+        // 必须等到电源请求真正落地再断言，否则是竞态（.NET 10 的异步调度下会稳定暴露）。
+        await WaitUntilAsync(() => harness.Handler.CallCount >= 1 && power.Requests.Count >= 1);
         Assert.Single(power.Requests);
     }
 

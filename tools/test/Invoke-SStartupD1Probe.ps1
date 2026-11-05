@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-if (-not $Exe) { $Exe = Join-Path $root 'src\AutoShutdown.App\bin\Release\net8.0-windows\win-x64\AutoShutdown.App.exe' }
+if (-not $Exe) { $Exe = Join-Path $root 'src\AutoShutdown.App\bin\Release\net10.0-windows\win-x64\AutoShutdown.App.exe' }
 if (-not (Test-Path -LiteralPath $Exe)) { throw "候选 EXE 不存在：$Exe" }
 
 Add-Type -AssemblyName UIAutomationClient

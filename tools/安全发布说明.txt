@@ -5,13 +5,13 @@
 
 1. 轻量版（framework-dependent）
    文件名：AutoShutdown-v1.0.0-win-x64-framework-dependent.zip
-   特点：体积小；运行前需要安装 .NET 8 Desktop Runtime x64。
+   特点：体积小；运行前需要安装 .NET 10 Desktop Runtime x64。
    安装地址：https://dotnet.microsoft.com/download/dotnet/8.0
    （选择 ".NET Desktop Runtime 8.0.x" 的 x64 版本）
 
 2. 免运行库版（self-contained）
    文件名：AutoShutdown-v1.0.0-win-x64-self-contained.zip
-   特点：已包含 .NET 8 运行库，无需另行安装；包体更大属于正常情况。
+   特点：已包含 .NET 10 运行库，无需另行安装；包体更大属于正常情况。
 
 二、使用方法
 

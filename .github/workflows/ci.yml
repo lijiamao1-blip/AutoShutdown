@@ -31,12 +31,12 @@ jobs:
       - name: 拉取代码
         uses: actions/checkout@v5
 
-      # global.json 固定 8.0.1xx 功能带（rollForward=latestPatch），
-      # 安装该功能带的最新补丁，满足 Directory.Build.props 里的 RuntimeFrameworkVersion。
+      # global.json 要求 10.0.100 以上的 .NET 10 SDK（rollForward=latestFeature）；
+      # 安装 10.0 最新补丁，其自带运行时满足 Directory.Build.props 里的 RuntimeFrameworkVersion。
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '8.0.1xx'
+          dotnet-version: '10.0.x'
 
       - name: 还原依赖
         run: dotnet restore AutoShutdown.sln

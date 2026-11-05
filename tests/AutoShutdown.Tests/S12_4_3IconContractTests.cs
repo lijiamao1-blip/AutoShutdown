@@ -267,7 +267,7 @@ public sealed class S12_4_3IconContractTests
             "AutoShutdown.App",
             "bin",
             config,
-            "net8.0-windows",
+            "net10.0-windows",
             fileName);
     }
 

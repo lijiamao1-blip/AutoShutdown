@@ -78,7 +78,12 @@ public static class AppInfo
 
         try
         {
+            // SYSLIB0057：.NET 9 起该 API 标记过时，但 X509CertificateLoader 不能从 PE 文件提取
+            // Authenticode 证书，官方没有替代 API（https://aka.ms/dotnet-warnings/SYSLIB0057），
+            // 因此仅在此处局部抑制，行为与 .NET 8 一致。
+#pragma warning disable SYSLIB0057
             using var certificate = X509Certificate.CreateFromSignedFile(path);
+#pragma warning restore SYSLIB0057
             var subject = string.IsNullOrWhiteSpace(certificate.Subject)
                 ? "（未知颁发者）"
                 : certificate.Subject;
