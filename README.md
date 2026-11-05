@@ -96,7 +96,7 @@ AutoShutdown 是一款面向 Windows 10/11 的定时电源与任务管理工具�
 
 ## 开发与构建
 
-开发环境需要 Windows 和 .NET 8.0.130 及以上的 8.0.1xx SDK（`global.json` 允许 latestPatch，发布包内置 .NET 8.0.31 运行时）：
+开发环境需要 Windows 和 .NET 10 SDK（10.0.100 及以上，`global.json` 允许 latestFeature；发布包内置 .NET 10.0.14 运行时，用户无需另装运行库）：
 
 ```powershell
 dotnet restore .\AutoShutdown.sln

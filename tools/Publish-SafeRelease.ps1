@@ -54,8 +54,8 @@ New-Item -ItemType Directory -Force -Path $fdStage, $scStage, $packagesDir, $man
 
 # ---- 3. 备份当前已验收的 Release 产物（构建前） ----
 Write-Host '备份当前已验收 Release 产物...'
-$binApp = Join-Path $root 'src\AutoShutdown.App\bin\Release\net8.0-windows'
-$binCore = Join-Path $root 'src\AutoShutdown.Core\bin\Release\net8.0'
+$binApp = Join-Path $root 'src\AutoShutdown.App\bin\Release\net10.0-windows'
+$binCore = Join-Path $root 'src\AutoShutdown.Core\bin\Release\net10.0'
 foreach ($src in @(
     (Join-Path $binApp 'AutoShutdown.App.exe'),
     (Join-Path $binApp 'AutoShutdown.App.dll'),
@@ -150,7 +150,7 @@ $fdReadme = @"
 AutoShutdown 安全测试版 使用说明（轻量版 / framework-dependent）
 版本：v$version
 
-1. 本包为轻量版，程序运行需要 .NET 8 Desktop Runtime x64。
+1. 本包为轻量版，程序运行需要 .NET 10 Desktop Runtime x64。
    请先安装：https://dotnet.microsoft.com/download/dotnet/8.0
    （选择 “.NET Desktop Runtime 8.0.x” 的 x64 版本）
 2. 将压缩包解压到新目录后，双击 AutoShutdown.App.exe 启动。
@@ -161,7 +161,7 @@ $scReadme = @"
 AutoShutdown 安全测试版 使用说明（免运行库版 / self-contained）
 版本：v$version
 
-1. 本包已包含 .NET 8 运行库，无需另行安装；包体较大属于正常情况。
+1. 本包已包含 .NET 10 运行库，无需另行安装；包体较大属于正常情况。
 2. 将压缩包解压到新目录后，双击 AutoShutdown.App.exe 启动。
 3. 首次运行会在用户数据目录（%LocalAppData%\AutoShutdown）自动生成配置与日志，无需手动创建。
 "@

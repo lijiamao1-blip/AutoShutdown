@@ -137,7 +137,7 @@ if (-not $SkipFdZip) {
     $fdReadme = @"
 AutoShutdown v$Version ($Step.$Build) 轻量版（framework-dependent）使用说明
 
-1. 本包运行需要 .NET 8 Desktop Runtime x64：https://dotnet.microsoft.com/download/dotnet/8.0
+1. 本包运行需要 .NET 10 Desktop Runtime x64：https://dotnet.microsoft.com/download/dotnet/10.0
 2. 解压到新目录后双击 AutoShutdown.App.exe 启动。
 3. 数据目录默认 %LocalAppData%\AutoShutdown；可用环境变量 AUTOSHUTDOWN_DATA_ROOT 指向隔离数据目录（S-PKG 验证构建）。
 $readmeModeLine

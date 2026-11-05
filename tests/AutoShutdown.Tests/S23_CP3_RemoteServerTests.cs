@@ -124,7 +124,10 @@ public sealed class S23_CP3_RemoteServerTests
             // 落盘必须是 DPAPI 封装形态，绝非明文证书/PFX：无法直接按证书解析，且不含主体名字节。
             Assert.True(File.Exists(certPath));
             var onDisk = await File.ReadAllBytesAsync(certPath);
-            Assert.ThrowsAny<CryptographicException>(() => new X509Certificate2(onDisk));
+            // 旧的 X509Certificate2(byte[]) 会依次尝试各种格式；.NET 9 起改用 X509CertificateLoader，
+            // 这里把证书（DER/PEM）与 PFX（PKCS#12）两种解析分别断言，覆盖同样的范围。
+            Assert.ThrowsAny<CryptographicException>(() => X509CertificateLoader.LoadCertificate(onDisk));
+            Assert.ThrowsAny<CryptographicException>(() => X509CertificateLoader.LoadPkcs12(onDisk, password: null));
             Assert.False(ContainsBytes(onDisk, Encoding.UTF8.GetBytes("AutoShutdown Remote Server")));
 
             // 持久化：新实例从磁盘恢复同一证书。

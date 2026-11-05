@@ -379,7 +379,9 @@ public sealed class RemoteCertificateService
         //   （%AppData%\Microsoft\Crypto\RSA|\Keys）写入任何持久化私钥残留。
         // 因此选择 DefaultKeySet：私钥唯一持久形态是经 DPAPI 封装的 PFX 落盘（绝非明文），
         // 内存中的私钥在证书对象释放后由系统回收。
-        var certificate = new X509Certificate2(
+        // .NET 9 起 X509Certificate2(byte[], ...) 构造器已过时（SYSLIB0057），
+        // 改用只接受 PKCS#12 的 X509CertificateLoader，存储标志保持不变。
+        var certificate = X509CertificateLoader.LoadPkcs12(
             pfx,
             password,
             X509KeyStorageFlags.DefaultKeySet);

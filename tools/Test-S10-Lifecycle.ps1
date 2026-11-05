@@ -6,7 +6,7 @@ AutoShutdown S10 双实例生命周期验收脚本。
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$exePath = Join-Path $projectRoot 'src\AutoShutdown.App\bin\Release\net8.0-windows\AutoShutdown.App.exe'
+$exePath = Join-Path $projectRoot 'src\AutoShutdown.App\bin\Release\net10.0-windows\AutoShutdown.App.exe'
 $pipeName = 'AutoShutdown.Desktop.Activation.v1'
 $main = $null
 $second = $null
