@@ -25,16 +25,16 @@ jobs:
   build-and-test:
     name: 编译与测试 (Windows)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: 拉取代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # global.json 固定 8.0.1xx 功能带（rollForward=latestPatch），
       # 安装该功能带的最新补丁，满足 Directory.Build.props 里的 RuntimeFrameworkVersion。
       - name: 安装 .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.1xx'
 
@@ -44,6 +44,9 @@ jobs:
       - name: 编译 (Release，警告即错误)
         run: dotnet build AutoShutdown.sln --configuration Release --no-restore
 
+      # 很多测试带 2 秒硬超时（[Fact(Timeout = 2000)]）。云端机器核数少，
+      # 测试集合并行时会互相抢 CPU，导致每次随机有 1~2 个测试超时。
+      # 这里改为按顺序执行测试集合，结果才稳定可信。
       - name: 运行测试
         run: >
           dotnet test AutoShutdown.sln
@@ -52,10 +55,11 @@ jobs:
           --filter "Category!=RealMachine"
           --logger "trx;LogFileName=test-results.trx"
           --results-directory TestResults
+          -- xUnit.ParallelizeTestCollections=false
 
       - name: 上传测试结果
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-results
           path: TestResults/
