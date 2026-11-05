@@ -94,7 +94,8 @@ public sealed class S23_CP4_CommandMatrixTests
         harness.Clock.UtcNow = Base.AddSeconds(RemoteProtocol.FallbackCountdownSeconds);
         await WaitUntilAsync(() => harness.Deadline.PendingCount >= 1);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Handler.CallCount >= 1);
+        // CountingHandler 在调用内层处理器之前就计数：须等电源请求真正落地再断言，避免竞态。
+        await WaitUntilAsync(() => harness.Handler.CallCount >= 1 && power.Requests.Count >= 1);
 
         Assert.Single(power.Requests);
     }
