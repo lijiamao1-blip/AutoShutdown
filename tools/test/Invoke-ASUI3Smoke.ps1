@@ -73,7 +73,7 @@ $script:protectedRoots = @(
 )
 
 if (-not $EvidenceDirectory) {
-    $EvidenceDirectory = Join-Path $root 'S-PKG-work包\S-UI3-验收证据'
+    $EvidenceDirectory = Join-Path $root 'docs\history\S-PKG-work包\S-UI3-验收证据'
 }
 New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
 

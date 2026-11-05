@@ -457,7 +457,10 @@ public sealed class CorePipelineIntegrationTests
 
         harness.Clock.UtcNow = new DateTimeOffset(2024, 1, 15, 23, 30, 0, TimeSpan.Zero);
         harness.Deadline.CompleteNext();
-        await WaitUntilAsync(() => harness.Power.CallCount == 1);
+        // 电源请求返回后引擎才把 executed 改回 waiting：只等 CallCount 会和状态迁移竞态，
+        // 因此同时等待状态迁移完成再断言。
+        await WaitUntilAsync(() => harness.Power.CallCount == 1
+            && harness.CurrentInstance?.State == TaskInstanceState.Waiting);
 
         // S14：DailyAt 为周期规则，触发后 executed→waiting 并重排到下一日（跨午夜后仍为 23:30 UTC）。
         Assert.Equal(1, harness.Power.CallCount);

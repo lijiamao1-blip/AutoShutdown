@@ -532,7 +532,7 @@ Write-Host "EXE: $ReleaseExe"
 
 $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("as-closeui1-" + [guid]::NewGuid().ToString('N'))
 $dataRoot = Join-Path $sandbox 'data'
-$evidence = if ($EvidenceDir) { $EvidenceDir } else { Join-Path $root 'S-PKG-work包\S-CLOSEUI1-D1-截图证据' }
+$evidence = if ($EvidenceDir) { $EvidenceDir } else { Join-Path $root 'docs\history\S-PKG-work包\S-CLOSEUI1-D1-截图证据' }
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
 $winverExe  = Join-Path (${env:SystemRoot}) 'System32\winver.exe'

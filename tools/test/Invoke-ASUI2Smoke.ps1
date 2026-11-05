@@ -89,7 +89,7 @@ if (-not $expectedVersion) {
     exit 1
 }
 if (-not $EvidenceDir) {
-    $EvidenceDir = Join-Path $root 'S-PKG-work包\S-UI2-截图证据'
+    $EvidenceDir = Join-Path $root 'docs\history\S-PKG-work包\S-UI2-截图证据'
 }
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 
