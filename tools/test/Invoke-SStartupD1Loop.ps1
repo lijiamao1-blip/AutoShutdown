@@ -28,7 +28,7 @@ if (-not $Exe) { $Exe = Join-Path $root 'artifacts\release\v2.0.0\S-STARTUP-D1-c
 if (-not (Test-Path -LiteralPath $Exe)) { Write-Host ("候选 EXE 不存在: " + $Exe); exit 10 }
 
 if (-not $ReportPath) {
-    $evDir = Join-Path $root 'S-PKG-work包\S-STARTUP-D1-循环证据'
+    $evDir = Join-Path $root 'docs\history\S-PKG-work包\S-STARTUP-D1-循环证据'
     New-Item -ItemType Directory -Force -Path $evDir | Out-Null
     $ReportPath = Join-Path $evDir ('loop-{0:yyyyMMdd-HHmmss}.csv' -f (Get-Date))
 }

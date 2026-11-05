@@ -117,6 +117,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Publish-ReleaseCandidate.ps1 -V
 - `src/AutoShutdown.OfficeSaveHelper`：Office 文档保存辅助程序。
 - `tests/AutoShutdown.Tests`：单元测试、集成测试与界面契约测试。
 - `tools`：构建、测试和发布脚本。
+- `docs/history`：各开发阶段的执行书、结果记录与验收证据。
 
 ## 当前版本
 

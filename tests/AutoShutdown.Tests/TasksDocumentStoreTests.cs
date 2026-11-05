@@ -12,7 +12,7 @@ public sealed class TasksDocumentStoreTests : IDisposable
         "AutoShutdown.Tests",
         Guid.NewGuid().ToString("N"));
 
-    // 与 S13-work包/tasks.json.sample 内容一致的 V1 样例（S14 迁移测试用，含版本字段）。
+    // 与 docs/history/S13-work包/tasks.json.sample 内容一致的 V1 样例（S14 迁移测试用，含版本字段）。
     private const string V1TasksJson =
         """{"SchemaVersion":1,"Tasks":[{"Id":"11111111-1111-1111-1111-111111111111","Kind":1,"Action":1,"CountdownDuration":"02:00:00","TargetTimeOfDay":null,"WarningSeconds":60,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":0},{"Id":"22222222-2222-2222-2222-222222222222","Kind":3,"Action":2,"CountdownDuration":null,"TargetTimeOfDay":"20:00:00","WarningSeconds":300,"CreatedAt":"2024-01-15T10:00:00+00:00","RealPowerConfirmed":false,"IsEnabled":true,"Priority":50}]}""";
 
